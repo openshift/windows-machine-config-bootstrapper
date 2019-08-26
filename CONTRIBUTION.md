@@ -30,7 +30,7 @@ development flow.
 - When changes are requested, please amend the commit instead of adding new commits with the changes.
 - Make sure commit messages are in the proper format (see below).
 - Push changes in a topic branch to a personal fork of the repository.
-- To make sure that your topic branch is in sync with the remote master branch, follow a rebase workflow.
+- To make sure that your topic branch is in sync with the remote master branch, follow a [rebase workflow](https://help.github.com/en/articles/about-git-rebase).
 - Submit a pull request to openshift/windows-machine-config-operator.
 - The PR must receive one `/lgtm` and one `/approve` comments from the maintainers of the project.
 
