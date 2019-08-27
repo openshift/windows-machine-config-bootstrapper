@@ -50,6 +50,17 @@ The format can be described more formally as follows:
 <BLANK LINE>
 <footer>
 ```
+Example
+```
+CONTRIBUTION.md: Updated the Guidlines
+
+Cupcake ipsum dolor sit. Amet tart cheesecake tiramisu chocolate cake topping.
+Icing ice cream sweet roll. Biscuit dragée toffee wypas.
+Does not yet address T44834 or T176. Follow-up to Id5e7cbb1.
+
+Bug: T42
+Change-Id: I88c5f819c42d9fe1468be6b2cf74413d7d6d6907
+```
 
 The first line is the subject and should be no longer than 50 characters, the second line is always blank, and other
 lines should be wrapped at 80 characters. This allows the message to be easier to read on GitHub as well as in various
