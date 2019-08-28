@@ -30,7 +30,7 @@ development flow.
 - When changes are requested, please amend the commit instead of adding new commits with the changes.
 - Make sure commit messages are in the proper format (see below).
 - Push changes in a topic branch to a personal fork of the repository.
-- To make sure that your topic branch is in sync with the remote master branch, follow a rebase workflow.
+- To make sure that your topic branch is in sync with the remote master branch, follow a [rebase workflow](https://www.atlassian.com/git/tutorials/merging-vs-rebasing).
 - Submit a pull request to openshift/windows-machine-config-operator.
 - The PR must receive one `/lgtm` and one `/approve` comments from the maintainers of the project.
 
@@ -44,11 +44,21 @@ subject line should feature the what and the body of the commit should describe 
 The format can be described more formally as follows:
 
 ```
-<subsystem>: <what changed>
+[subsystem] <what changed>
 <BLANK LINE>
 <why this change was made>
 <BLANK LINE>
 <footer>
+```
+Example
+```
+[docs] Updated the Guidlines
+
+Cupcake ipsum dolor sit. Amet tart cheesecake tiramisu chocolate cake topping.
+Icing ice cream sweet roll. Biscuit dragée toffee wypas.
+Does not yet address T44834 or T176. Follow-up to Id5e7cbb1.
+
+Bug: T42
 ```
 
 The first line is the subject and should be no longer than 50 characters, the second line is always blank, and other
