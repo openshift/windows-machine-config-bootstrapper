@@ -1,8 +1,8 @@
 # How to contribute
 
-Windows Machine Config Operator is Apache 2.0 licensed and accepts contributions via GitHub pull requests. This document
-outlines some of the conventions on commit message formatting, instructions on how to set up a dev environment, and
-other resources to help get contributions into the project.  
+Windows Machine Config Operator is Apache 2.0 licensed and accepts contributions via GitHub pull requests. This
+document outlines some of the conventions on commit message formatting, instructions on how to set up a dev
+environment, and other resources to help get contributions into the project.  
 
 ## Setting up a dev environment
 
@@ -27,11 +27,11 @@ This is an outline of what a contributor's workflow looks like:
 time. Vendor commits should always be separate.
 - A PR should consist of a set of logical commits that makes it easy to review and should not follow your personal
 development flow.
-- When changes are requested, please amend the commit instead of adding new commits with the changes.
 - Make sure commit messages are in the proper format (see below).
 - Push changes in a topic branch to a personal fork of the repository.
-- To make sure that your topic branch is in sync with the remote master branch, follow a [rebase workflow](https://www.atlassian.com/git/tutorials/merging-vs-rebasing).
-- Submit a pull request to openshift/windows-machine-config-operator.
+- To make sure that your topic branch is in sync with the remote master branch,
+follow a [rebase workflow](https://www.atlassian.com/git/tutorials/merging-vs-rebasing).
+- Submit a pull request to openshift/windows-machine-config-operator (see PR workflow below).
 - The PR must receive one `/lgtm` and one `/approve` comments from the maintainers of the project.
 
 Thanks for contributing!
@@ -64,3 +64,19 @@ Bug: T42
 The first line is the subject and should be no longer than 50 characters, the second line is always blank, and other
 lines should be wrapped at 80 characters. This allows the message to be easier to read on GitHub as well as in various
 git tools.
+
+### PR workflow
+
+- Before submitting a PR
+  - Format your code and fix all the spelling/grammatical mistakes.
+  - Limit the column length of the code and the comments within the code to 120 characters.
+  - Error messages within the code should be limited to a single line.
+- Following are the things you should keep in mind once you open a PR:
+  - Wait for comments from at least 2 reviewers before pushing changes.
+  Open comments in the meanwhile can be worked on locally.
+  - PR comments should be addressed in new commits. Before final approval, they have to be squashed.
+  - If PR has multiple commits, changes requested should eventually be squashed into the original commit where the
+  change was requested before the final merge. Each commit in the final PR before merge should pass the tests and be
+  usable. (see below)
+
+![Sample PR life-cycle](/images/PR-workflow.png)
