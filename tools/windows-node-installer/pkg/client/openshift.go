@@ -44,7 +44,7 @@ func (o *OpenShift) GetCloudProvider() (*v1.PlatformStatus, error) {
 	if infra.Status == (v1.InfrastructureStatus{}) || infra.Status.PlatformStatus == nil {
 		return nil, fmt.Errorf("error getting infrastructure status")
 	}
-	return infra.Status.PlatformStatus, nil
+	return infra.Status, nil
 }
 
 // getInfrastructure returns the information of current Infrastructure referred by the OpenShift client or an error.
