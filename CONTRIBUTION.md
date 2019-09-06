@@ -71,6 +71,9 @@ git tools.
   - Format your code and fix all the spelling/grammatical mistakes.
   - Limit the column length of the code and the comments within the code to 120 characters.
   - Error messages within the code should be limited to a single line.
+  - Update the documentation if your PR is introducing or changing user facing functionality.
+  - Ensure each PR commit compiles and all unit and e2e tests pass on your local machine.
+    - PRs that have vendor commits are an exception to this rule.
 - Following are the things you should keep in mind once you open a PR:
   - Wait for comments from at least 2 reviewers before pushing changes.
   Open comments in the meanwhile can be worked on locally.
