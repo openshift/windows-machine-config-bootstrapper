@@ -3,7 +3,9 @@ package cloudprovider
 import (
 	"fmt"
 
+	v1 "github.com/openshift/api/config/v1"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
+	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
 )
 
 // Cloud is the interface that needs to be implemented per provider to allow support for creating Windows nodes on
@@ -43,6 +45,8 @@ func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, r
 	}
 
 	switch provider := cloudProvider.Type; provider {
+	case v1.AzurePlatformType:
+		return azure.New(oc, credentialPath, credentialAccountID, resourceTrackerDir)
 	default:
 		return nil, fmt.Errorf("the '%v' cloud provider is not supported", provider)
 	}
