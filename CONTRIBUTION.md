@@ -8,7 +8,6 @@ environment, and other resources to help get contributions into the project.
 
 - Fork the repository on GitHub
 - Clone the forked repository in your go path.
-- Install [Operator-SDK](https://github.com/operator-framework/operator-sdk).
 
 ## Reporting bugs and creating issues
 
