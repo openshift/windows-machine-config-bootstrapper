@@ -1,6 +1,7 @@
 package azure
 
 import (
+	"context"
 	"fmt"
 
 	compute "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-06-01/compute"
@@ -9,6 +10,7 @@ import (
 	autorest "github.com/Azure/go-autorest/autorest"
 	aauth "github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/Azure/go-autorest/autorest/to"
+	v1 "github.com/openshift/api/config/v1"
 	client "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
@@ -20,7 +22,7 @@ type azureProvider struct {
 	// Creates an authorizer from the available client credentials
 	authorizer autorest.Authorizer
 	// client of existing OpenShift cluster
-	openShiftClient *client.OpenShift
+	openShiftClient *v1.PlatformStatus
 	// Azure Subscription Id
 	azureSubscriptionId string
 	// file location to store `windows-node-installer.json`
@@ -45,21 +47,24 @@ func New(openShiftClient *client.OpenShift, credentialPath, resourceTrackerDir s
 		fmt.Errorf("unable to initialize the resourceauthorizer: %v", err)
 		return nil, err
 	}
-	azureSubscriptionId, err := aauth.GetSubscriptionID()
-	if err != nil {
-		fmt.Errorf("unable to get the subscription id: %v", err)
-		return nil, error
-	}
+	getFileSettings, err := aauth.GetSettingsFromFile()
+	azureSubscriptionId := getFileSettings.GetSubscriptionID()
+	fmt.Printf("subscriptionId: %v\n", azureSubscriptionId)
+	/*
+		if azureSubscriptionId == nil {
+			fmt.Errorf("unable to get the subscription id")
+			return
+		}
+	*/
 	return &azureProvider{resourceauthorizer,
-		openShiftClient, resourceTrackerDir,
-		virtualNetworkName,
-		azureSubscriptionId}, nil
+		provider, azureSubscriptionId,
+		resourceTrackerDir}, nil
 }
 
 // Get the Azure Virtual Machine Client by passing the client authorizer
-func getVMClient(authorizer autorest.Authorizer) compute.VirtualMachinesClient {
+func getVMClient(az *azureProvider) compute.VirtualMachinesClient {
 	vmClient := compute.NewVirtualMachinesClient(az.azureSubscriptionId)
-	a, _ := az.authorizer
+	a := az.authorizer
 	vmClient.Authorizer = a
 	return vmClient
 }
@@ -70,15 +75,14 @@ func (az *azureProvider) CreateWindowsVM(imageId, instanceType, sshKey string, n
 	// Get the specified virtual network by resource group.
 	vnetClient := network.NewVirtualNetworksClient(az.azureSubscriptionId)
 	vnetClient.Authorizer = az.authorizer
-	provider, err := az.openShiftClient.GetCloudProvider()
-	vnetList, err := vnetClient.List(provider.Azure.ResourceGroupName)
+	vnetList, err := vnetClient.List(context.Background(), az.openShiftClient.Azure.ResourceGroupName)
 	if err != nil {
 		fmt.Errorf("failed to fetch the Vnet info: %v", err)
 		return err
 	}
 
 	// Get vmClient to create an instance
-	vmClient := getVMClient(az.authorizer)
+	vmClient := getVMClient(az)
 
 	// Construct the VirtualMachine properties
 	// construct the hardware profile.
@@ -96,27 +100,36 @@ func (az *azureProvider) CreateWindowsVM(imageId, instanceType, sshKey string, n
 	}
 
 	//construct the OSProfile.
+	winrmlisteners := &[]compute.WinRMListener{
+		compute.WinRMListener{
+			Protocol: "Http",
+		},
+	}
+	c := &compute.WinRMConfiguration{
+		Listeners: winrmlisteners,
+	}
 	vmOsProfile := &compute.OSProfile{
 		ComputerName: to.StringPtr(vmName),
 		WindowsConfiguration: &compute.WindowsConfiguration{
 			ProvisionVMAgent:       to.BoolPtr(true),
 			EnableAutomaticUpdates: to.BoolPtr(false),
 			TimeZone:               to.StringPtr("Eastern Standard Time"),
-			WinRM.Listeners: {
-				Protocol: "Http",
-			},
+			WinRM:                  c,
 		},
 	}
 
 	//construct the NetworkProfile.
-	if vnetList.vnlr.Value[] == nil {
+	if vnetList.Values() == nil {
 		fmt.Errorf("failed to fetch the virtual network in the existing resource group")
 	}
-	
+
+	//find the length of the vnet struct array
+	vnetLength := len(vnetList.Values())
+
 	vmNetworkProfile := &compute.NetworkProfile{
 		NetworkInterfaces: &[]compute.NetworkInterfaceReference{
 			{
-				ID: vnetList.vnlr.*Value[0].ID,
+				ID: vnetList.Values()[vnetLength-1].ID,
 				NetworkInterfaceReferenceProperties: &compute.NetworkInterfaceReferenceProperties{
 					Primary: to.BoolPtr(true),
 				},
@@ -125,6 +138,7 @@ func (az *azureProvider) CreateWindowsVM(imageId, instanceType, sshKey string, n
 	}
 
 	instanceCreate, err := vmClient.CreateOrUpdate(
+		context.Background(),
 		az.openShiftClient.Azure.ResourceGroupName,
 		vmName,
 		compute.VirtualMachine{
@@ -142,5 +156,12 @@ func (az *azureProvider) CreateWindowsVM(imageId, instanceType, sshKey string, n
 		fmt.Errorf("failed to create the instance: %v", err)
 		return err
 	}
+
+	err = instanceCreate.WaitForCompletionRef(context.Background(), vmClient.Client)
+	if err != nil {
+		return fmt.Errorf("cannot get the instance create or update response: %v", err)
+	}
+
+	//return instanceCreate.Result(vmClient)
 	return nil
 }
