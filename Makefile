@@ -17,4 +17,3 @@ build:
 .PHONY: build-tools
 build-tools:
 	$(GO_BUILD_ARGS) go build -o wni $(TOOLS_DIR)
-
