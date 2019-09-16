@@ -2,7 +2,7 @@ all: build build-tools
 
 PACKAGE=github.com/openshift/windows-machine-config-operator
 MAIN_PACKAGE=$(PACKAGE)/cmd/bootstrapper
-TOOLS_DIR=$(PACKAGE)/tools/windows-node-installer
+TOOLS_DIR=./tools/windows-node-installer
 
 GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on
 
@@ -16,4 +16,4 @@ build:
 
 .PHONY: build-tools
 build-tools:
-	$(GO_BUILD_ARGS) go build -o wni $(TOOLS_DIR)
+	$(GO_BUILD_ARGS) go build -o wni $(TOOLS_DIR)/main.go

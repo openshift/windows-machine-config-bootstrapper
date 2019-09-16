@@ -31,7 +31,7 @@ func GetOpenShift(kubeConfigPath string) (*OpenShift, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &OpenShift{oc}, nil
+	return &OpenShift{oc}
 }
 
 // GetCloudProvider returns the Provider details of a given OpenShift client including provider type and region or
