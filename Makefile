@@ -14,6 +14,9 @@ GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on
 build:
 	$(GO_BUILD_ARGS) GOOS=windows go build -o wmcb.exe  $(MAIN_PACKAGE)
 
+test-e2e-prepared-node:
+	GOOS=windows go test -run=TestBootstrapper ./test/e2e
+
 test-unit:
 	go test ./pkg/...
 

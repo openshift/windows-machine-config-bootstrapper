@@ -24,9 +24,7 @@ require (
 	github.com/vincent-petithory/dataurl v0.0.0-20160330182126-9a301d65acbb
 	go.uber.org/zap v1.10.0
 	go4.org v0.0.0-20190919214946-0cfe6e5be80f // indirect
-	golang.org/x/arch v0.0.0-20190909030613-46d78d1859ac // indirect
 	golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a
-	golang.org/x/tools v0.0.0-20190916201440-b31ee645dd40 // indirect
 	k8s.io/apimachinery v0.0.0-20190923155427-ec87dd743e08
 	k8s.io/kubelet v0.0.0-20190923161547-13146ddde0d1
 	sigs.k8s.io/controller-runtime v0.2.1
