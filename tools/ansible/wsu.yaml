@@ -1,0 +1,97 @@
+---
+- hosts: localhost
+  vars:
+     bootstrap_node_machineconfigpool: 'worker'
+     bootstrap_node_port: 22623
+     bootstrap_node_endpoint: "{{ openshift_node_bootstrap_server }}:{{ bootstrap_node_port }}/config/{{ bootstrap_node_machineconfigpool }}"
+    
+  tasks:
+    - name: Validate given input parameters meet the requirement
+      fail:
+          msg: "Please provide the following parameters to run this playbook [ kubelet_location, kubeovn_location, wmcb_location, openshift_node_bootstrap_server ]"
+      when: kubelet_location is not defined or
+            wmcb_location is not defined or
+            openshift_node_bootstrap_server is not defined
+
+    - name: Show ignition file endpoint 
+      debug:
+        msg: "Ignition file endpoint is {{ bootstrap_node_endpoint }}"
+
+    - name: Create temporary build directory to store files
+      tempfile:
+        state: directory
+      register: build_tmp
+
+    - name: Show temporary path directory
+      debug:
+        msg: "Temporary build path is {{ build_tmp.path }}"
+      when: build_tmp is defined
+
+    - name: Check that you can connect (GET) to a page and it returns a status 200
+      uri:
+        url: "{{ bootstrap_node_endpoint }}"
+        dest: "{{ build_tmp.path }}/worker.ign"
+      when: build_tmp is defined
+
+    - name: Download Kubernetes archive to controller machine
+      get_url:
+        url: "{{ kubelet_location }}"
+        dest: "{{ build_tmp.path }}/kube.tar.gz"
+      when: build_tmp is defined
+
+    - name: Unarchive Kubenetes binary
+      unarchive:
+        src: "{{ build_tmp.path }}/kube.tar.gz"
+        dest: "{{ build_tmp.path }}" 
+      when: build_tmp is defined
+
+    - name: Download wmcb binary to controller machine
+      get_url:
+        url: "{{ wmcb_location }}"
+        dest: "{{ build_tmp.path }}/wmcb.exe"
+      when: build_tmp is defined
+
+
+- hosts: win
+  vars:
+    build_tmp: "{{ hostvars['localhost']['build_tmp'] }}"
+  tasks:
+    - name: Description 
+      debug:
+        msg: Preparing your Windows node 
+
+    - name: Check Windows container runtime
+      win_service:
+        name: docker
+        state: started
+
+    - name: Create temporary build path on Windows
+      win_tempfile:
+        state: directory
+      register: win_build_tmp
+
+    - name: Show temporary build path location
+      debug:
+        msg: "Temporary build path on Windows is {{ win_build_tmp.path }}"
+
+    - name: Transfer kubelet binary from controller machine to Windows host
+      win_copy: 
+        src: "{{ build_tmp.path }}/kubernetes/node/bin/kubelet.exe"
+        dest: "{{ win_build_tmp.path }}/kubelet.exe"
+      when: win_build_tmp is defined and build_tmp is defined
+
+    - name: Transfer wmcb binary from controller machine to Windows host
+      win_copy:
+        src: "{{ build_tmp.path }}/wmcb.exe"
+        dest: "{{ win_build_tmp.path }}/wmcb.exe"
+      when: win_build_tmp is defined and build_tmp is defined
+
+    - name: Transfer ignition file from controller machine to Windows host
+      win_copy:
+        src: "{{ build_tmp.path }}/worker.ign"
+        dest: "{{ win_build_tmp.path }}/worker.ign"
+      when: win_build_tmp is defined and build_tmp is defined
+
+    - name: Show what is in Windows temporary build directory
+      raw: ls "{{ win_build_tmp.path }}"
+
