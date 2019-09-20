@@ -3,7 +3,7 @@ package client
 import (
 	"fmt"
 
-	v1 "github.com/openshift/api/config/v1"
+	"github.com/openshift/api/config/v1"
 	clientset "github.com/openshift/client-go/config/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
@@ -22,16 +22,30 @@ type OpenShift struct {
 
 // GetOpenShift uses kubeconfig to create a client for existing OpenShift cluster and returns it or an error.
 func GetOpenShift(kubeConfigPath string) (*OpenShift, error) {
-	log.Info("kubeconfig source: ", kubeConfigPath)
+	log.V(0).Info(fmt.Sprintf("kubeconfig source: %s", kubeConfigPath))
+
 	rc, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
 	if err != nil {
 		return nil, err
 	}
+
 	oc, err := clientset.NewForConfig(rc)
 	if err != nil {
 		return nil, err
 	}
 	return &OpenShift{oc}, nil
+}
+
+// GetInfrastructureID returns the infrastructure ID of the OpenShift cluster or an error.
+func (o *OpenShift) GetInfrastructureID() (string, error) {
+	infra, err := o.getInfrastructure()
+	if err != nil {
+		return "", err
+	}
+	if infra.Status == (v1.InfrastructureStatus{}) {
+		return "", fmt.Errorf("infrastructure status is nil")
+	}
+	return infra.Status.InfrastructureName, nil
 }
 
 // GetCloudProvider returns the Provider details of a given OpenShift client including provider type and region or
