@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -79,8 +79,8 @@ func createCmd() *cobra.Command {
 		},
 		TraverseChildren: true,
 		RunE: func(_ *cobra.Command, args []string) error {
-			cloud, err := cloudprovider.CloudProviderFactory( rootInfo.kubeconfigPath, awsOpts.credentialPath,
-				awsOpts.credentialAccountID,rootInfo.resourceTrackerDir)
+			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, awsOpts.credentialPath,
+				awsOpts.credentialAccountID, rootInfo.resourceTrackerDir)
 			if err != nil {
 				return fmt.Errorf("error creating cloud provider clients, %v", err)
 			}

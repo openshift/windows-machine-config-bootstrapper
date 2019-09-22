@@ -9,15 +9,15 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
-// CmdInfo contains necessary information for creating Cloud instance from cloudprovider package.
-type CmdInfo struct {
-	kubeconfigPath     string
-	resourceTrackerDir string
-	logLevel           string
-}
-
 var (
-	rootInfo CmdInfo
+	// rootInfo contains necessary information for creating Cloud instance from cloudprovider package.
+	rootInfo struct {
+		kubeconfigPath      string
+		credentialPath      string
+		credentialAccountID string
+		resourceTrackerDir  string
+		logLevel            string
+	}
 	// rootCmd contains the wni root command for the Windows Node Installer
 	rootCmd = &cobra.Command{
 		Use:   "wni",
