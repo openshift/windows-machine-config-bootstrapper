@@ -11,14 +11,14 @@ replace (
 require (
 	github.com/aws/aws-sdk-go v1.23.2
 	github.com/coreos/etcd v3.3.10+incompatible
-	github.com/deckarep/golang-set v1.7.1
+	github.com/deckarep/golang-set v1.7.1 // indirect
 	github.com/go-logr/zapr v0.1.0
 	github.com/googleapis/gnostic v0.3.1 // indirect
 	github.com/imdario/mergo v0.3.7 // indirect
 	github.com/openshift/api v3.9.1-0.20190814194116-a94e914914f4+incompatible
 	github.com/openshift/client-go v0.0.0-20190813201236-5a5508328169
 	github.com/spf13/cobra v0.0.5
-	github.com/spf13/viper v1.4.0
+	github.com/spf13/viper v1.4.0 // indirect
 	github.com/stretchr/testify v1.3.0
 	go.uber.org/zap v1.10.0
 	k8s.io/apimachinery v0.0.0-20190404173353-6a84e37a896d

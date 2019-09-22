@@ -1,4 +1,4 @@
-package main
+package log
 
 import (
 	"github.com/go-logr/zapr"
@@ -6,9 +6,9 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
-// setLogLevel sets the level of log for display in command line using zapcore.Levels ("debug", "info", "warn",
+// SetLogLevel sets the level of log for display in command line using zapcore.Levels ("debug", "info", "warn",
 // "error", "dpanic", "panic", and "fatal") returns an error if input log level is not understandable.
-func setLogLevel(logLevel []byte) error {
+func SetLogLevel(logLevel []byte) error {
 	cfg := zap.NewDevelopmentConfig()
 	// Building a logger wrapper.
 	zapLog, err := cfg.Build()
