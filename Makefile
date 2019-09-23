@@ -17,3 +17,7 @@ build:
 .PHONY: build-tools
 build-tools:
 	$(GO_BUILD_ARGS) go build -o wni $(TOOLS_DIR)
+
+.PHONY: test-tools-unit
+test-tools-unit: 
+	./tools/windows-node-installer/test/run-unit-test.sh
