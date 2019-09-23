@@ -1,7 +1,9 @@
 # windows-node-installer
 The `windows-node-installer (wni)` is a tool that creates a Windows instance under the same virtual network 
 (AWS-VCP, Azure-Vnet, and etc.) used by a given OpenShift cluster running on the selected provider.
-The tool configures the instance to allow it to join the running cluster as a worker node.
+The actual configuration on the created Windows instance is done by 
+[WMCB](https://github.com/openshift/windows-machine-config-operator) to ensure that the node joins the
+OpenShift cluster
 
 ### Supported Platforms
  
@@ -9,7 +11,7 @@ The tool configures the instance to allow it to join the running cluster as a wo
  
 ### Pre-requisite
 
- - An existing OpenShift 4.2.x cluster running on a supported platform.
+ - An existing OpenShift 4.x cluster running on a supported platform.
  - A `kubeconfig` file for the OpenShift cluster.
  - A valid credentials file of the supported platform.
  
@@ -23,26 +25,51 @@ make build-tools
 
 ## How to use it
 ### Creating a Windows instance:
+
 ```bash
+wni --help
+Creates and destroys Windows instance with an existing OpenShift cluster.
+
 Usage:
-  wni create [flags]
+  wni [command]
+
+Available Commands:
+  aws         Takes aws specific resource names from user
+  help        Help about any command
 
 Flags:
-  -h, --help                   help for create
-      --image-id* string        ami ID of a base image for the instance (i.e.: ami-06a4e829b8bbad61e for Microsoft 
-      Windows Server 2019 Base image on AWS) (required).
-      --instance-type* string   name of a type of instance (i.e.: m4.large for AWS, etc) (required).
-      --ssh-key* string         name of existing ssh key on cloud provider for accessing the instance after it is 
-      created (required).
+      --dir string          directory to save or read window-node-installer.json file from. (default ".")
+  -h, --help                help for wni
+      --kubeconfig string   file path to the kubeconfig of the existing OpenShift cluster (required).
+      --log-level string    log level (e.g. 'info') (default "info")
+
+Use "wni [command] --help" for more information about a command.
+```
+
+For example for aws:
+
+```bash
+$wni aws --help
+Takes aws specific resource names from user
+
+Usage:
+  wni aws [command]
+
+Available Commands:
+  create      Create a Windows instance on the same provider as the existing OpenShift Cluster.
+  destroy     Destroy the Windows instances and resources specified in 'windows-node-installer.json' file.
+
+Flags:
+      --credential-account string   account name of a credential used to create the OpenShift Cluster specified in the provider's credentials file. (required)
+      --credentials string          file path to the cloud provider credentials of the existing OpenShift cluster (required).
+  -h, --help                        help for aws
 
 Global Flags:
-      --credential-account* string   account name of a credential used to create the OpenShift Cluster specified in 
-      the provider's credentials file (required).
-      --credentials* string          file path to the cloud provider credentials of the existing OpenShift cluster 
-      (required).
-      --dir string                   directory to save or read window-node-installer.json file from. (default ".")
-      --kubeconfig* string           file path to the kubeconfig of the existing OpenShift cluster (required).
-      --log-level string             log level (e.g. 'info') (default "info")
+      --dir string          directory to save or read window-node-installer.json file from. (default ".")
+      --kubeconfig string   file path to the kubeconfig of the existing OpenShift cluster (required).
+      --log-level string    log level (e.g. 'info') (default "info")
+
+Use "wni aws [command] --help" for more information about a command.
 ```
 
 Created instance default properties:
@@ -62,22 +89,21 @@ The IDs of created instance and security group are saved to the `window-node-ins
 
 ```bash
 Usage:
-  wni destroy [flags]
+  wni aws destroy [flags]
 
 Flags:
   -h, --help   help for destroy
 
 Global Flags:
-      --credential-account* string   account name of a credential used to create the OpenShift Cluster specified in 
+      --credential-account string   account name of a credential used to create the OpenShift Cluster specified in 
       the provider's credentials file (required).
-      --credentials* string          file path to the cloud provider credentials of the existing OpenShift cluster 
+      --credentials string          file path to the cloud provider credentials of the existing OpenShift cluster 
       (required).
       --dir string                   directory to save or read window-node-installer.json file from. (default ".")
-      --kubeconfig* string           file path to the kubeconfig of the existing OpenShift cluster (required).
+      --kubeconfig string           file path to the kubeconfig of the existing OpenShift cluster (required).
       --log-level string             log level (e.g. 'info') (default "info")
 ```
  
 The `wni` destroys all resources (instances and security groups) specified in the `window-node-installer.json` file. 
 Security groups will not be deleted if they are still in-use by other instances.
 
-\* required flags.
