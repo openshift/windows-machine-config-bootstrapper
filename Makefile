@@ -1,4 +1,4 @@
-all: build build-tools
+all: build build-tools verify-all
 
 PACKAGE=github.com/openshift/windows-machine-config-operator
 MAIN_PACKAGE=$(PACKAGE)/cmd/bootstrapper
@@ -17,3 +17,8 @@ build:
 .PHONY: build-tools
 build-tools:
 	$(GO_BUILD_ARGS) go build -o wni $(TOOLS_DIR)
+
+.PHONY: verify-all
+# TODO: Add other verifications
+verify-all:
+	hack/verify-gofmt.sh
