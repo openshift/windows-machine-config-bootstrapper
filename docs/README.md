@@ -7,4 +7,4 @@ jobs that the bootstrapper does:
 - Ensures that the kubelet gets the correct kubelet config
 - Run the kubelet as a windows service
 
-This will be remotely invoked from a Ansible script or can be run locally
+This will be remotely invoked from a Ansible script or can be run locally.
