@@ -361,7 +361,7 @@ func constructStorageProfile(imageId, instanceType string) (storageProfile *comp
 // scale to multiple listeners depending on the use case. By default they listen via Http protocol.
 func constructWinRMConfig() (winRMConfig *compute.WinRMConfiguration) {
 	winRMListeners := &[]compute.WinRMListener{
-		compute.WinRMListener{
+		{
 			Protocol: "Http",
 		},
 	}
@@ -384,7 +384,7 @@ func constructOSProfile(adminUserName, adminPassword string) (osProfile *compute
 		WindowsConfiguration: &compute.WindowsConfiguration{
 			ProvisionVMAgent:       to.BoolPtr(true),
 			EnableAutomaticUpdates: to.BoolPtr(false),
-			TimeZone:               to.StringPtr("centralus"),
+			TimeZone:               to.StringPtr("Central Standard Time"),
 			WinRM:                  computeWinRMConfig,
 		},
 	}
@@ -405,6 +405,14 @@ func constructNetworkProfile(nicID *string) (networkProfile *compute.NetworkProf
 		},
 	}
 	return networkProfile
+}
+
+// extractResourceName captures the resource name omitting the other details.
+func extractResourceName(rawresource string) (name string) {
+	resultList := strings.Split(rawresource, "/")
+	arrayLength := len(resultList)
+	name = resultList[arrayLength-1]
+	return
 }
 
 // CreateWindowsVM takes in imageId, instanceType and sshKey name to create Windows instance under the same
@@ -435,27 +443,41 @@ func (az *AzureProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (
 	if err != nil {
 		return err
 	}
-	log.V(0).Info("created IP for node: %s", ipName)
+	log.V(0).Info(fmt.Sprintf("created IP for node is: %s", ipName))
 	vnetProfile := getvnetProfile(az.vnetClient)
 	vnetName := *(vnetProfile.Name)
 	subnetList := *(vnetProfile.VirtualNetworkPropertiesFormat.Subnets)
+
+	// TODO check for the worker subnet.
 	subnetName := *(subnetList[1].Name)
+	neededSubnetProp := *(subnetList[1].SubnetPropertiesFormat)
+	nsg := *(neededSubnetProp.NetworkSecurityGroup)
+	netSecGroupName := *(nsg.ID)
 
 	// Collect the existing network security group from the existing cluster.
-	nsgName, err := getnsgName(subnetList[1].NetworkSecurityGroup.Name, az)
+	rawNSGName, err := getnsgName(&netSecGroupName, az)
 	if err != nil {
 		return err
 	}
-	log.V(0).Info("created security group for node: %s", nsgName)
+	log.V(0).Info(fmt.Sprintf("network security group for node is: %s", rawNSGName))
+
+	// Update the security rules for the worker subnet.
+	nsgName := extractResourceName(rawNSGName)
+	err = createSecurityGroup(context.Background(), az, nsgName)
+	if err != nil {
+		return err
+	}
+
 	// Create a nic Profile for the instance.
 	vmnicProfile, err := getnicProfile(context.Background(), az, vnetName, subnetName, nsgName, ipName)
 	if err != nil {
-		return fmt.Errorf("cannot create a NIC profile: %v", err)
+		return fmt.Errorf("cannot create a nic: %v", err)
 	}
+	log.V(0).Info(fmt.Sprintf("created nic for node is: %v", *(vmnicProfile.ID)))
 
 	vmNetworkProfile := constructNetworkProfile(vmnicProfile.ID)
 
-	log.V(0).Info("constructed all the profiles, about the create instance.")
+	log.V(0).Info(fmt.Sprintf("constructed all the profiles, about to create instance."))
 
 	future, err := az.vmClient.CreateOrUpdate(
 		context.Background(),
@@ -483,37 +505,38 @@ func (az *AzureProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (
 
 	vmInfo, err := future.Result(az.vmClient)
 	if err != nil {
-		log.V(0).Info("failed to obtain instance result info: %v", err)
+		log.V(0).Info(fmt.Sprintf("failed to obtain instance result info: %v", err))
 	}
 	resource.AppendInstallerInfo([]string{*(vmInfo.Name)}, []string{nsgName}, az.resourceTrackerDir)
 
 	// Output commandline message to help RDP into the created instance.
-	log.V(0).Info("Successfully created windows instance: %s, please RDP into windows with the following:")
-	log.V(0).Info("xfreerdp /u:windows /v:%s  /h:1080 /w:1920 /p:%s", ipName, adminPassword)
+	log.V(0).Info(fmt.Sprintf("Successfully created windows instance: %s, please RDP into windows with the following:"))
+	log.V(0).Info(fmt.Sprintf("xfreerdp /u:windows /v:%s /h:1080 /w:1920 /p:%s", ipName, adminPassword))
 
 	return nil
 }
 
 // returnNicIpdetails returns nicName and ipName of the instance by taking instance name as an argument.
-func returnNicIpdetails(az *AzureProvider, vmName string) (nicName string, ipName string, err error) {
+func returnNicIpdetails(az *AzureProvider, vmName string) (err error, nicName, ipName string) {
 	vmStruct, err := az.vmClient.Get(context.Background(), resourceGroupName, vmName, "instanceView")
 	if err != nil {
-		log.Error(err, "cannot fetch the instance data of %s", vmName)
+		log.Error(err, fmt.Sprintf("cannot fetch the instance data of %s", vmName))
 		return
 	}
 	networkProfile := vmStruct.VirtualMachineProperties.NetworkProfile
 	networkInterface := (*networkProfile.NetworkInterfaces)[0]
-	nicName = *networkInterface.ID
-
-	vnetProfile := getvnetProfile(az.vnetClient)
-	subnetList := *(vnetProfile.VirtualNetworkPropertiesFormat.Subnets)
-	subnetName := *(subnetList[1].Name)
-	ipNamePtr, err := az.ipClient.Get(context.Background(), resourceGroupName, subnetName, "")
-	ipName = *ipNamePtr.Name
+	rawNICName := *networkInterface.ID
+	nicName = extractResourceName(rawNICName)
+	interfaceStruct, err := az.nicClient.Get(context.Background(), resourceGroupName, nicName, "")
 	if err != nil {
-		log.Error(err, "cannot fetch the instance public IP of %s", vmName)
+		log.Error(err, fmt.Sprintf("cannot fetch the network interface data of %s", vmName))
 	}
-	return
+	nicPropFormat := *(interfaceStruct.InterfacePropertiesFormat)
+	nicIPConfigs := *(nicPropFormat.IPConfigurations)
+	ipConfigProp := *(nicIPConfigs[0].InterfaceIPConfigurationPropertiesFormat)
+	ipName = *(ipConfigProp.PublicIPAddress.ID)
+
+	return nil, nicName, ipName
 }
 
 // deletePublicIP deletes the already created Public IP of the instance.
@@ -534,7 +557,7 @@ func deleteSecGroup(ctx context.Context, nsgClient network.SecurityGroupsClient,
 // DestroyWindowsVMs destroys all the resources created by the CreateWindows method.
 func (az *AzureProvider) DestroyWindowsVMs() error {
 	// Read from `windows-node-installer.json` file
-	log.V(0).Info("processing file '%s'", az.resourceTrackerDir)
+	log.V(0).Info(fmt.Sprintf("processing file '%s'", az.resourceTrackerDir))
 	installerInfo, err := resource.ReadInstallerInfo(az.resourceTrackerDir)
 	if err != nil {
 		return fmt.Errorf("unable to get saved info from json file")
@@ -543,32 +566,32 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 
 	for _, vmname := range installerInfo.InstanceIDs {
 
-		nicName, ipName, err := returnNicIpdetails(az, vmname)
+		err, nicName, ipName := returnNicIpdetails(az, vmname)
 		_, err = deletePublicIP(context.Background(), az.ipClient, ipName)
 		if err != nil {
-			log.Error(err, "failed to delete the public IP: %s", vmname)
+			log.Error(err, fmt.Sprintf("failed to delete the public IP: %s", vmname))
 		}
 
-		log.V(0).Info("deleted the IP of instance '%s'", vmname)
-
-		_, err = deleteNIC(context.Background(), az.nicClient, nicName)
-		if err != nil {
-			log.Error(err, "failed to delete the nic: %s", vmname)
-		}
-
-		log.V(0).Info("deleted the NIC of instance '%s'", vmname)
+		log.V(0).Info(fmt.Sprintf("deleted the IP of instance '%s'", vmname))
 
 		future, err := az.vmClient.Delete(context.Background(), resourceGroupName, vmname)
 		if err != nil {
-			log.Error(err, "failed to delete the instance: %s", vmname)
+			log.Error(err, fmt.Sprintf("failed to delete the instance: %s", vmname))
 		}
-
-		log.V(0).Info("deleted the instance '%s'", vmname)
 
 		err = future.WaitForCompletionRef(context.Background(), az.vmClient.Client)
 		if err != nil {
-			log.Error(err, "cannot complete the instance delete operation on %s: %s", vmname, err)
+			log.Error(err, fmt.Sprintf("cannot complete the instance delete operation on %s: %s", vmname, err))
 		}
+
+		log.V(0).Info(fmt.Sprintf("deleted the instance '%s'", vmname))
+
+		_, err = deleteNIC(context.Background(), az.nicClient, nicName)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("failed to delete the nic: %s", vmname))
+		}
+
+		log.V(0).Info(fmt.Sprintf("deleted the NIC of instance '%s'", vmname))
 
 		terminatedInstances = append(terminatedInstances, vmname)
 	}
@@ -576,10 +599,10 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 	for _, nsgName := range installerInfo.SecurityGroupIDs {
 		_, err := deleteSecGroup(context.Background(), az.nsgClient, nsgName)
 		if err != nil {
-			log.Error(err, "failed to delete the sec group: %s", nsgName)
+			log.Error(err, fmt.Sprintf("failed to delete the sec group: %s", nsgName))
 		}
 
-		log.V(0).Info("deleted the security group rule '%s'", nsgName)
+		log.V(0).Info(fmt.Sprintf("deleted the security group rule '%s'", nsgName))
 
 		deletedSg = append(deletedSg, nsgName)
 	}
@@ -587,7 +610,7 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 	// Update the 'windows-node-installer.json' file
 	err = resource.RemoveInstallerInfo(terminatedInstances, deletedSg, az.resourceTrackerDir)
 	if err != nil {
-		log.V(0).Info("%s file was not updated, %v", az.resourceTrackerDir, err)
+		log.V(0).Info(fmt.Sprintf("%s file was not updated, %v", az.resourceTrackerDir, err))
 	}
 	return nil
 }
