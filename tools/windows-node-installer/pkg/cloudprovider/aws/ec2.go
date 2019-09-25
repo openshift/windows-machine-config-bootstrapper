@@ -2,6 +2,7 @@ package aws
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"os"
@@ -21,6 +22,12 @@ import (
 // log is the global logger for the aws package. Each log record produced
 // by this logger will have an identifier containing `aws-ec2` tag.
 var log = logger.Log.WithName("aws-ec2")
+
+// Constant value
+const (
+	// Winrm port for https request
+	WINRM_PORT = 5986
+)
 
 // awsProvider is a provider specific struct which contains clients for EC2, IAM, and the existing OpenShift
 // cluster that is running on EC2.
@@ -105,7 +112,17 @@ func (a *awsProvider) CreateWindowsVM() (rerr error) {
 		return fmt.Errorf("failed to get cluster worker IAM, %v", err)
 	}
 
-	instance, err := a.createInstance(a.imageID, a.instanceType, a.sshKey, networkInterface, workerIAM)
+	// PowerShell script to setup WinRM for Ansible
+	userDataWinrm := `<powershell>
+        $url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
+        $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
+        (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
+        powershell.exe -ExecutionPolicy ByPass -File $file
+        </powershell>
+        <persist>true</persist>`
+
+	instance, err := a.createInstance(a.imageID, a.instanceType, a.sshKey, networkInterface, workerIAM, userDataWinrm)
+
 	if err != nil {
 		return err
 	}
@@ -211,9 +228,10 @@ func (a *awsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkI
 }
 
 // createInstance creates one VM instance based on the given information and returns a instance struct with all its
-// information or an error if no instance is created.
+// information or an error if no instance is created. userDataInput is a plaintext input, this will be passed
+// and executed when launching the instance, it can be empty string if no data is given.
 func (a *awsProvider) createInstance(imageID, instanceType, sshKey string,
-	networkInterface *ec2.InstanceNetworkInterfaceSpecification, iamProfile *ec2.IamInstanceProfileSpecification) (
+	networkInterface *ec2.InstanceNetworkInterfaceSpecification, iamProfile *ec2.IamInstanceProfileSpecification, userDataInput string) (
 	*ec2.Instance, error) {
 	runResult, err := a.EC2.RunInstances(&ec2.RunInstancesInput{
 		ImageId:            aws.String(imageID),
@@ -223,6 +241,7 @@ func (a *awsProvider) createInstance(imageID, instanceType, sshKey string,
 		MaxCount:           aws.Int64(1),
 		NetworkInterfaces:  []*ec2.InstanceNetworkInterfaceSpecification{networkInterface},
 		IamInstanceProfile: iamProfile,
+		UserData:           aws.String(base64.StdEncoding.EncodeToString([]byte(userDataInput))),
 	})
 	if err != nil {
 		return nil, err
@@ -305,6 +324,15 @@ func (a *awsProvider) authorizeSgIngress(sgID string, vpc *ec2.Vpc) error {
 				SetIpProtocol("tcp").
 				SetFromPort(3389).
 				SetToPort(3389).
+				SetIpRanges([]*ec2.IpRange{
+					(&ec2.IpRange{}).
+						SetCidrIp(myIP + "/32"),
+				}),
+			(&ec2.IpPermission{}).
+				SetIpProtocol("tcp").
+				// winrm ansible https port
+				SetFromPort(WINRM_PORT).
+				SetToPort(WINRM_PORT).
 				SetIpRanges([]*ec2.IpRange{
 					(&ec2.IpRange{}).
 						SetCidrIp(myIP + "/32"),
