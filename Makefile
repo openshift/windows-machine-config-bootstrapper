@@ -12,7 +12,13 @@ GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on
 
 .PHONY: build
 build:
-	$(GO_BUILD_ARGS) go build -o wmcb  $(MAIN_PACKAGE)
+	$(GO_BUILD_ARGS) GOOS=windows go build -o wmcb.exe  $(MAIN_PACKAGE)
+
+test-e2e-prepared-node:
+	GOOS=windows go test -run=TestBootstrapper ./test/e2e
+
+test-unit:
+	go test ./pkg/...
 
 .PHONY: build-tools
 build-tools:

@@ -4,7 +4,8 @@ import (
 	"flag"
 
 	"github.com/spf13/cobra"
-	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
+	logger "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 const (
@@ -23,6 +24,7 @@ var (
 
 func init() {
 	rootCmd.PersistentFlags().AddGoFlagSet(flag.CommandLine)
+	logger.SetLogger(zap.New())
 }
 
 func main() {
