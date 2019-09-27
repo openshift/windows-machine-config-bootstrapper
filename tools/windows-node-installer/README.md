@@ -35,7 +35,7 @@ visit `--help` for any commands or sub-commands.
 =======
 Available Commands:
   aws         Takes aws specific resource names from user
-  azure       Takes azure specific resource names from user
+  azure       Takes azure specific inputs from user
   help        Help about any command
 >>>>>>> Added logging implementation and revisions
 
@@ -71,7 +71,7 @@ The `wni` destroys all resources (instances and security groups) specified in th
 Security groups will not be deleted if they are still in-use by other instances.
 
 
-For example for azure:
+Example for azure:
 
 ```bash
 $wni azure --help
@@ -81,12 +81,11 @@ Usage:
   wni azure [command]
 
 Available Commands:
-  create      Create a Windows instance on the same provider as the existing OpenShift Cluster.
+  create      Create a Windows node on the Azure cloud provider.
   destroy     Destroy the Windows instances and resources specified in 'windows-node-installer.json' file.
 
 Flags:
-      --credential-account string   account name of a credential used to create the OpenShift Cluster specified in the provider's credentials file. (required)
-      --credentials string          file path to the cloud provider credentials of the existing OpenShift cluster (required).
+      --credentials string          file location to the azure cloud provider credentials (required).
   -h, --help                        help for azure
 
 Global Flags:
@@ -94,40 +93,16 @@ Global Flags:
       --kubeconfig string   file path to the kubeconfig of the existing OpenShift cluster (required).
       --log-level string    log level (e.g. 'info') (default "info")
 
-Use "wni aws [command] --help" for more information about a command.
+Use "wni azure [command] --help" for more information about a command.
 ```
 
-Created instance default properties:
- - Instance name \<OpenShift cluster infrastructure ID\>-windows-worker-\<zone\>-\<random characters string\>
- - Share virtual network with the OpenShift Cluster
- - Public subnet within the virtual network
- - Auto-assigned public IP address
- - Attached security group for Windows (Allow RDP access from user's IP address and all traffic within the virtual 
- network)
- - Attached OpenShift cluster worker security group
-
-The IDs of created instance and security group are saved to the `window-node-installer.json` file at the current or the
- directory specified in `--dir`.
-
-### Destroying Windows instances:
-
+### Sample command to create a windows node:
 ```bash
-Usage:
-  wni azure destroy [flags]
-
-Flags:
-  -h, --help   help for destroy
-
-Global Flags:
-      --credential-account string   account name of a credential used to create the OpenShift Cluster specified in 
-      the provider's credentials file (required).
-      --credentials string          file path to the cloud provider credentials of the existing OpenShift cluster 
-      (required).
-      --dir string                   directory to save or read window-node-installer.json file from. (default ".")
-      --kubeconfig string           file path to the kubeconfig of the existing OpenShift cluster (required).
-      --log-level string             log level (e.g. 'info') (default "info")
+./wni azure create --kubeconfig ~/OpenShift/installation_directory/azure/auth/kubeconfig --credentials /home/vinaykns/OpenShift/azure.auth --dir ~/windowsnodeinstaller/
 ```
- 
-The `wni` destroys all resources (instances and security groups) specified in the `window-node-installer.json` file. 
-Security groups will not be deleted if they are still in-use by other instances.
+
+### Sample command to delete the windows node on azure
+```bash
+./wni azure destroy --kubeconfig ~/OpenShift/installation_directory/azure/auth/kubeconfig --credentials /home/vinaykns/OpenShift/azure.auth --dir ~/windowsnodeinstaller/
+```
 

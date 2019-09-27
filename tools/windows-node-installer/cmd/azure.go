@@ -2,33 +2,27 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
+	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
 	"github.com/spf13/cobra"
 )
 
-var (
-
-	// azCreateFlagInfo contains information for creating an instance.
-	azCreateFlagInfo struct {
-		imageID      string
-		instanceType string
-		sshKey       string
-		// ip address name to be attached to the instance.
-		ipName string
-		// nic name to be attached to the instance.
-		nicName string
-	}
-
-	// azureOpts contains the specific cloud provider specific information
-	azureOpts struct {
-		// credentialPath is the location of the azure credentials file on the disk
-		credentialPath string
-		// credentialAccountID is the aws account id
-		credentialAccountID string
-	}
-)
+// azCreateFlagInfo contains azure specific information for creating an instance.
+// the fields inside the struct gets filled once the flags are parsed.
+// all the fields are optional except credentialPath.
+var azCreateFlagInfo struct {
+	imageID             string
+	instanceType        string
+	credentialPath      string
+	credentialAccountID string
+	// Provide the IP address if the installer doesn't want to create one.
+	ipName string
+	// Provide the nic name if the installer doesn't want to create one.
+	nicName string
+}
 
 func init() {
 	azureCmd := newAZCmd()
@@ -44,16 +38,10 @@ func newAZCmd() *cobra.Command {
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return requiredAZFlags(cmd)
 		},
-		Run: func(_ *cobra.Command, args []string) {
-			fmt.Println(args)
-		},
 	}
-	azureCmd.PersistentFlags().StringVar(&azureOpts.credentialPath, "credentials", "",
-		"file path to the cloud provider credentials of the existing OpenShift cluster (required).")
+	azureCmd.PersistentFlags().StringVar(&azCreateFlagInfo.credentialPath, "credentials", "",
+		"file location to the azure cloud provider credentials (required).")
 
-	azureCmd.PersistentFlags().StringVar(&azureOpts.credentialAccountID, "credential-account", "",
-		"account name of a credential used to create the OpenShift Cluster specified in the provider's credentials"+
-			" file. (required)")
 	return azureCmd
 }
 
@@ -63,26 +51,31 @@ func requiredAZFlags(azureCmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	err = azureCmd.MarkPersistentFlagRequired("credential-account")
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
 // createCmd defines `create` command and creates a Windows instance using parameters from the persistent flags to
-// fill up information in azCreateFlagInfo. It uses PreRunE to check for whether required flags are provided.
+// fill up information in azCreateFlagInfo.
 func azCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a Windows instance on the same provider as the existing OpenShift Cluster.",
-		Long: "creates a Windows instance under the same virtual network (AWS-VCP, Azure-Vnet, " +
-			"and etc.) used by a given OpenShift cluster running on the selected provider. " +
-			"The created instance would be ready to join the OpenShift Cluster as a worker node.",
+		Short: "Create a Windows node on the Azure cloud provider.",
+		Long: "creates a Windows instance under the same Vnet of" +
+			"the existing OpenShift cluster. " +
+			"The created instance would be used as a worker node for the OpenShift Cluster.",
 		TraverseChildren: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, azureOpts.credentialPath,
-				azureOpts.credentialAccountID, rootInfo.resourceTrackerDir)
+			os.Setenv("AZURE_AUTH_LOCATION", azCreateFlagInfo.credentialPath)
+			getFileSettings, err := auth.GetSettingsFromFile()
+			if err != nil {
+				return fmt.Errorf("unable to get the settings from path: %v", err)
+			}
+			if azCreateFlagInfo.credentialAccountID == "" {
+				azCreateFlagInfo.credentialAccountID = getFileSettings.GetSubscriptionID()
+			}
+			// Provide the azCreateFlagInfo.credentialAccountID as a default
+			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, azCreateFlagInfo.credentialPath,
+				azCreateFlagInfo.credentialAccountID, rootInfo.resourceTrackerDir)
 			if err != nil {
 				return fmt.Errorf("error creating cloud provider clients, %v", err)
 			}
@@ -92,11 +85,11 @@ func azCreateCmd() *cobra.Command {
 			var az *azure.AzureProvider = cloud.(*azure.AzureProvider)
 			az, ok := cloud.(*azure.AzureProvider)
 			if ok {
-				az.AzureUserInput.NicName = azCreateFlagInfo.nicName
-				az.AzureUserInput.IpName = azCreateFlagInfo.ipName
+				az.NicName = azCreateFlagInfo.nicName
+				az.IpName = azCreateFlagInfo.ipName
 			}
 
-			err = cloud.CreateWindowsVM(azCreateFlagInfo.imageID, azCreateFlagInfo.instanceType, azCreateFlagInfo.sshKey)
+			err = cloud.CreateWindowsVM(azCreateFlagInfo.imageID, azCreateFlagInfo.instanceType, "")
 			if err != nil {
 				return fmt.Errorf("error creating Windows Instance, %v", err)
 			}
@@ -104,16 +97,15 @@ func azCreateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.imageID, "image-id", "WindowsServer",
-		"the image type to be used for instance creation (required)")
-	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.instanceType, "instance-type", "2019-Datacenter",
-		"SKU version of the image to be used  (required)")
-	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.sshKey, "ssh-key", "",
-		"name of existing ssh key on cloud provider for accessing the instance after it is created. (required)")
+	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.imageID, "image-id", "MicrosoftWindowsServer:WindowsServer:2019-Datacenter:latest",
+		"image-id to be used for node creation ")
+	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.instanceType, "instance-type", "Basic_A1",
+		"instance-type for node creation, for more info "+
+			"https://docs.microsoft.com/en-us/rest/api/compute/virtualmachines/listavailablesizes ")
 	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.ipName, "ipName", "",
-		"ip name of the node to login")
+		"ip resource name for the node to login")
 	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.nicName, "nicName", "",
-		"nic name for the node")
+		"nic resource name for the node")
 	return cmd
 }
 
@@ -127,8 +119,16 @@ func azDestroyCmd() *cobra.Command {
 			"The security groups still associated with any existing instances will not be deleted.",
 
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, azureOpts.credentialPath,
-				azureOpts.credentialAccountID, rootInfo.resourceTrackerDir)
+			os.Setenv("AZURE_AUTH_LOCATION", azCreateFlagInfo.credentialPath)
+			getFileSettings, err := auth.GetSettingsFromFile()
+			if err != nil {
+				return fmt.Errorf("unable to get the settings from path: %v", err)
+			}
+			if azCreateFlagInfo.credentialAccountID == "" {
+				azCreateFlagInfo.credentialAccountID = getFileSettings.GetSubscriptionID()
+			}
+			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, azCreateFlagInfo.credentialPath,
+				azCreateFlagInfo.credentialAccountID, rootInfo.resourceTrackerDir)
 			if err != nil {
 				return fmt.Errorf("error creating cloud provider clients, %v", err)
 			}

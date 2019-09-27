@@ -8,7 +8,7 @@ import (
 	"github.com/openshift/api/config/v1"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/aws"
-	azure "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
+	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
 	"k8s.io/client-go/util/homedir"
 )
@@ -75,8 +75,12 @@ func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, r
 =======
 		return aws.New(oc, credentialPath, credentialAccountID, resourceTrackerFilePath)
 	case v1.AzurePlatformType:
+<<<<<<< HEAD
 		return azure.New(oc, credentialPath, resourceTrackerFilePath)
 >>>>>>> [wni] Azure Implementation
+=======
+		return azure.New(oc, credentialPath, credentialAccountID, resourceTrackerFilePath)
+>>>>>>> Another set of code revisions
 	default:
 		return nil, fmt.Errorf("the '%v' cloud provider is not supported", provider)
 	}
