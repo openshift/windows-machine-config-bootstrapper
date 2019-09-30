@@ -38,10 +38,10 @@ var (
 // It uses PreRunE to check for whether required flags are provided.
 func init() {
 	rootCmd.PersistentFlags().StringVar(&rootInfo.kubeconfigPath, "kubeconfig", "",
-		"file path to the kubeconfig of the existing OpenShift cluster (required).")
+		"file path to the kubeconfig of the existing OpenShift cluster (required)")
 
 	rootCmd.PersistentFlags().StringVar(&rootInfo.resourceTrackerDir, "dir", ".",
-		"directory to save or read window-node-installer.json file from.")
+		"directory to save or read windows-node-installer.json file from")
 
 	rootCmd.PersistentFlags().StringVar(&rootInfo.logLevel, "log-level", "info", "log level (e.g. 'info')")
 

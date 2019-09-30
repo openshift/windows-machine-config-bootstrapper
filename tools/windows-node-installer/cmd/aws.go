@@ -44,11 +44,11 @@ func newAWSCmd() *cobra.Command {
 		},
 	}
 	awsCmd.PersistentFlags().StringVar(&awsOpts.credentialPath, "credentials", "",
-		"file path to the cloud provider credentials of the existing OpenShift cluster (required).")
+		"file path to the cloud provider credentials of the existing OpenShift cluster (required)")
 
 	awsCmd.PersistentFlags().StringVar(&awsOpts.credentialAccountID, "credential-account", "",
 		"account name of a credential used to create the OpenShift Cluster specified in the provider's credentials"+
-			" file. (required)")
+			" file (required)")
 	return awsCmd
 }
 
@@ -94,11 +94,11 @@ func createCmd() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&createFlagInfo.imageID, "image-id", "",
 		"ami ID of a base image for the instance (i.e."+
-			": ami-06a4e829b8bbad61e for Microsoft Windows Server 2019 Base image on AWS). (required)")
+			": ami-06a4e829b8bbad61e for Microsoft Windows Server 2019 Base image on AWS) (required)")
 	cmd.PersistentFlags().StringVar(&createFlagInfo.instanceType, "instance-type", "",
-		"name of a type of instance (i.e.: m4.large for AWS, etc). (required)")
+		"name of a type of instance (i.e.: m4.large for AWS, etc) (required)")
 	cmd.PersistentFlags().StringVar(&createFlagInfo.sshKey, "ssh-key", "",
-		"name of existing ssh key on cloud provider for accessing the instance after it is created. (required)")
+		"name of existing ssh key on cloud provider for accessing the instance after it is created (required)")
 	return cmd
 }
 
@@ -123,7 +123,7 @@ func validateCreateFlags(createCmd *cobra.Command) error {
 func destroyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "destroy",
-		Short: "Destroy the Windows instances and resources specified in 'windows-node-installer.json' file.",
+		Short: "Destroy all security groups and instances specified in 'windows-node-installer.json' file.",
 		Long: "Destroy all resources specified in 'windows-node-installer.json' file in the current or specified" +
 			" directory, including instances and security groups. " +
 			"The security groups still associated with any existing instances will not be deleted.",
