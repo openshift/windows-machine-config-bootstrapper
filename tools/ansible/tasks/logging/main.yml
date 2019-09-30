@@ -1,0 +1,7 @@
+---
+- hosts: win
+  tasks:
+   - name: Logging | Install Fluentd
+     include_tasks: install_fluentd.yml
+   # - name: Logging | Install Fluentd plugins
+   #   include_tasks: install_plugins.yml
