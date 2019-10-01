@@ -26,6 +26,13 @@ var log = logger.Log.WithName("aws-ec2")
 // cluster that is running on EC2.
 // This is an implementation of the Cloud interface.
 type awsProvider struct {
+	// imageID is the AMI image-id to be used for creating Virtual Machine
+	imageID string
+	// instanceType is the flavor of VM to be used
+	instanceType string
+	// sshKey is the ssh key to access the VM created. Please note that key should be uploaded to AWS before
+	// using this flag
+	sshKey string
 	// A client for EC2.
 	EC2 *ec2.EC2
 	// A client for IAM.
@@ -41,7 +48,7 @@ type awsProvider struct {
 // credentialAccountID is the account name the user uses to create VM instance.
 // The credentialAccountID should exist in the AWS credentials file pointing at one specific credential.
 // resourceTrackerDir is where created instance and security group information is stored.
-func New(openShiftClient *client.OpenShift, credentialPath, credentialAccountID,
+func New(openShiftClient *client.OpenShift, imageID, instanceType, sshKey, credentialPath, credentialAccountID,
 	resourceTrackerDir string) (*awsProvider, error) {
 	provider, err := openShiftClient.GetCloudProvider()
 	if err != nil {
@@ -51,7 +58,8 @@ func New(openShiftClient *client.OpenShift, credentialPath, credentialAccountID,
 	if err != nil {
 		return nil, err
 	}
-	return &awsProvider{ec2.New(session, aws.NewConfig()),
+	return &awsProvider{imageID, instanceType, sshKey,
+		ec2.New(session, aws.NewConfig()),
 		iam.New(session, aws.NewConfig()),
 		openShiftClient,
 		resourceTrackerDir,
@@ -82,7 +90,7 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // - logs id and security group information of the created instance in 'windows-node-installer.json' file at the
 // resourceTrackerDir.
 // On success, the function outputs RDP access information in the commandline interface.
-func (a *awsProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (rerr error) {
+func (a *awsProvider) CreateWindowsVM() (rerr error) {
 	// Obtains information from AWS and the existing OpenShift cluster for creating an instance.
 	infraID, err := a.openShiftClient.GetInfrastructureID()
 	if err != nil {
@@ -97,7 +105,7 @@ func (a *awsProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (rer
 		return fmt.Errorf("failed to get cluster worker IAM, %v", err)
 	}
 
-	instance, err := a.createInstance(imageId, instanceType, sshKey, networkInterface, workerIAM)
+	instance, err := a.createInstance(a.imageID, a.instanceType, a.sshKey, networkInterface, workerIAM)
 	if err != nil {
 		return err
 	}
