@@ -98,10 +98,11 @@ func azCreateCmd() *cobra.Command {
 	}
 
 	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.imageID, "image-id", "MicrosoftWindowsServer:WindowsServer:2019-Datacenter:latest",
-		"image-id to be used for node creation ")
+		"image-id to be used for node creation, for more info "+
+			"https://docs.microsoft.com/en-us/azure/virtual-machines/windows/overview")
 	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.instanceType, "instance-type", "Basic_A1",
 		"instance-type for node creation, for more info "+
-			"https://docs.microsoft.com/en-us/rest/api/compute/virtualmachines/listavailablesizes ")
+			"https://docs.microsoft.com/en-us/azure/virtual-machines/windows/sizes ")
 	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.ipName, "ipName", "",
 		"ip resource name for the node to login")
 	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.nicName, "nicName", "",

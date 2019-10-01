@@ -71,38 +71,28 @@ The `wni` destroys all resources (instances and security groups) specified in th
 Security groups will not be deleted if they are still in-use by other instances.
 
 
-Example for azure:
-
+### Azure Platform 
+## Generate Service Principal:
+The wni tool requires a service principal credential file for Azure Platform to access the resources defined within the
+scope of the ID. To create one we do
 ```bash
-$wni azure --help
-Takes azure specific resource names from user
+az ad sp create-for-rbac --sdk-auth > azure.auth
+```
+This assumes that one have already set up the Azure CLI client, here we are creating one that is compatible with Azure SDK
+auth file to connect and authenticate with Azure.
 
-Usage:
-  wni azure [command]
+## Create Instance
+We can create instance with using azure create subcommand, Currently all the flags in create subcommand are optional.
+One can also provide already created resources such IP & NIC names via ipName, nicName towards node creation if you don't 
+want the installer to create one. The other arguments are image-id & instance-type which deals with setting up OS properties 
+and the size for the virtual machine. For more info on the details please do ./wni azure create --help
 
-Available Commands:
-  create      Create a Windows node on the Azure cloud provider.
-  destroy     Destroy the Windows instances and resources specified in 'windows-node-installer.json' file.
-
-Flags:
-      --credentials string          file location to the azure cloud provider credentials (required).
-  -h, --help                        help for azure
-
-Global Flags:
-      --dir string          directory to save or read window-node-installer.json file from. (default ".")
-      --kubeconfig string   file path to the kubeconfig of the existing OpenShift cluster (required).
-      --log-level string    log level (e.g. 'info') (default "info")
-
-Use "wni azure [command] --help" for more information about a command.
+# Sample command to create a window node:
+```bash
+./wni azure create --kubeconfig ~/OpenShift/azure/auth/kubeconfig --credentials /home/vinaykns/OpenShift/azure.auth --dir ~/windowsnodeinstaller/
 ```
 
-### Sample command to create a windows node:
+# Sample command to delete a window node:
 ```bash
-./wni azure create --kubeconfig ~/OpenShift/installation_directory/azure/auth/kubeconfig --credentials /home/vinaykns/OpenShift/azure.auth --dir ~/windowsnodeinstaller/
+./wni azure destroy --kubeconfig ~/OpenShift/azure/auth/kubeconfig --credentials /home/vinaykns/OpenShift/azure.auth --dir ~/windowsnodeinstaller/
 ```
-
-### Sample command to delete the windows node on azure
-```bash
-./wni azure destroy --kubeconfig ~/OpenShift/installation_directory/azure/auth/kubeconfig --credentials /home/vinaykns/OpenShift/azure.auth --dir ~/windowsnodeinstaller/
-```
-
