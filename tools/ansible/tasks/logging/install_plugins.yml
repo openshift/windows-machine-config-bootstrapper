@@ -1,0 +1,20 @@
+---
+# Installing plugins listed here: https://github.com/openshift/origin-aggregated-logging/blob/master/fluentd/Gemfile
+- name: Logging | Install fluentd plugins
+  vars:
+    plugins:
+      - {name: elasticsearch-transport}
+      - {name: elasticsearch-api}
+      - {name: elasticsearch}
+      - {name: fluent-plugin-kubernetes_metadata_filter}
+      - {name: fluent-plugin-concat}
+      - {name: fluent-plugin-elasticsearch}
+      - {name: fluent-plugin-multi-format-parser}
+      - {name: fluent-plugin-record-modifier}
+      - {name: fluent-plugin-rewrite-tag-filter}
+      - {name: fluent-plugin-systemd}
+      - {name: fluent-plugin-viaq_data_model}
+      - {name: fluent-plugin-remote-syslog}
+      - {name: fluent-plugin-prometheus}
+  win_shell: gem install "{{ item.name }}"
+  with_items: "{{ plugins }}"
