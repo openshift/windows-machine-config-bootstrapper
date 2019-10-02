@@ -70,9 +70,9 @@ func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, r
 
 	switch provider := cloudProvider.Type; provider {
 	case v1.AWSPlatformType:
-		return aws.New(oc, credentialPath, credentialAccountID, resourceTrackerFilePath)
+		return aws.New(oc, imageID, instanceType, sshKey, credentialPath, credentialAccountID, resourceTrackerFilePath)
 	case v1.AzurePlatformType:
-		return azure.New(oc, credentialPath, credentialAccountID, resourceTrackerDir)
+		return azure.New(oc, credentialPath, credentialAccountID, resourceTrackerDir, imageID, instanceType)
 	default:
 		return nil, fmt.Errorf("the '%v' cloud provider is not supported", provider)
 	}

@@ -3,8 +3,10 @@ package azure
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
-	"os"
+	"net/http"
+	"reflect"
 	"regexp"
 	"strings"
 	"time"
@@ -21,42 +23,62 @@ import (
 )
 
 var log = logger.Log.WithName("azure-vm")
+var windowsWorker string = "winworker-"
 
 // AzureProvider holds azure platform specific information required for creating/deleting
 // the windows node.
 type AzureProvider struct {
-	vnetClient         network.VirtualNetworksClient
-	vmClient           compute.VirtualMachinesClient
-	ipClient           network.PublicIPAddressesClient
-	subnetsClient      network.SubnetsClient
-	nicClient          network.InterfacesClient
-	nsgClient          network.SecurityGroupsClient
-	diskClient         compute.DisksClient
-	authorizer         autorest.Authorizer
-	resourceGroupName  string
-	subscriptionID     string
-	infraID            string
-	IpName             string
-	NicName            string
-	NsgName            string
+	// vnetClient to query for vnet related info.
+	vnetClient network.VirtualNetworksClient
+	// vmClient for instance management operations.
+	vmClient compute.VirtualMachinesClient
+	// ipClient to query for IP related operations.
+	ipClient network.PublicIPAddressesClient
+	// subnetsClient to query for subnet related operations.
+	subnetsClient network.SubnetsClient
+	// nicClient to query for nic related operations.
+	nicClient network.InterfacesClient
+	// nsgClient to query for security groups related operations.
+	nsgClient network.SecurityGroupsClient
+	// diskClient to query for disk related operations.
+	diskClient compute.DisksClient
+	// a request authorization token to supply for clients
+	authorizer autorest.Authorizer
+	// resourceGroupName of the existing openshift cluster.
+	resourceGroupName string
+	// subscriptionID of the corresponding azure service principal.
+	subscriptionID string
+	// infraID is the name of existing openshift infrastructure.
+	infraID string
+	// IPName is the resource name provided by the user if the installer doesn't want to create one.
+	IpName string
+	// NicName is the resource name provided by the user if the installer doesn't want to create one.
+	NicName string
+	// NsgName is the resource name provided by the user if the installer doesn't want to create one.
+	NsgName string
+	// imageID of the instance to be created.
+	imageID string
+	// instanceType aka instance flavor.
+	instanceType string
+	// workspace to store all the results.
 	resourceTrackerDir string
 }
 
 // New returns cloud specific interface for performing necessary functions related to creating or
 // destroying an instance.
-// The factory takes in kubeconfig of an existing OpenShift cluster and a cloud vendor specific credential file.
+// It takes in kubeconfig of an existing OpenShift cluster and a azure specific credential file.
 // The resourceTrackerDir is where the `windows-node-installer.json` file which contains IDs of created instance and
 // security group will be created.
 func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
-	resourceTrackerDir string) (*AzureProvider, error) {
+	resourceTrackerDir, imageID, instanceType string) (*AzureProvider, error) {
 	provider, err := openShiftClient.GetCloudProvider()
-	if err != nil {
+	if errorCheck(err) {
 		return nil, err
 	}
 
 	infraID, _ := openShiftClient.GetInfrastructureID()
 	resourceAuthorizer, err := auth.NewAuthorizerFromFile(azure.PublicCloud.ResourceManagerEndpoint)
-	if err != nil {
+	if errorCheck(err) {
 		return nil, err
 	}
 	resourceGroupName := provider.Azure.ResourceGroupName
@@ -71,7 +93,8 @@ func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
 
 	return &AzureProvider{vnetClient, vmClient, ipClient,
 		subnetClient, nicClient, nsgClient, diskClient, resourceAuthorizer,
-		resourceGroupName, subscriptionID, infraID, IpName, NicName, NsgName, resourceTrackerDir}, nil
+		resourceGroupName, subscriptionID, infraID, IpName, NicName, NsgName,
+		imageID, instanceType, resourceTrackerDir}, nil
 }
 
 // getVnetClient gets the Networking Client by passing the authorizer token.
@@ -123,35 +146,64 @@ func getDiskClient(authorizer autorest.Authorizer, subscriptionID string) comput
 	return diskClient
 }
 
-func check(err error, msg string) {
+// errorCheck checks if there exists an error and returns a bool response
+func errorCheck(err error) bool {
 	if err != nil {
-		log.Error(err, fmt.Sprintf(msg))
-	}
-}
-
-// verifyForResource verifies if the resource exists or not.
-func verifyForResource(resource string) bool {
-	if resource != "" {
 		return true
 	} else {
 		return false
 	}
 }
 
+// checkForNil checks if the object is present or not
+func checkForNil(v interface{}) bool {
+	return v == nil || (reflect.ValueOf(v).Kind() == reflect.Ptr && reflect.ValueOf(v).IsNil())
+}
+
+// findIP checks for the IP address pattern.
+func findIP(input string) string {
+	numBlock := "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])"
+	regexPattern := numBlock + "\\." + numBlock + "\\." + numBlock + "\\." + numBlock
+	regEx := regexp.MustCompile(regexPattern)
+	return regEx.FindString(input)
+}
+
+// getMyIP returns the IP address string of the user
+// by talking to https://checkip.azurewebsites.net/
+func getMyIP() (ip *string, err error) {
+	resp, err := http.Get("https://checkip.azurewebsites.net/")
+	if errorCheck(err) {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	contents, err := ioutil.ReadAll(resp.Body)
+	if errorCheck(err) {
+		return nil, err
+	}
+	result := findIP(string(contents))
+	return &result, nil
+}
+
 // getvnetProfile gets the vnet Profile of the existing openshift cluster.
+// there exists a single vnet in the openshift cluster.
 func (az *AzureProvider) getvnetProfile(ctx context.Context) (vnetProfile network.VirtualNetwork) {
 	vnetList, err := az.vnetClient.List(ctx, az.resourceGroupName)
-	if err != nil {
+	if errorCheck(err) {
 		fmt.Errorf("cannot get the vnetProfile info: %v", err)
 		return
 	}
 	vnetListValues := vnetList.Values()
-	vnetProfile = vnetListValues[0]
-	return vnetProfile
+	if len(vnetListValues) > 0 {
+		vnetProfile = vnetListValues[0]
+	}
+	return
 }
 
 // extractResourceName captures the resource name omitting the other details.
-// document the function.
+// for ex: /subscriptions/.../resourcegroups/ExampleResourceGroup?api-version=2016-02-01/vnetName/somesamplevnetName
+// we need to extract the vnetName from the above input.
 func extractResourceName(rawresource string) (name string) {
 	resultList := strings.Split(rawresource, "/")
 	arrayLength := len(resultList)
@@ -160,8 +212,13 @@ func extractResourceName(rawresource string) (name string) {
 }
 
 // createPublicIP creates the public IP for the instance
-func (az *AzureProvider) createPublicIP(ctx context.Context) (ip network.PublicIPAddress, err error) {
-	nodeLocation := *(az.getvnetProfile(ctx).Location)
+func (az *AzureProvider) createPublicIP(ctx context.Context) (ip *network.PublicIPAddress, err error) {
+	var nodeLocation string
+	if !checkForNil(az.getvnetProfile(ctx).Location) {
+		nodeLocation = *(az.getvnetProfile(ctx).Location)
+	} else {
+		return nil, fmt.Errorf("cannot get location of the openshift cluster: %v", err)
+	}
 	future, err := az.ipClient.CreateOrUpdate(
 		ctx,
 		az.resourceGroupName,
@@ -176,29 +233,36 @@ func (az *AzureProvider) createPublicIP(ctx context.Context) (ip network.PublicI
 		},
 	)
 
-	if err != nil {
+	if errorCheck(err) {
 		return ip, fmt.Errorf("cannot create public ip address: %v", err)
 	}
 
 	err = future.WaitForCompletionRef(ctx, az.ipClient.Client)
-	if err != nil {
+	if errorCheck(err) {
 		return ip, fmt.Errorf("cannot create public ip address: %v", err)
 	}
 
-	return future.Result(az.ipClient)
+	ip_info, err := future.Result(az.ipClient)
+	return &ip_info, err
 }
 
 // createNIC creates the nic for the instance
-func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, nsgName string) (nic network.Interface, err error) {
-	nodeLocation := *(az.getvnetProfile(ctx).Location)
+func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, nsgName,
+	ipConfigName string) (nic *network.Interface, err error) {
+	var nodeLocation string
+	if !checkForNil(az.getvnetProfile(ctx).Location) {
+		nodeLocation = *(az.getvnetProfile(ctx).Location)
+	} else {
+		return nil, fmt.Errorf("cannot get location of the openshift cluster: %v", err)
+	}
 	subnet, err := az.subnetsClient.Get(ctx, az.resourceGroupName, vnetName, subnetName, "")
-	if err != nil {
+	if errorCheck(err) {
 		fmt.Errorf("failed to get subnet: %v", err)
 	}
 
 	ip, err := az.ipClient.Get(ctx, az.resourceGroupName, az.IpName, "")
 
-	if err != nil {
+	if errorCheck(err) {
 		fmt.Errorf("failed to get ip address: %v", err)
 	}
 
@@ -208,7 +272,7 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 		InterfacePropertiesFormat: &network.InterfacePropertiesFormat{
 			IPConfigurations: &[]network.InterfaceIPConfiguration{
 				{
-					Name: to.StringPtr("ipConfig1"),
+					Name: to.StringPtr(ipConfigName),
 					InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
 						Subnet:                    &subnet,
 						PrivateIPAllocationMethod: network.Dynamic,
@@ -221,15 +285,15 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 
 	if nsgName != "" {
 		nsg, err := az.nsgClient.Get(ctx, az.resourceGroupName, nsgName, "")
-		if err != nil {
-			fmt.Errorf("failed to get nsg: %v", err)
+		if errorCheck(err) {
+			return nil, fmt.Errorf("failed to get network security group rules: %v", err)
 		}
 		nicParams.NetworkSecurityGroup = &nsg
 	}
 
 	future, err := az.nicClient.CreateOrUpdate(ctx, az.resourceGroupName, az.NicName, nicParams)
-	if err != nil {
-		return nic, fmt.Errorf("cannot create nic: %v", err)
+	if errorCheck(err) {
+		return nil, fmt.Errorf("cannot create nic: %v", err)
 	}
 
 	err = future.WaitForCompletionRef(ctx, az.nicClient.Client)
@@ -237,13 +301,23 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 		return nic, fmt.Errorf("cannot create nic: %v", err)
 	}
 
-	return future.Result(az.nicClient)
+	nic_info, err := future.Result(az.nicClient)
+	return &nic_info, err
 }
 
 // createSecurityGroup tries to create a security group that allows to RDP to the windows node and allow for all the traffic
 // coming from the nodes that belong to the same VNET.
 func (az *AzureProvider) createSecurityGroup(ctx context.Context, nsgName string) (err error) {
-	nodeLocation := *(az.getvnetProfile(ctx).Location)
+	var nodeLocation string
+	if !checkForNil(az.getvnetProfile(ctx).Location) {
+		nodeLocation = *(az.getvnetProfile(ctx).Location)
+	} else {
+		return fmt.Errorf("cannot get location of the openshift cluster: %v", err)
+	}
+	myIP, err := getMyIP()
+	if errorCheck(err) {
+		return err
+	}
 	future, err := az.nsgClient.CreateOrUpdate(
 		ctx,
 		az.resourceGroupName,
@@ -256,8 +330,8 @@ func (az *AzureProvider) createSecurityGroup(ctx context.Context, nsgName string
 						Name: to.StringPtr("RDP"),
 						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
 							Protocol:                 network.SecurityRuleProtocolTCP,
-							SourceAddressPrefix:      to.StringPtr("*"),
-							SourcePortRange:          to.StringPtr("1-65535"),
+							SourceAddressPrefix:      to.StringPtr(*myIP + "/32"),
+							SourcePortRange:          to.StringPtr("*"),
 							DestinationAddressPrefix: to.StringPtr("*"),
 							DestinationPortRange:     to.StringPtr("3389"),
 							Access:                   network.SecurityRuleAccessAllow,
@@ -271,7 +345,7 @@ func (az *AzureProvider) createSecurityGroup(ctx context.Context, nsgName string
 							Protocol:                 network.SecurityRuleProtocolTCP,
 							SourceAddressPrefix:      to.StringPtr("10.0.0.0/16"),
 							SourcePortRange:          to.StringPtr("*"),
-							DestinationAddressPrefix: to.StringPtr("0.0.0.0/0"),
+							DestinationAddressPrefix: to.StringPtr("*"),
 							DestinationPortRanges:    &[]string{"1-65535"},
 							Access:                   network.SecurityRuleAccessAllow,
 							Direction:                network.SecurityRuleDirectionInbound,
@@ -296,6 +370,7 @@ func (az *AzureProvider) createSecurityGroup(ctx context.Context, nsgName string
 
 // constructStorageProfile constructs the Storage Profile for the creation of windows instance.
 // The Storage Profile consists of the image reference details such as which instance type, version etc.
+// imageId format: Publisher:Offer:Sku:Version ex: MicrosoftWindowsServer:WindowsServer:2019-Datacenter:latest
 func (az *AzureProvider) constructStorageProfile(imageId string) (storageProfile *compute.StorageProfile) {
 	stringSplit := strings.Split(imageId, ":")
 
@@ -311,6 +386,7 @@ func (az *AzureProvider) constructStorageProfile(imageId string) (storageProfile
 }
 
 // randonPasswordString generates random string with restrictions of given length.
+// ex: 3i[g0|)z for n of size 8
 func randomPasswordString(n int) string {
 	digits := "0123456789"
 	specials := "~=+%^*/()[]{}/!@#$?|"
@@ -328,6 +404,7 @@ func randomPasswordString(n int) string {
 }
 
 //randomString generates random string of given length.
+// ex: for n = 8 it generates Excb1VQs
 func randomString(n int) string {
 	var letter = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 	b := make([]rune, n)
@@ -337,25 +414,41 @@ func randomString(n int) string {
 	return string(b)
 }
 
+// getTimeZoneMap generates a map of different time zones and returns to the user.
+// TODO: Covered the US TimeZones, need to fill up the other timezones.
+func getTimeZoneMap() map[string]string {
+	timeZoneMap := make(map[string]string)
+	timeZoneMap["centralus"] = "Central Standard Time"
+	timeZoneMap["eastus2"] = "Eastern Daylight Time"
+	timeZoneMap["eastus"] = "Eastern Standard Time"
+	timeZoneMap["westus"] = "Pacific Standard Time"
+	timeZoneMap["westus2"] = "Pacific Daylight Time"
+	timeZoneMap["northcentralus"] = "Central Daylight Time"
+	timeZoneMap["southcentralus"] = "Central Daylight Time"
+	return timeZoneMap
+}
+
 // generateResourceName generates the names for the individual resource components of an instance
+// for ex: vkapalav-winc-47hkp-winworker--Pt8hW-ip
 func (az *AzureProvider) generateResourceName(resource, randomStr string) (name string) {
-	name = strings.Join([]string{az.infraID, "windows", "worker", randomStr, resource}, "-")
+	name = strings.Join([]string{az.infraID, windowsWorker, randomStr, resource}, "-")
 	return name
 }
 
 // getIPAdress gets the IP Address by IP resource name as an argument.
-func (az *AzureProvider) getIPAddress(ctx context.Context) (ipAddress string, err error) {
+func (az *AzureProvider) getIPAddress(ctx context.Context) (ipAddress *string, err error) {
 	result, err := az.ipClient.Get(ctx, az.resourceGroupName, az.IpName, "")
-	if err != nil {
-		return "", err
+	if errorCheck(err) {
+		return nil, err
 	}
 	ipAddressProperties := *(result.PublicIPAddressPropertiesFormat)
-	ipAddress = *(ipAddressProperties.IPAddress)
+	ipAddress = &(*(ipAddressProperties.IPAddress))
 	return
 }
 
 // constructWinRMConfig constructs the winrm Listeners for the instance for now it will configure only one listener, but this may
 // scale to multiple listeners depending on the use case. By default they listen via Http protocol.
+// TODO: Provide the CertificateURL for the winRMListeners, the url need to be grabbed from the Key Vault.
 func constructWinRMConfig() (winRMConfig *compute.WinRMConfiguration) {
 	winRMListeners := &[]compute.WinRMListener{
 		{
@@ -371,15 +464,12 @@ func constructWinRMConfig() (winRMConfig *compute.WinRMConfiguration) {
 // constructOSProfile constructs the OS Profile for the creation of windows instance. The OS Profile consists of information
 // such as configuring remote management listeners, instance access setup.
 func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *compute.OSProfile, vmName, password string) {
-	instanceName := "windows-" + randomString(5)
-	adminUserName := "windows"
+	instanceName := windowsWorker + randomString(5)
+	adminUserName := "core"
 	adminPassword := randomPasswordString(12)
 	computeWinRMConfig := constructWinRMConfig()
 	nodeLocation := *(az.getvnetProfile(ctx).Location)
-	var TimeZone string
-	if nodeLocation == "centralus" {
-		TimeZone = "Central Standard Time"
-	}
+	timeZoneMap := getTimeZoneMap()
 	osProfile = &compute.OSProfile{
 		ComputerName:  to.StringPtr(instanceName),
 		AdminUsername: to.StringPtr(adminUserName),
@@ -387,7 +477,7 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
 		WindowsConfiguration: &compute.WindowsConfiguration{
 			ProvisionVMAgent:       to.BoolPtr(true),
 			EnableAutomaticUpdates: to.BoolPtr(false),
-			TimeZone:               to.StringPtr(TimeZone),
+			TimeZone:               to.StringPtr(timeZoneMap[nodeLocation]),
 			WinRM:                  computeWinRMConfig,
 		},
 	}
@@ -400,59 +490,84 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
 func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 	vmName string) (networkProfile *compute.NetworkProfile, err error) {
 	vnetProfile := az.getvnetProfile(ctx)
-	vnetName := *(vnetProfile.Name)
-	subnetList := *(vnetProfile.VirtualNetworkPropertiesFormat.Subnets)
 	var index int
+	var vnetName, subnetName string
+	var subnetList []network.Subnet
+	var subnetProperties network.SubnetPropertiesFormat
+	var nsgStruct network.SecurityGroup
 
+	if !checkForNil(vnetProfile.Name) {
+		vnetName = *(vnetProfile.Name)
+	} else {
+		return nil, fmt.Errorf("cannot obtain vnet name of openshift cluster")
+	}
+	if !checkForNil(vnetProfile.VirtualNetworkPropertiesFormat.Subnets) {
+		subnetList = *(vnetProfile.VirtualNetworkPropertiesFormat.Subnets)
+	} else {
+		return nil, fmt.Errorf("cannot obtain subnet list from existing vnet")
+	}
 	for i, subnet := range subnetList {
-		response, _ := regexp.MatchString("\\bworker\\b", *(subnet.Name))
-		if response {
+		if strings.Contains(*(subnet.Name), "worker") {
 			index = i
 			break
 		}
 	}
+	if !checkForNil(subnetList[index].Name) {
+		subnetName = *(subnetList[index].Name)
+	} else {
+		return nil, fmt.Errorf("cannot obtain worker nodes subnet name")
+	}
+	if !checkForNil(subnetList[index].SubnetPropertiesFormat) {
+		subnetProperties = *(subnetList[index].SubnetPropertiesFormat)
+	} else {
+		return nil, fmt.Errorf("cannot obtain subnet properties")
+	}
+	if !checkForNil(subnetProperties.NetworkSecurityGroup) {
+		nsgStruct = *(subnetProperties.NetworkSecurityGroup)
+	} else {
+		return nil, fmt.Errorf("cannot obtain security group rules of worker subnet")
+	}
 
-	subnetName := *(subnetList[index].Name)
-	subnetProperties := *(subnetList[index].SubnetPropertiesFormat)
-	nsgStruct := *(subnetProperties.NetworkSecurityGroup)
 	vmRandString := strings.Split(vmName, "-")[1]
 	var nsgName string
-	if verifyForResource(*(nsgStruct.ID)) {
+	if !checkForNil(nsgStruct.ID) {
 		nsgID := *(nsgStruct.ID)
 		nsgName = extractResourceName(nsgID)
 		err := az.createSecurityGroup(ctx, nsgName)
-		if err != nil {
+		if errorCheck(err) {
 			return nil, fmt.Errorf("failed to create security group rules: %v", err)
 		}
 	} else {
 		nsgName = az.generateResourceName("nsg", vmRandString)
 		err := az.createSecurityGroup(ctx, nsgName)
-		if err != nil {
+		if errorCheck(err) {
 			return nil, fmt.Errorf("failed to create security group rules: %v", err)
 		}
-		az.NsgName = nsgName
 	}
+	az.NsgName = nsgName
 
-	if !verifyForResource(az.IpName) {
+	if len(az.IpName) == 0 {
 		ipName := az.generateResourceName("ip", vmRandString)
 		az.IpName = ipName
 		_, err := az.createPublicIP(ctx)
-		if err != nil {
+		if errorCheck(err) {
 			return nil, fmt.Errorf("failed to create IP for node: %v", err)
 		}
 	}
 
 	var vmNic network.Interface
-	if verifyForResource(az.NicName) {
+	if len(az.NicName) > 0 {
 		vmNic, err = az.nicClient.Get(ctx, az.resourceGroupName, az.NicName, "")
-		if err != nil {
+		if errorCheck(err) {
 			return nil, fmt.Errorf("failed to create nic for the instance: %v", err)
 		}
 	} else {
 		nicName := az.generateResourceName("nic", vmRandString)
+		ipConfigName := az.generateResourceName("ipConfig", vmRandString)
 		az.NicName = nicName
-		vmNic, err = az.createNIC(ctx, vnetName, subnetName, nsgName)
-		if err != nil {
+		ptrvmNic, err := az.createNIC(ctx, vnetName, subnetName, nsgName, ipConfigName)
+		vmNic = *(ptrvmNic)
+		if errorCheck(err) {
 			return nil, fmt.Errorf("failed to create nic for the instance: %v", err)
 		}
 	}
@@ -475,21 +590,24 @@ func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 // resourceGroupName as the existing OpenShift
 // TODO: If it fails during the instance creation process it has to delete the resources created
 // untill that step.
-func (az *AzureProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (err error) {
+func (az *AzureProvider) CreateWindowsVM() (err error) {
 	// Construct the VirtualMachine properties
 	rand.Seed(time.Now().UnixNano())
 	ctx := context.Background()
 	vmHardwareProfile := &compute.HardwareProfile{
-		VMSize: compute.VirtualMachineSizeTypes(instanceType)}
+		VMSize: compute.VirtualMachineSizeTypes(az.instanceType)}
 	log.Info(fmt.Sprintf("constructed the HardwareProfile for node"))
 
-	vmStorageProfile := az.constructStorageProfile(imageId)
+	vmStorageProfile := az.constructStorageProfile(az.imageID)
 	log.Info(fmt.Sprintf("constructed the Storage Profile for node"))
 
 	vmOSProfile, instanceName, adminPassword := az.constructOSProfile(ctx)
 	log.Info(fmt.Sprintf("constructed the OSProfile for the node"))
 
 	vmNetworkProfile, err := az.constructNetworkProfile(ctx, instanceName)
+	if errorCheck(err) {
+		return err
+	}
 	log.Info(fmt.Sprintf("constructed the network profile for the node"))
 
 	log.Info(fmt.Sprintf("constructed all the profiles, about to create instance."))
@@ -508,40 +626,40 @@ func (az *AzureProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (
 			},
 		},
 	)
-	if err != nil {
+	if errorCheck(err) {
 		return fmt.Errorf("instance failed to create: %v", err)
 	}
 	err = future.WaitForCompletionRef(ctx, az.vmClient.Client)
-	if err != nil {
+	if errorCheck(err) {
 		return fmt.Errorf("instance failed to create: %v", err)
 	}
 	vmInfo, err := future.Result(az.vmClient)
-	check(err, "failed to obtain instance info")
-	resourceTrackerFilePath, err := resource.MakeFilePath(az.resourceTrackerDir)
-	check(err, "unable to create file")
-	if az.NsgName == "" {
-		resource.AppendInstallerInfo([]string{*(vmInfo.Name)}, []string{}, resourceTrackerFilePath)
-	} else {
-		resource.AppendInstallerInfo([]string{*(vmInfo.Name)}, []string{az.NsgName}, resourceTrackerFilePath)
+	if errorCheck(err) {
+		log.Error(err, fmt.Sprintf("failed to obtain instance info"))
 	}
 
-	log.Info(fmt.Sprintf("Successfully created windows instance: %s", instanceName))
-	ipAddress, ipErr := az.getIPAddress(ctx)
-	check(ipErr, fmt.Sprintf("couldn't get the IP Address for corresponding resource: %s", az.IpName))
-	if ipErr != nil {
-		ipAddress = az.IpName
+	resourceTrackerFilePath, err := resource.MakeFilePath(az.resourceTrackerDir)
+	if errorCheck(err) {
+		log.Error(err, fmt.Sprintf("unable to create a file"))
 	}
-	resultPath := az.resourceTrackerDir + "/" + instanceName
-	f, err := os.Create(resultPath)
-	check(err, "unable to create a file")
-	defer f.Close()
-	_, err = f.Write([]byte(fmt.Sprintf("xfreerdp /u:windows /v:%s /h:1080 /w:1920 /p:%s \n", ipAddress, adminPassword)))
-	check(err, "unable to write data into file")
-	if err == nil {
+	resource.AppendInstallerInfo([]string{*(vmInfo.Name)}, []string{az.NsgName}, resourceTrackerFilePath)
+
+	log.Info(fmt.Sprintf("Successfully created windows instance: %s", instanceName))
+
+	ipAddress, ipErr := az.getIPAddress(ctx)
+	if errorCheck(ipErr) {
+		log.Error(err, fmt.Sprintf("couldn't get the IP Address for corresponding resource: %s", az.IpName))
+		*ipAddress = az.IpName
+	}
+	resultData := fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:'%s' \n", *ipAddress, adminPassword)
+	resultPath := az.resourceTrackerDir + instanceName
+	err = resource.StoreResultData(resultPath, resultData)
+	if errorCheck(err) {
+		log.Error(err, fmt.Sprintf("unable to write data into file"))
+		log.Info(fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:%s", *ipAddress, adminPassword))
+	} else {
 		log.Info(fmt.Sprintf("Please Check for file %s in %s directory on how to access the node",
 			instanceName, az.resourceTrackerDir))
-	} else {
-		log.Info(fmt.Sprintf("xfreerdp /u:windows /v:%s /h:1080 /w:1920 /p:%s", ipAddress, adminPassword))
 	}
 	return nil
 }
@@ -585,34 +703,23 @@ func (az *AzureProvider) getIPname(ctx context.Context, vmName string) (err erro
 
 // destroyIP deletes the IP address by taking it's name as argument.
 func (az *AzureProvider) destroyIP(ctx context.Context, ipName string) (err error) {
-	future, err := az.ipClient.Delete(ctx, az.resourceGroupName, ipName)
-	if err != nil {
+	_, err = az.ipClient.Delete(ctx, az.resourceGroupName, ipName)
+	if errorCheck(err) {
 		log.Error(err, fmt.Sprintf("failed to delete the public IP: %s", ipName))
 		return
 	}
-	var response bool = false
-	var responseStatus int = 200
-	var r autorest.Response
-	for i := 1; i <= 300; i++ {
-		time.Sleep(1 * time.Second)
-		r, err = future.Result(az.ipClient)
-		response = r.IsHTTPStatus(responseStatus)
-		if response {
-			return nil
-		}
-	}
-	return err
+	return
 }
 
 // destroyInstance deletes the instance by taking it's name as argument.
 func (az *AzureProvider) destroyInstance(ctx context.Context, vmName string) (err error) {
 	future, err := az.vmClient.Delete(ctx, az.resourceGroupName, vmName)
-	if err != nil {
+	if errorCheck(err) {
 		log.Error(err, fmt.Sprintf("failed to delete the instance: %s", vmName))
 		return
 	}
 	err = future.WaitForCompletionRef(ctx, az.vmClient.Client)
-	if err != nil {
+	if errorCheck(err) {
 		log.Error(err, fmt.Sprintf("failed to delete the instance: %s", vmName))
 		return
 	}
@@ -621,44 +728,67 @@ func (az *AzureProvider) destroyInstance(ctx context.Context, vmName string) (er
 
 // destroyNIC deletes the nic by taking it's name as argument.
 func (az *AzureProvider) destroyNIC(ctx context.Context, nicName string) (err error) {
-	future, err := az.nicClient.Delete(ctx, az.resourceGroupName, nicName)
-	if err != nil {
+	_, err = az.nicClient.Delete(ctx, az.resourceGroupName, nicName)
+	if errorCheck(err) {
 		log.Error(err, fmt.Sprintf("failed to delete the nic: %s", nicName))
 		return
 	}
-	var response bool = false
-	var responseStatus int = 200
-	var r autorest.Response
-	for i := 1; i <= 300; i++ {
-		time.Sleep(1 * time.Second)
-		r, err = future.Result(az.nicClient)
-		response = r.IsHTTPStatus(responseStatus)
-		if response {
-			return nil
-		}
-	}
-	return err
+	return
 }
 
-// destroyNSG deletes the security groups by taking it's name as argument.
-func (az *AzureProvider) destroyNSG(ctx context.Context, nsgName string) (err error) {
-	future, err := az.nsgClient.Delete(ctx, az.resourceGroupName, nsgName)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("failed to delete the sec group: %s", nsgName))
-		return
-	}
-	var response bool = false
-	var responseStatus int = 200
-	var r autorest.Response
-	for i := 1; i <= 300; i++ {
-		time.Sleep(1 * time.Second)
-		r, err = future.Result(az.nsgClient)
-		response = r.IsHTTPStatus(responseStatus)
-		if response {
-			return nil
+// deleteSpecificRule deletes particular rule set by name from the list of available rules set.
+func (az *AzureProvider) deleteSpecificRule(s []network.SecurityRule, name string) (updatedList []network.SecurityRule) {
+	for i, rule := range s {
+		if !checkForNil(rule.Name) {
+			if strings.Contains(*(rule.Name), name) {
+				updatedList = append(s[:i], s[i+1:]...)
+			}
 		}
 	}
-	return err
+	return
+}
+
+// destroyNSG deletes the security group rules by taking it's name as argument.
+// it deletes the rdp and vnet_traffic rules from the worker subnet security group rules.
+func (az *AzureProvider) updateNSGRules(ctx context.Context, nsgName string) (err error) {
+	var secGroupPropFormat network.SecurityGroupPropertiesFormat
+	var secGroupRules []network.SecurityRule
+	secGroupProfile, err := az.nsgClient.Get(ctx, az.resourceGroupName, nsgName, "")
+	if errorCheck(err) {
+		return fmt.Errorf("cannot obtain the worker subnet security group rules: %v", err)
+	}
+	if !checkForNil(secGroupProfile.SecurityGroupPropertiesFormat) {
+		secGroupPropFormat = *(secGroupProfile.SecurityGroupPropertiesFormat)
+	} else {
+		return fmt.Errorf("cannot obtain the security group properties format: %v", err)
+	}
+	if !checkForNil(secGroupPropFormat.SecurityRules) {
+		secGroupRules = *(secGroupPropFormat.SecurityRules)
+	} else {
+		fmt.Errorf("cannot obtain the security group rules: %v", err)
+	}
+	secGroupRules = az.deleteSpecificRule(secGroupRules, "RDP")
+	secGroupRules = az.deleteSpecificRule(secGroupRules, "vnet_traffic")
+	future, err := az.nsgClient.CreateOrUpdate(
+		ctx,
+		az.resourceGroupName,
+		nsgName,
+		network.SecurityGroup{
+			Location: to.StringPtr(*(az.getvnetProfile(ctx).Location)),
+			SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
+				SecurityRules: &secGroupRules,
+			},
+		},
+	)
+	if errorCheck(err) {
+		return fmt.Errorf("cannot update the security group rules of the worker subnet: %v", err)
+	}
+	err = future.WaitForCompletionRef(ctx, az.nsgClient.Client)
+	if errorCheck(err) {
+		return fmt.Errorf("cannot update the security group rules of the worker subnet: %v", err)
+	}
+	_, err = future.Result(az.nsgClient)
+	return
 }
 
 // destroyDisk deletes the disk attached with the instance by taking its name
@@ -668,23 +798,12 @@ func (az *AzureProvider) destroyDisk(ctx context.Context, vmInfo compute.Virtual
 	vmOSdiskProperties := *(vmStorageProfile.OsDisk)
 	diskName := *(vmOSdiskProperties.Name)
 	az.diskClient.PollingDuration = time.Minute * 10
-	future, err := az.diskClient.Delete(ctx, az.resourceGroupName, diskName)
-	if err != nil {
+	_, err = az.diskClient.Delete(ctx, az.resourceGroupName, diskName)
+	if errorCheck(err) {
 		log.Error(err, fmt.Sprintf("failed to delete the root disk: %s", diskName))
 		return
 	}
-	var response bool = false
-	var responseStatus int = 200
-	var r autorest.Response
-	for i := 1; i <= 300; i++ {
-		time.Sleep(1 * time.Second)
-		r, err = future.Result(az.diskClient)
-		response = r.IsHTTPStatus(responseStatus)
-		if response {
-			return nil
-		}
-	}
-	return err
+	return
 }
 
 // DestroyWindowsVMs destroys all the resources created by the CreateWindows method.
@@ -693,11 +812,11 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 	log.Info(fmt.Sprintf("processing file '%s'", az.resourceTrackerDir))
 	ctx := context.Background()
 	resourceTrackerFilePath, err := resource.MakeFilePath(az.resourceTrackerDir)
-	if err != nil {
+	if errorCheck(err) {
 		return err
 	}
 	installerInfo, err := resource.ReadInstallerInfo(resourceTrackerFilePath)
-	if err != nil {
+	if errorCheck(err) {
 		return fmt.Errorf("unable to get saved info from json file")
 	}
 	var terminatedInstances, deletedSg []string
@@ -709,38 +828,40 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 
 		vmInfo, _ := az.vmClient.Get(ctx, az.resourceGroupName, vmName, compute.InstanceView)
 
-		log.Info(fmt.Sprintf("deleting the resource associated with the instance: %s", vmName))
+		log.Info(fmt.Sprintf("deleting the resources associated with the instance: %s", vmName))
 
 		err = az.destroyInstance(ctx, vmName)
-		if err == nil {
+		if !errorCheck(err) {
 			log.Info(fmt.Sprintf("deleted the instance '%s'", vmName))
 		}
 
 		err = az.destroyNIC(ctx, nicName)
-		if err == nil {
+		if !errorCheck(err) {
 			log.Info(fmt.Sprintf("deleted the NIC of instance"))
 		}
 
-		err := az.destroyIP(ctx, ipName)
-		if err == nil {
+		err = az.destroyIP(ctx, ipName)
+		if !errorCheck(err) {
 			log.Info(fmt.Sprintf("deleted the IP of instance"))
 		}
 
 		err = az.destroyDisk(ctx, vmInfo)
-		if err == nil {
+		if !errorCheck(err) {
 			log.Info(fmt.Sprintf("deleted the disk attached to the instance"))
 		}
 
-		terminatedInstances = append(terminatedInstances, vmName)
+		rdpFilePath := az.resourceTrackerDir + vmName
+		err = resource.DeleteResultData(rdpFilePath)
+		if errorCheck(err) {
+			log.Error(err, fmt.Sprintf("unable to remove the file: %s", rdpFilePath))
+		}
 
-		rdpFilePath := az.resourceTrackerDir + "/" + vmName
-		err = os.Remove(rdpFilePath)
-		check(err, fmt.Sprintf("unable to remove the file: %s", rdpFilePath))
+		terminatedInstances = append(terminatedInstances, vmName)
 	}
 
 	for _, nsgName := range installerInfo.SecurityGroupIDs {
-		err = az.destroyNSG(ctx, nsgName)
-		if err == nil {
+		err = az.updateNSGRules(ctx, nsgName)
+		if !errorCheck(err) {
 			log.Info(fmt.Sprintf("deleted the security group rule '%s'", nsgName))
 		}
 
@@ -749,7 +870,7 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 
 	// Update the 'windows-node-installer.json' file
 	err = resource.RemoveInstallerInfo(terminatedInstances, deletedSg, resourceTrackerFilePath)
-	if err != nil {
+	if errorCheck(err) {
 		log.Info(fmt.Sprintf("%s file was not updated, %v", resourceTrackerFilePath, err))
 	}
 	return nil

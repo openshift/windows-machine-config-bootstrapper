@@ -159,3 +159,23 @@ func MakeFilePath(dirPath string) (string, error) {
 	}
 	return strings.Join([]string{dirPath, installerInfoFileName}, ""), err
 }
+
+// StoreResult stores the access related information in a file created in resourceTrackerDir
+func StoreResultData(filePath, fileData string) (err error) {
+	f, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write([]byte(fileData))
+	if err != nil {
+		return err
+	}
+	return
+}
+
+// DeleteResultData deletes the file created to stores access related information.
+func DeleteResultData(filePath string) (err error) {
+	err = os.Remove(filePath)
+	return
+}
