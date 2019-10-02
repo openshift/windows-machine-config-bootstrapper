@@ -42,15 +42,15 @@ func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, r
 	// File, dir, credential account sanity checks.
 	kubeconfigPath, err := makeValidAbsPath(kubeconfigPath)
 	if err != nil {
-		return nil, fmt.Errorf("invalid path for kubeconfig file, %v", err)
+		return nil, fmt.Errorf("error resolving path for kubeconfig file, %v", err)
 	}
 	credentialPath, err = makeValidAbsPath(credentialPath)
 	if err != nil {
-		return nil, fmt.Errorf("invalid path for credentials file, %v", err)
+		return nil, fmt.Errorf("error resolving path for credentials file, %v", err)
 	}
 	resourceTrackerDir, err = makeValidAbsPath(resourceTrackerDir)
 	if err != nil {
-		return nil, fmt.Errorf("invalid directory path for resource tracker file, %v", err)
+		return nil, fmt.Errorf("error resolving path for resource tracker directory, %v", err)
 	}
 
 	// Create a new client of the given OpenShift cluster based on kubeconfig.
@@ -77,10 +77,9 @@ func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, r
 
 // makeValidAbsPath remakes a path into an absolute path and ensures that it exists.
 func makeValidAbsPath(path string) (string, error) {
-	if path == "" {
-		return "", fmt.Errorf("empty path")
-	}
-	if !filepath.IsAbs(path) {
+	if len(path) > 0 && !filepath.IsAbs(path) {
+		// Expand `~` to `/home` directory of the user
+		// TODO: remove dependency on `homedir` package from kubernetes repo
 		if path[0] == '~' {
 			path = filepath.Join(homedir.HomeDir(), path[1:])
 		}
@@ -91,8 +90,8 @@ func makeValidAbsPath(path string) (string, error) {
 		return "", err
 	}
 
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return "", fmt.Errorf("path %s dose not exist", path)
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("path %s does not exist", path)
 	}
 	return path, nil
 }
