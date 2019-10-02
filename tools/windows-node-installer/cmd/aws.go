@@ -9,15 +9,15 @@ import (
 
 var (
 
-	// createFlagInfo contains information for creating an instance.
-	createFlagInfo struct {
-		imageID      string
+	// awsInfo contains information for aws Cloud provider
+	awsInfo struct {
+		// imageID is the AMI image-id to be used for creating Virtual Machine
+		imageID string
+		// instanceType is the flavor of VM to be used
 		instanceType string
-		sshKey       string
-	}
-
-	// awsOpts contains the specific cloud provider specific information
-	awsOpts struct {
+		// sshKey is the ssh key to access the VM created. Please note that key should be uploaded to AWS before
+		// using this flag
+		sshKey string
 		// credentialPath is the location of the aws credentials file on the disk
 		credentialPath string
 		// credentialAccountID is the aws account id
@@ -43,10 +43,10 @@ func newAWSCmd() *cobra.Command {
 			fmt.Println(args)
 		},
 	}
-	awsCmd.PersistentFlags().StringVar(&awsOpts.credentialPath, "credentials", "",
+	awsCmd.PersistentFlags().StringVar(&awsInfo.credentialPath, "credentials", "",
 		"file path to the cloud provider credentials of the existing OpenShift cluster (required)")
 
-	awsCmd.PersistentFlags().StringVar(&awsOpts.credentialAccountID, "credential-account", "",
+	awsCmd.PersistentFlags().StringVar(&awsInfo.credentialAccountID, "credential-account", "",
 		"account name of a credential used to create the OpenShift Cluster specified in the provider's credentials"+
 			" file (required)")
 	return awsCmd
@@ -71,20 +71,20 @@ func createCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a Windows instance on the same provider as the existing OpenShift Cluster.",
-		Long: "creates a Windows instance under the same virtual network (AWS-VCP, Azure-Vnet, " +
-			"and etc.) used by a given OpenShift cluster running on the selected provider. " +
+		Long: "creates a Windows instance under the same virtual network (AWS-VCP " +
+			"used by a given OpenShift cluster running on the selected provider. " +
 			"The created instance would be ready to join the OpenShift Cluster as a worker node.",
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			return validateCreateFlags(cmd)
 		},
 		TraverseChildren: true,
 		RunE: func(_ *cobra.Command, args []string) error {
-			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, awsOpts.credentialPath,
-				awsOpts.credentialAccountID, rootInfo.resourceTrackerDir)
+			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, awsInfo.credentialPath,
+				awsInfo.credentialAccountID, rootInfo.resourceTrackerDir)
 			if err != nil {
-				return fmt.Errorf("error creating cloud provider clients, %v", err)
+				return fmt.Errorf("error creating aws client, %v", err)
 			}
-			err = cloud.CreateWindowsVM(createFlagInfo.imageID, createFlagInfo.instanceType, createFlagInfo.sshKey)
+			err = cloud.CreateWindowsVM(awsInfo.imageID, awsInfo.instanceType, awsInfo.sshKey)
 			if err != nil {
 				return fmt.Errorf("error creating Windows Instance, %v", err)
 			}
@@ -92,12 +92,12 @@ func createCmd() *cobra.Command {
 		},
 	}
 
-	cmd.PersistentFlags().StringVar(&createFlagInfo.imageID, "image-id", "",
+	cmd.PersistentFlags().StringVar(&awsInfo.imageID, "image-id", "",
 		"ami ID of a base image for the instance (i.e."+
 			": ami-06a4e829b8bbad61e for Microsoft Windows Server 2019 Base image on AWS) (required)")
-	cmd.PersistentFlags().StringVar(&createFlagInfo.instanceType, "instance-type", "",
+	cmd.PersistentFlags().StringVar(&awsInfo.instanceType, "instance-type", "",
 		"name of a type of instance (i.e.: m4.large for AWS, etc) (required)")
-	cmd.PersistentFlags().StringVar(&createFlagInfo.sshKey, "ssh-key", "",
+	cmd.PersistentFlags().StringVar(&awsInfo.sshKey, "ssh-key", "",
 		"name of existing ssh key on cloud provider for accessing the instance after it is created (required)")
 	return cmd
 }
@@ -129,8 +129,8 @@ func destroyCmd() *cobra.Command {
 			"The security groups still associated with any existing instances will not be deleted.",
 
 		RunE: func(_ *cobra.Command, _ []string) error {
-			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, awsOpts.credentialPath,
-				awsOpts.credentialAccountID, rootInfo.resourceTrackerDir)
+			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, awsInfo.credentialPath,
+				awsInfo.credentialAccountID, rootInfo.resourceTrackerDir)
 			if err != nil {
 				return fmt.Errorf("error creating cloud provider clients, %v", err)
 			}
