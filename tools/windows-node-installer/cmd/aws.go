@@ -80,11 +80,12 @@ func createCmd() *cobra.Command {
 		TraverseChildren: true,
 		RunE: func(_ *cobra.Command, args []string) error {
 			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, awsInfo.credentialPath,
-				awsInfo.credentialAccountID, rootInfo.resourceTrackerDir)
+				awsInfo.credentialAccountID, rootInfo.resourceTrackerDir,
+				awsInfo.imageID, awsInfo.instanceType, awsInfo.sshKey)
 			if err != nil {
 				return fmt.Errorf("error creating aws client, %v", err)
 			}
-			err = cloud.CreateWindowsVM(awsInfo.imageID, awsInfo.instanceType, awsInfo.sshKey)
+			err = cloud.CreateWindowsVM()
 			if err != nil {
 				return fmt.Errorf("error creating Windows Instance, %v", err)
 			}
@@ -130,7 +131,7 @@ func destroyCmd() *cobra.Command {
 
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, awsInfo.credentialPath,
-				awsInfo.credentialAccountID, rootInfo.resourceTrackerDir)
+				awsInfo.credentialAccountID, rootInfo.resourceTrackerDir, "", "", "")
 			if err != nil {
 				return fmt.Errorf("error creating cloud provider clients, %v", err)
 			}

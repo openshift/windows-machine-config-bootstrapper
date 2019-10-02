@@ -15,9 +15,9 @@ import (
 // Cloud is the interface that needs to be implemented per provider to allow support for creating Windows nodes on
 // that provider.
 type Cloud interface {
-	// CreateWindowsVM creates a Windows VM based on available image id, instance type, and ssh key name.
+	// CreateWindowsVM creates a Windows VM for a given cloud provider
 	// TODO: CreateWindowsVM should return a provider object for further interaction with the created instance.
-	CreateWindowsVM(imageId, instanceType, sshKey string) error
+	CreateWindowsVM() error
 	// DestroyWindowsVMs uses 'windows-node-installer.json' file that contains IDs of created instance and
 	// security group and deletes them.
 	// Example 'windows-node-installer.json' file:
@@ -37,7 +37,8 @@ type Cloud interface {
 // this function requires specifying the credentialAccountID of the user's credential account.
 // The resourceTrackerDir is where the `windows-node-installer.json` file which contains IDs of created instance and
 // security group will be created.
-func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, resourceTrackerDir string) (Cloud, error) {
+func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, resourceTrackerDir,
+	imageID, instanceType, sshKey string) (Cloud, error) {
 	// File, dir, credential account sanity checks.
 	kubeconfigPath, err := makeValidAbsPath(kubeconfigPath)
 	if err != nil {
@@ -68,7 +69,7 @@ func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, r
 
 	switch provider := cloudProvider.Type; provider {
 	case v1.AWSPlatformType:
-		return aws.New(oc, credentialPath, credentialAccountID, resourceTrackerFilePath)
+		return aws.New(oc, imageID, instanceType, sshKey, credentialPath, credentialAccountID, resourceTrackerFilePath)
 	default:
 		return nil, fmt.Errorf("the '%v' cloud provider is not supported", provider)
 	}
