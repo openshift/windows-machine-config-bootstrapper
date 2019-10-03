@@ -1,12 +1,23 @@
 package e2e
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
+	"fmt"
+	amazonaws "github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider"
 	awscp "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/aws"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
 	"github.com/stretchr/testify/assert"
+	"io/ioutil"
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -66,6 +77,25 @@ func TestCreateDestroyWindowsInstance(t *testing.T) {
 	if !checkIfInfraTagExists(instance, infraID) {
 		t.Fatalf("Infrastructure tag not available for %v", info.InstanceIDs[0])
 	}
+
+	instanceId := info.InstanceIDs[0]
+	sgId := info.SecurityGroupIDs[0]
+
+	// Create new client session and wait for instance status ok
+	sess, err := session.NewSession(&amazonaws.Config{
+		Region: amazonaws.String("us-east-1")},
+	)
+	assert.NoErrorf(t, err, "Couldn't create new aws session: %s", err)
+	svc := ec2.New(sess)
+	err = svc.WaitUntilSystemStatusOk(&ec2.DescribeInstanceStatusInput{
+		InstanceIds: amazonaws.StringSlice([]string{instanceId}),
+	})
+	assert.NoErrorf(t, err, "fail to wait for instance launch: %s", err)
+
+	// Test winrm port and ansible connection
+	testWinrmPort(t, sgId, svc)
+	testWinrmAnsible(t, instanceId, svc)
+
 	err = cloud.DestroyWindowsVMs()
 	assert.NoError(t, err, "error deleting instance")
 
@@ -87,4 +117,82 @@ func checkIfInfraTagExists(instance *ec2.Instance, infraID string) bool {
 		}
 	}
 	return false
+}
+
+// testWinrmPort checks the security group of the instance and verify that the
+// winrm port are in security group inbound rule so that the
+// instance is able to listen to winrm request.
+func testWinrmPort(t *testing.T, sgId string, svc *ec2.EC2) {
+	// Testing winrm port
+	SgResult, err := svc.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
+		GroupIds: []*string{
+			amazonaws.String(sgId),
+		},
+	})
+	assert.Nilf(t, err, "Couldn't retirve Security Group: %s", err)
+
+	// Verify winrm port and protocol are in the inbound rule of the security group
+	portOpen := false
+	for _, rule := range SgResult.SecurityGroups[0].IpPermissions {
+		if rule.FromPort != nil && *rule.FromPort == 5986 {
+			portOpen = true
+		}
+	}
+	if !portOpen {
+		t.Fatalf("winrm port is missing in new launched instance.")
+	}
+}
+
+// testWinrmAnsible verifies the connection of Windows instance using Ansible ping
+// module. If the module executed successfully, which means the Windows instance
+// is ready for Ansible communication.
+func testWinrmAnsible(t *testing.T, instanceId string, svc *ec2.EC2) {
+	// Getting instance password
+	pwData, err := svc.GetPasswordData(&ec2.GetPasswordDataInput{
+		InstanceId: amazonaws.String(instanceId),
+	})
+	if err != nil {
+		assert.NoErrorf(t, err, "fail to get instance password: %s", err)
+	}
+
+	// Decypt password
+	pwDecoded, err := base64.StdEncoding.DecodeString(strings.Trim(*pwData.PasswordData, "\r\n"))
+	if err != nil {
+		assert.NoErrorf(t, err, "fail to decode password in base64: %s", err)
+	}
+	privateKey, err := ioutil.ReadFile(os.Getenv("KUBE_SSH_KEY_PATH"))
+	privateKeyByte := []byte(privateKey)
+	decryptedPasswordByte, err := rsaDecode(t, pwDecoded, privateKeyByte)
+	if err != nil {
+		assert.NoErrorf(t, err, "fail to decrypt password: %s", err)
+	}
+	decryptedPassword := string(decryptedPasswordByte)
+
+	// Getting instance ip address
+	result, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
+		InstanceIds: []*string{
+			amazonaws.String(instanceId),
+		},
+	})
+	assert.NoErrorf(t, err, "Couldn't DescribeInstances: %s", err)
+	ipAddress := *result.Reservations[0].Instances[0].PublicIpAddress
+	ipAddressArg := ipAddress + ","
+
+	// Test winrm Ansible connection
+	extraVars := fmt.Sprintf("ansible_user=Administrator ansible_password='%s' ansible_connection=winrm ansible_ssh_port=5986 ansible_winrm_server_cert_validation=ignore", decryptedPassword)
+	cmdAnsible := exec.Command("ansible", "all", "-i", ipAddressArg, "-e", extraVars, "-m", "win_ping", "-vvvvv")
+	cmdAnsible.Stdout = os.Stdout
+	cmdAnsible.Stderr = os.Stderr
+	err = cmdAnsible.Run()
+	if err != nil {
+		t.Fatalf("ansible is not able to communicate with Windows instance.")
+	}
+}
+
+// rsaDecode decrypted the encrypted password and return the original key phrase
+func rsaDecode(t *testing.T, encryptedData []byte, privateKeyByte []byte) ([]byte, error) {
+	privateKeyBlock, _ := pem.Decode(privateKeyByte)
+	privateKey, err := x509.ParsePKCS1PrivateKey(privateKeyBlock.Bytes)
+	assert.NoErrorf(t, err, "failed to parse private key: %s", err)
+	return rsa.DecryptPKCS1v15(rand.Reader, privateKey, encryptedData)
 }
