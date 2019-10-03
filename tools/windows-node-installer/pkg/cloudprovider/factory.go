@@ -89,7 +89,10 @@ func makeValidAbsPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
+	// Add a trailing slash if it doesn't exist.
+	if path[len(path)-1:] != "/" {
+		path = path + "/"
+	}
 	if _, err := os.Stat(path); err != nil {
 		return "", fmt.Errorf("path %s does not exist", path)
 	}
