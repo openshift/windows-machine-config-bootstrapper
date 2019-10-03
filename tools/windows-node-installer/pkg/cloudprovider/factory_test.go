@@ -23,7 +23,7 @@ func TestMakeValidAbsPath(t *testing.T) {
 		{
 			description:  "Empty path should resolve to current working directory",
 			inputPath:    "",
-			expectedPath: getCWD(),
+			expectedPath: getCWD() + "/",
 		},
 		{
 			description:   "Non existent file should return an error and should resolve to empty string",
