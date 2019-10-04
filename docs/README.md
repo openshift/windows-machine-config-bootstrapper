@@ -28,6 +28,8 @@ wmcb run --ignition-file $IGNITION_FILE_PATH --kubelet-path $KUBELET_PATH
 
 ## Testing
 
+### Windows Machine Config Bootstrapper
+
 On an existing Windows instance which is ready to join the cluster, copy the worker ignition file to C:\Windows\Temp\worker.ign, and the kubelet to C:\Windows\Temp\kubelet.exe
 
 On the Windows instance, run:
@@ -45,3 +47,7 @@ oc adm certificate approve $CSR_NAME
 Repeat the above steps for the `system:node:$NODE_NAME` csr which will appear shortly. 
 
 You can now do `oc get nodes`, and see the Windows node has joined the cluster.
+
+### Ansible
+
+Follow the instructions in `tools/ansible/README.md`, and ensure the playbook completes successfully.
