@@ -76,6 +76,8 @@ func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, r
 }
 
 // makeValidAbsPath remakes a path into an absolute path and ensures that it exists.
+// TODO: Break this function to validate files. dirs etc. As of now, we don't differentiate
+// between files and dirs
 func makeValidAbsPath(path string) (string, error) {
 	if len(path) > 0 && !filepath.IsAbs(path) {
 		// Expand `~` to `/home` directory of the user
@@ -89,12 +91,15 @@ func makeValidAbsPath(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Add a trailing slash if it doesn't exist.
-	if path[len(path)-1:] != "/" {
-		path = path + "/"
-	}
-	if _, err := os.Stat(path); err != nil {
+	file, err := os.Stat(path)
+	if err != nil {
 		return "", fmt.Errorf("path %s does not exist", path)
+	}
+	if file.IsDir() {
+		// Add a trailing slash if it doesn't exist only for directories
+		if path[len(path)-1:] != "/" {
+			path = path + "/"
+		}
 	}
 	return path, nil
 }

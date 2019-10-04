@@ -1,6 +1,7 @@
 package cloudprovider
 
 import (
+	"io/ioutil"
 	"os"
 	"testing"
 )
@@ -14,6 +15,14 @@ func getCWD() string {
 // TestMakeValidAbsPath tests if makeValidAbsPath is returning an error or not in various conditions.
 // TODO: Add more test cases here
 func TestMakeValidAbsPath(t *testing.T) {
+	// create Temporary file for testing
+	file, _ := ioutil.TempFile("/tmp", "test-")
+	fileName := file.Name()
+	defer os.Remove(fileName)
+	// create Temporary directory for testing
+	dir, _ := ioutil.TempDir("/tmp", "test-")
+	defer os.Remove(dir)
+
 	tests := []struct {
 		description   string
 		inputPath     string
@@ -30,6 +39,18 @@ func TestMakeValidAbsPath(t *testing.T) {
 			inputPath:     "/somerandomPath",
 			expectedPath:  "",
 			expectedError: true,
+		},
+		{
+			description:   "a temporary file which exists on machine should not get a trailing /",
+			inputPath:     fileName,
+			expectedPath:  fileName,
+			expectedError: false,
+		},
+		{
+			description:   "a temporary dir which exists on machine should get a trailing /",
+			inputPath:     dir,
+			expectedPath:  dir + "/",
+			expectedError: false,
 		},
 	}
 	for _, test := range tests {
