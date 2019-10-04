@@ -41,7 +41,7 @@ func TestCreateDestroyWindowsInstance(t *testing.T) {
 	assert.NoError(t, err, "error creating Windows instance")
 
 	// Check instance and security group information in windows-node-installer.json.
-	info, err := resource.ReadInstallerInfo(dir + "windows-node-installer.json")
+	info, err := resource.ReadInstallerInfo(dir + "/" + "windows-node-installer.json")
 	assert.NoError(t, err, "error reading windows-node-installer.json file")
 	assert.NotEmpty(t, info.SecurityGroupIDs, "security group is not created")
 	assert.NotEmpty(t, info.InstanceIDs, "instance is not created")
