@@ -19,6 +19,11 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
+const (
+	infraIDTagKeyPrefix = "kubernetes.io/cluster/"
+	infraIDTagValue     = "owned"
+)
+
 // log is the global logger for the aws package. Each log record produced
 // by this logger will have an identifier containing `aws-ec2` tag.
 var log = logger.Log.WithName("aws-ec2")
@@ -32,7 +37,9 @@ const (
 // awsProvider is a provider specific struct which contains clients for EC2, IAM, and the existing OpenShift
 // cluster that is running on EC2.
 // This is an implementation of the Cloud interface.
-type awsProvider struct {
+// TODO: Move this into top level `pkg/types` so that we will have all the types needed across all cloud providers
+// instead of relying on importing individual packages
+type AwsProvider struct {
 	// imageID is the AMI image-id to be used for creating Virtual Machine
 	imageID string
 	// instanceType is the flavor of VM to be used
@@ -56,7 +63,7 @@ type awsProvider struct {
 // The credentialAccountID should exist in the AWS credentials file pointing at one specific credential.
 // resourceTrackerDir is where created instance and security group information is stored.
 func New(openShiftClient *client.OpenShift, imageID, instanceType, sshKey, credentialPath, credentialAccountID,
-	resourceTrackerDir string) (*awsProvider, error) {
+	resourceTrackerDir string) (*AwsProvider, error) {
 	provider, err := openShiftClient.GetCloudProvider()
 	if err != nil {
 		return nil, err
@@ -65,7 +72,7 @@ func New(openShiftClient *client.OpenShift, imageID, instanceType, sshKey, crede
 	if err != nil {
 		return nil, err
 	}
-	return &awsProvider{imageID, instanceType, sshKey,
+	return &AwsProvider{imageID, instanceType, sshKey,
 		ec2.New(session, aws.NewConfig()),
 		iam.New(session, aws.NewConfig()),
 		openShiftClient,
@@ -97,9 +104,9 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // - logs id and security group information of the created instance in 'windows-node-installer.json' file at the
 // resourceTrackerDir.
 // On success, the function outputs RDP access information in the commandline interface.
-func (a *awsProvider) CreateWindowsVM() (rerr error) {
+func (a *AwsProvider) CreateWindowsVM() (rerr error) {
 	// Obtains information from AWS and the existing OpenShift cluster for creating an instance.
-	infraID, err := a.openShiftClient.GetInfrastructureID()
+	infraID, err := a.GetInfraID()
 	if err != nil {
 		return err
 	}
@@ -151,9 +158,19 @@ func (a *awsProvider) CreateWindowsVM() (rerr error) {
 	return nil
 }
 
+// GetInfraID returns the infrastructure ID associated with the OpenShift cluster. This is public for
+// testing purposes as of now.
+func (a *AwsProvider) GetInfraID() (string, error) {
+	infraID, err := a.openShiftClient.GetInfrastructureID()
+	if err != nil {
+		return "", fmt.Errorf("erroring getting OpenShift infrastructure ID associated with the cluster")
+	}
+	return infraID, nil
+}
+
 // DestroyWindowsVMs destroys the created instances and security groups on AWS specified in the
 // 'windows-node-installer.json' file. The security groups still in use by other instances will not be deleted.
-func (a *awsProvider) DestroyWindowsVMs() error {
+func (a *AwsProvider) DestroyWindowsVMs() error {
 	// Read from `windows-node-installer.json` file.
 	log.V(0).Info(fmt.Sprintf("processing file '%s'", a.resourceTrackerDir))
 	destroyList, err := resource.ReadInstallerInfo(a.resourceTrackerDir)
@@ -201,7 +218,7 @@ func (a *awsProvider) DestroyWindowsVMs() error {
 // getNetworkInterface is a wrapper function that includes all networking related work including getting OpenShift
 // cluster's VPC and its worker security group, a public subnet within the VPC, and a Windows security group.
 // It returns a valid ec2 network interface or an error.
-func (a *awsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkInterfaceSpecification, error) {
+func (a *AwsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkInterfaceSpecification, error) {
 	vpc, err := a.getInfrastructureVPC(infraID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VPC, %v", err)
@@ -230,7 +247,7 @@ func (a *awsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkI
 // createInstance creates one VM instance based on the given information and returns a instance struct with all its
 // information or an error if no instance is created. userDataInput is a plaintext input, this will be passed
 // and executed when launching the instance, it can be empty string if no data is given.
-func (a *awsProvider) createInstance(imageID, instanceType, sshKey string,
+func (a *AwsProvider) createInstance(imageID, instanceType, sshKey string,
 	networkInterface *ec2.InstanceNetworkInterfaceSpecification, iamProfile *ec2.IamInstanceProfileSpecification, userDataInput string) (
 	*ec2.Instance, error) {
 	runResult, err := a.EC2.RunInstances(&ec2.RunInstancesInput{
@@ -255,7 +272,7 @@ func (a *awsProvider) createInstance(imageID, instanceType, sshKey string,
 }
 
 // getInfrastructureVPC gets the VPC of a given infrastructure or returns error.
-func (a *awsProvider) getInfrastructureVPC(infraID string) (*ec2.Vpc, error) {
+func (a *AwsProvider) getInfrastructureVPC(infraID string) (*ec2.Vpc, error) {
 	vpc, err := a.getVPCByInfrastructure(infraID)
 	if err != nil {
 		return nil, err
@@ -268,7 +285,7 @@ func (a *awsProvider) getInfrastructureVPC(infraID string) (*ec2.Vpc, error) {
 // VPC. If no such security group exists, it creates a security group under the VPC with a group name
 // '<infraID>-windows-worker-sg'.
 // The function returns security group ID or error for both finding or creating a security group.
-func (a *awsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, error) {
+func (a *AwsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, error) {
 	sgID, err := a.findWindowsWorkerSg(infraID)
 	if err != nil {
 		return a.createWindowsWorkerSg(infraID, vpc)
@@ -277,7 +294,7 @@ func (a *awsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, erro
 }
 
 // findWindowsWorkerSg creates the Windows worker security group with name <infraID>-windows-worker-sg.
-func (a *awsProvider) createWindowsWorkerSg(infraID string, vpc *ec2.Vpc) (string, error) {
+func (a *AwsProvider) createWindowsWorkerSg(infraID string, vpc *ec2.Vpc) (string, error) {
 	sgName := strings.Join([]string{infraID, "windows", "worker", "sg"}, "-")
 	sg, err := a.EC2.CreateSecurityGroup(&ec2.CreateSecurityGroupInput{
 		GroupName:   aws.String(sgName),
@@ -304,7 +321,7 @@ func (a *awsProvider) createWindowsWorkerSg(infraID string, vpc *ec2.Vpc) (strin
 
 // authorizeSgIngress attaches inbound rules for RDP from user's external IP address and all traffic within the VPC
 // on newly created security group for Windows instance. The function returns error if failed.
-func (a *awsProvider) authorizeSgIngress(sgID string, vpc *ec2.Vpc) error {
+func (a *AwsProvider) authorizeSgIngress(sgID string, vpc *ec2.Vpc) error {
 	myIP, err := getMyIp()
 	if err != nil {
 		return err
@@ -346,7 +363,7 @@ func (a *awsProvider) authorizeSgIngress(sgID string, vpc *ec2.Vpc) error {
 }
 
 // findWindowsWorkerSg finds the Windows worker security group based on security group name <infraID>-windows-worker-sg.
-func (a *awsProvider) findWindowsWorkerSg(infraID string) (string, error) {
+func (a *AwsProvider) findWindowsWorkerSg(infraID string) (string, error) {
 	sgName := strings.Join([]string{infraID, "windows", "worker", "sg"}, "-")
 	sgs, err := a.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
 		Filters: []*ec2.Filter{
@@ -380,7 +397,7 @@ func getMyIp() (string, error) {
 
 // createInstanceNameTag creates a name tag for a created instance with format: <infraID>-windows-worker-<zone>-
 // <random 4 characters string>. The function returns a tagged instance Name or error if failed.
-func (a *awsProvider) createInstanceNameTag(instance *ec2.Instance, infraID string) (string, error) {
+func (a *AwsProvider) createInstanceNameTag(instance *ec2.Instance, infraID string) (string, error) {
 	zone, err := a.getInstanceZone(instance)
 	if err != nil {
 		return "", err
@@ -393,6 +410,13 @@ func (a *awsProvider) createInstanceNameTag(instance *ec2.Instance, infraID stri
 				Key:   aws.String("Name"),
 				Value: aws.String(instanceName),
 			},
+			// Add OpenShift tag, so that
+			// - The kubelet can communicate with cloud provider
+			// - TearDown & Reaper job in OpenShift CI can delete the virtual machine as part of cluster
+			{
+				Key:   aws.String(infraIDTagKeyPrefix + infraID),
+				Value: aws.String(infraIDTagValue),
+			},
 		},
 	})
 	if err != nil {
@@ -402,7 +426,7 @@ func (a *awsProvider) createInstanceNameTag(instance *ec2.Instance, infraID stri
 }
 
 // getInstanceZone gets the instance zone name (ie: us-east-1a) from the input instance struct or returns an error.
-func (a *awsProvider) getInstanceZone(instance *ec2.Instance) (string, error) {
+func (a *AwsProvider) getInstanceZone(instance *ec2.Instance) (string, error) {
 	if instance == nil || instance.Placement == nil || instance.Placement.AvailabilityZone == nil {
 		return "", fmt.Errorf("failed to get intance availbility zone")
 	}
@@ -410,12 +434,12 @@ func (a *awsProvider) getInstanceZone(instance *ec2.Instance) (string, error) {
 }
 
 // getVPCByInfrastructure finds the VPC of an infrastructure and returns the VPC struct or an error.
-func (a *awsProvider) getVPCByInfrastructure(infraID string) (*ec2.Vpc, error) {
+func (a *AwsProvider) getVPCByInfrastructure(infraID string) (*ec2.Vpc, error) {
 	res, err := a.EC2.DescribeVpcs(&ec2.DescribeVpcsInput{
 		Filters: []*ec2.Filter{
 			{
-				Name:   aws.String("tag:kubernetes.io/cluster/" + infraID),
-				Values: aws.StringSlice([]string{"owned"}),
+				Name:   aws.String("tag:" + infraIDTagKeyPrefix + infraID),
+				Values: aws.StringSlice([]string{infraIDTagValue}),
 			},
 			{
 				Name:   aws.String("state"),
@@ -436,7 +460,7 @@ func (a *awsProvider) getVPCByInfrastructure(infraID string) (*ec2.Vpc, error) {
 
 // getPublicSubnetId tries to find a public subnet under the VPC and returns subnet id or an error.
 // These subnets belongs to the OpenShift cluster.
-func (a *awsProvider) getPublicSubnetId(infraID string, vpc *ec2.Vpc) (string, error) {
+func (a *AwsProvider) getPublicSubnetId(infraID string, vpc *ec2.Vpc) (string, error) {
 	// search subnet by the vpcid owned by the vpcID
 	subnets, err := a.EC2.DescribeSubnets(&ec2.DescribeSubnetsInput{
 		Filters: []*ec2.Filter{
@@ -462,8 +486,24 @@ func (a *awsProvider) getPublicSubnetId(infraID string, vpc *ec2.Vpc) (string, e
 	return "", fmt.Errorf("could not find a public subnet in VPC: %v", *vpc.VpcId)
 }
 
+// GetInstance gets instance ec2 instance object from the given instanceID. We're making this method public
+// to use it in tests as of now.
+func (a *AwsProvider) GetInstance(instanceID string) (*ec2.Instance, error) {
+	instances, err := a.EC2.DescribeInstances(&ec2.DescribeInstancesInput{
+		InstanceIds: aws.StringSlice([]string{instanceID}),
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	if len(instances.Reservations) < 1 || len(instances.Reservations[0].Instances) < 1 {
+		return nil, fmt.Errorf("instance does not exist")
+	}
+	return instances.Reservations[0].Instances[0], err
+}
+
 // getClusterWorkerSGID gets worker security group id from the existing cluster or returns an error.
-func (a *awsProvider) getClusterWorkerSGID(infraID string) (string, error) {
+func (a *AwsProvider) getClusterWorkerSGID(infraID string) (string, error) {
 	sg, err := a.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
 		Filters: []*ec2.Filter{
 			{
@@ -471,8 +511,8 @@ func (a *awsProvider) getClusterWorkerSGID(infraID string) (string, error) {
 				Values: aws.StringSlice([]string{fmt.Sprintf("%s-worker-sg", infraID)}),
 			},
 			{
-				Name:   aws.String("tag:kubernetes.io/cluster/" + infraID),
-				Values: aws.StringSlice([]string{"owned"}),
+				Name:   aws.String("tag:" + infraIDTagKeyPrefix + infraID),
+				Values: aws.StringSlice([]string{infraIDTagValue}),
 			},
 		},
 	})
@@ -486,7 +526,7 @@ func (a *awsProvider) getClusterWorkerSGID(infraID string) (string, error) {
 }
 
 // getIAMWorkerRole gets worker IAM information from the existing cluster including IAM arn or an error.
-func (a *awsProvider) getIAMWorkerRole(infraID string) (*ec2.IamInstanceProfileSpecification, error) {
+func (a *AwsProvider) getIAMWorkerRole(infraID string) (*ec2.IamInstanceProfileSpecification, error) {
 	iamspc, err := a.IAM.GetInstanceProfile(&iam.GetInstanceProfileInput{
 		InstanceProfileName: aws.String(fmt.Sprintf("%s-worker-profile", infraID)),
 	})
@@ -500,7 +540,7 @@ func (a *awsProvider) getIAMWorkerRole(infraID string) (*ec2.IamInstanceProfileS
 
 // isSGInUse checks if the security group is used by any existing instances and returns true only if it is certain
 // that the security group is in use and logs the list of instances using the group.
-func (a *awsProvider) isSGInUse(sgID string) (bool, error) {
+func (a *AwsProvider) isSGInUse(sgID string) (bool, error) {
 	instances, err := a.EC2.DescribeInstances(&ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			{
@@ -530,7 +570,7 @@ func (a *awsProvider) isSGInUse(sgID string) (bool, error) {
 }
 
 // deleteSG checks if security group is in use, deletes it if not in use based on sgID, and returns error if fails.
-func (a *awsProvider) deleteSG(sgID string) error {
+func (a *AwsProvider) deleteSG(sgID string) error {
 	sgInUse, err := a.isSGInUse(sgID)
 	if err != nil {
 		return err
@@ -546,7 +586,7 @@ func (a *awsProvider) deleteSG(sgID string) error {
 }
 
 // terminateInstance will delete an AWS instance based on instance id and returns error if deletion fails.
-func (a *awsProvider) terminateInstance(instanceID string) error {
+func (a *AwsProvider) terminateInstance(instanceID string) error {
 	_, err := a.EC2.TerminateInstances(&ec2.TerminateInstancesInput{
 		InstanceIds: aws.StringSlice([]string{instanceID}),
 	})
@@ -556,7 +596,7 @@ func (a *awsProvider) terminateInstance(instanceID string) error {
 // waitUntilInstanceRunning waits until the instance is running and returns error if timeout or instance goes
 // to other states.The wait function tries for 40 times to see the instance in running state with 15 seconds in
 // between or returns error.
-func (a *awsProvider) waitUntilInstanceRunning(instanceID string) error {
+func (a *AwsProvider) waitUntilInstanceRunning(instanceID string) error {
 	return a.EC2.WaitUntilInstanceRunning(&ec2.DescribeInstancesInput{
 		InstanceIds: aws.StringSlice([]string{instanceID}),
 	})
@@ -565,7 +605,7 @@ func (a *awsProvider) waitUntilInstanceRunning(instanceID string) error {
 // waitUntilInstanceTerminated waits until the instance is terminated and returns error if timeout or instance goes
 // to other states. The wait function tries for 40 times to see the instance terminated with 15 seconds in between or
 // returns error.
-func (a *awsProvider) waitUntilInstanceTerminated(instanceID string) error {
+func (a *AwsProvider) waitUntilInstanceTerminated(instanceID string) error {
 	return a.EC2.WaitUntilInstanceTerminated(&ec2.DescribeInstancesInput{
 		InstanceIds: aws.StringSlice([]string{instanceID}),
 	})
