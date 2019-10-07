@@ -41,7 +41,7 @@ func init() {
 func newAZCmd() *cobra.Command {
 	azureCmd := &cobra.Command{
 		Use:   "azure",
-		Short: "Takes azure specific resource names from user",
+		Short: "Takes azure specific inputs from user",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return requiredAZFlags(cmd)
 		},
@@ -54,7 +54,7 @@ func newAZCmd() *cobra.Command {
 	return azureCmd
 }
 
-// requiredazureFlags defines required flags for createInfo.
+// requiredAZFlags defines required flags for createInfo.
 func requiredAZFlags(azureCmd *cobra.Command) error {
 	err := azureCmd.MarkPersistentFlagRequired("credentials")
 	if err != nil {
@@ -74,13 +74,13 @@ func setEnvVariable(filePath string) (subscriptionID string, err error) {
 	return
 }
 
-// createCmd defines `create` command and creates a Windows instance using parameters from the persistent flags to
-// fill up information in azCreateFlagInfo.
+// azCreateCmd defines `create` command and creates a Windows instance using parameters from the persistent flags to
+// fill up fields in azCreateFlagInfo.
 func azCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a Windows node on the Azure cloud provider.",
-		Long: "creates a Windows instance under the same Vnet of" +
+		Short: "create a windows node on the Azure cloud provider.",
+		Long: "creates a windows node under the same Vnet of" +
 			"the existing OpenShift cluster. " +
 			"The created instance would be used as a worker node for the OpenShift Cluster.",
 		TraverseChildren: true,
@@ -119,17 +119,19 @@ func azCreateCmd() *cobra.Command {
 		},
 	}
 
-	// specify the urn of the image-id, by default "MicrosoftWindowsServer:WindowsServer:2019-Datacenter:latest" is considered, but to override
-	// pass the value with flag `image-id`.
-	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.imageID, "image-id", "MicrosoftWindowsServer:WindowsServer:2019-Datacenter-with-Containers:latest",
-		"image-id to be used for node creation, for more info "+
-			"https://docs.microsoft.com/bs-latn-ba/azure/virtual-machines/windows/cli-ps-findimage#table-of-commonly-used-windows-images\n")
+	// specify the urn of the image-id, by default "MicrosoftWindowsServer:WindowsServer:2019-Datacenter:latest"
+	// is considered, but to override pass the value with flag `image-id`.
+	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.imageID, "image-id",
+		"MicrosoftWindowsServer:WindowsServer:2019-Datacenter-with-Containers:latest",
+		"image-id to be used for node creation, for more info\n"+
+			"https://docs.microsoft.com/bs-latn-ba/azure/virtual-machines/windows/cli-ps-findimage"+
+			"#table-of-commonly-used-windows-images\n")
 
 	// specify the instance flavor for the node to be created, by default "Basic_A1" is considered, but to override
 	// pass the value with flag `instance-type`.
 	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.instanceType, "instance-type", "Standard_B1s",
 		"instance-type for node creation, for more info "+
-			"https://docs.microsoft.com/en-us/azure/virtual-machines/linux/sizes-general#b-series")
+			" https://docs.microsoft.com/en-us/azure/virtual-machines/linux/sizes-general#b-series")
 
 	// provide the value for `ipName` argument if the installer doesn't want to create one, by default it will create
 	// one even though we explicitly give `""`.
@@ -137,13 +139,13 @@ func azCreateCmd() *cobra.Command {
 		"ip resource name for the node to login")
 
 	// provide the value for `nicName` argument if the installer doesn't want to create one, by default it will create
-	// one even though we explicitly give `""`. This is implemented considering UPI into perspective
+	// one even though we explicitly give `""`.
 	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.nicName, "nicName", "",
 		"nic resource name for the node")
 	return cmd
 }
 
-// destroyCmd defines `destroy` command and destroys resources specified in 'windows-node-installer.json' file.
+// azDestroyCmd defines `destroy` command and destroys resources specified in 'windows-node-installer.json' file.
 func azDestroyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "destroy",

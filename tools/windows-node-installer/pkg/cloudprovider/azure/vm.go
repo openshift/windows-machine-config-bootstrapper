@@ -14,7 +14,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-04-01/network"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
@@ -28,9 +27,9 @@ var windowsWorker string = "winworker-"
 // AzureProvider holds azure platform specific information required for creating/deleting
 // the windows node.
 type AzureProvider struct {
-	// vnetClient to query for vnet related info.
+	// vnetClient to get Virtual Network related info.
 	vnetClient network.VirtualNetworksClient
-	// vmClient for instance management operations.
+	// vmClient to query for instance related operations.
 	vmClient compute.VirtualMachinesClient
 	// ipClient to query for IP related operations.
 	ipClient network.PublicIPAddressesClient
@@ -77,7 +76,7 @@ func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
 	}
 
 	infraID, _ := openShiftClient.GetInfrastructureID()
-	resourceAuthorizer, err := auth.NewAuthorizerFromFile(azure.PublicCloud.ResourceManagerEndpoint)
+	resourceAuthorizer, err := auth.NewAuthorizerFromCLI()
 	if errorCheck(err) {
 		return nil, err
 	}

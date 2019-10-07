@@ -69,29 +69,24 @@ Security groups will not be deleted if they are still in-use by other instances.
 
 
 ### Azure Platform 
-Generate Service Principal:
-The wni tool requires a service principal credential file for Azure Platform to access the resources defined within the
-scope of the ID. To create one we do
-```bash
-az ad sp create-for-rbac --sdk-auth > azure.auth
-```
-This assumes that one have already set up the Azure CLI client, here we are creating one that is compatible with Azure SDK
-auth file to connect and authenticate with Azure.
-
 Create Instance:
-We can create instance with using azure create subcommand, Currently all the flags in create subcommand are optional, i.e all have `""` as a default value.
-One can also provide already created resources such IP & NIC names via `ipName`, `nicName` towards node creation if you don't want the installer to create one.
-The other arguments are `image-id` and  `instance-type` which deals with OS and the size settings for the virtual machine. The `image-id` is a URN which is a
-combination of Publisher:Offer:Sku:Version ex:`RedHat:RHEL:7.4:latest`. Once the instance is created successfully a file will be created under instance name in the `dir` explaining the steps on accessing the instance. For any reason if it couldn't write the data into a file it writes output into the STDOUT.
+We can create instance with using azure create subcommand, Currently all the flags in create subcommand are optional,
+i.e they don't expect the user to fill in the values. One can also provide already created resources such IP & NIC names via 
+`ipName`, `nicName` towards node creation if you don't want the installer to create one. The other arguments are 
+`image-id` and  `instance-type` which deals with OS and the size settings for the virtual machine. The `image-id` is a URN which 
+is a combination of Publisher:Offer:Sku:Version ex:`RedHat:RHEL:7.4:latest`. Once the instance is created successfully a file 
+will be created under instance name in the `dir`explaining the steps on accessing the instance. For any reason if it couldn't write 
+the data into a file it writes output into the STDOUT. 
 For more info on the details please visit `--help` on azure create subcommand.
 
 Sample Create Command:
 ```bash
-./wni azure create --kubeconfig ~/OpenShift/azure/auth/kubeconfig --image-id RedHat:RHEL:7.4:latest --instance-type Standard_B1s 
---credentials /home/vinaykns/OpenShift/azure.auth --dir ~/windowsnodeinstaller/
+./wni azure create --kubeconfig ~/OpenShift/azure/auth/kubeconfig --image-id MicrosoftWindowsServer:WindowsServer:2019-Datacenter:latest 
+--instance-type Standard_B1s --credentials ~/.azure/osServicePrincipal.json --dir ~/windowsnodeinstaller/
 
 ```
 Sample Delete Command:
 ```bash
-./wni azure destroy --kubeconfig ~/OpenShift/azure/auth/kubeconfig --credentials /home/vinaykns/OpenShift/azure.auth --dir ~/windowsnodeinstaller/
+./wni azure destroy --kubeconfig ~/OpenShift/azure/auth/kubeconfig --credentials ~/.azure/osServicePrincipal.json 
+--dir ~/windowsnodeinstaller/
 ```
