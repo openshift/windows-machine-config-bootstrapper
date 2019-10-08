@@ -290,7 +290,79 @@ func (a *AwsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, erro
 	if err != nil {
 		return a.createWindowsWorkerSg(infraID, vpc)
 	}
+
+	log.Info(fmt.Sprintf("Using existing Security Group: %s.", sgID))
+
+	// Check winrm port open status for the exist security group
+	portOpen, err := a.checkSgWinrmPort(sgID)
+	if err != nil {
+		return "", err
+	}
+
+	// Add winrm port to security group if it doesn't exist
+	if !portOpen {
+		err := a.addWinrmPortToSg(sgID)
+		if err != nil {
+			return "", err
+		}
+		log.Info(fmt.Sprintf("Winrm port is now added to Security Group %s", sgID))
+	} else {
+		log.Info(fmt.Sprintf("Winrm port already opened for Security Group: %s.", sgID))
+	}
+
 	return sgID, nil
+}
+
+// checkSgWinrmPort checks whether the winrm https port is opened in the given security group.
+// Return boolean for the checking result.
+func (a *AwsProvider) checkSgWinrmPort(sgId string) (bool, error) {
+	// Get security group information
+	SgResult, err := a.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
+		GroupIds: []*string{
+			aws.String(sgId),
+		},
+	})
+	if err != nil {
+		return false, err
+	}
+
+	// Search winrm port in the inbound rule of the security group
+	for _, rule := range SgResult.SecurityGroups[0].IpPermissions {
+		if rule.FromPort != nil && *rule.FromPort == WINRM_PORT {
+			return true, nil
+		}
+	}
+	log.Info(fmt.Sprintf("Winrm port is not open for Security Group: %s.", sgId))
+	return false, nil
+}
+
+// createWinrmPortToSg creates winrm https port 5986 for the given security group. If the port
+// doesn't not exist in the security group notify the user and generate one for the user.
+func (a *AwsProvider) addWinrmPortToSg(sgId string) error {
+	myIP, err := getMyIp()
+	if err != nil {
+		return err
+	}
+
+	// Add winrm https port to security group
+	log.Info(fmt.Sprintf("Adding winrm https port to Security Group %s", sgId))
+	_, err = a.EC2.AuthorizeSecurityGroupIngress(&ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId: aws.String(sgId),
+		IpPermissions: []*ec2.IpPermission{
+			(&ec2.IpPermission{}).
+				SetIpProtocol("tcp").
+				SetFromPort(WINRM_PORT).
+				SetToPort(WINRM_PORT).
+				SetIpRanges([]*ec2.IpRange{
+					(&ec2.IpRange{}).
+						SetCidrIp(myIP + "/32"),
+				}),
+		},
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // findWindowsWorkerSg creates the Windows worker security group with name <infraID>-windows-worker-sg.
