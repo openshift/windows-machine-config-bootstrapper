@@ -174,13 +174,10 @@ var cloudProviderRegex = regexp.MustCompile(`--cloud-provider=(\w*)`)
 // verbosityRegex searches for the verbosity option given to the kubelet
 var verbosityRegex = regexp.MustCompile(`--v=(\w*)`)
 
-// parseIgnitionFile parses the ignition file and writes the contents of the described files
-// to the k8s installation directory
-func (wmcb *winNodeBootstrapper) parseIgnitionFile(ignitionFilePath string, filesToTranslate map[string]fileTranslation) error {
-	ignitionFileContents, err := ioutil.ReadFile(ignitionFilePath)
-	if err != nil {
-		return err
-	}
+// parseIgnitionFileContents parses the ignition file contents and writes the contents of the described files to the k8s
+// installation directory
+func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents []byte,
+	filesToTranslate map[string]fileTranslation) error {
 	// Parse configuration file
 	configuration, _, err := ignitionv2.Parse(ignitionFileContents)
 	if err != nil {
@@ -243,7 +240,12 @@ func (wmcb *winNodeBootstrapper) initializeKubelet() error {
 	}
 	// Populate destination directory with the files we need
 	if wmcb.ignitionFilePath != "" {
-		err = wmcb.parseIgnitionFile(wmcb.ignitionFilePath, filesToTranslate)
+		ignitionFileContents, err := ioutil.ReadFile(wmcb.ignitionFilePath)
+		if err != nil {
+			return fmt.Errorf("could not read ignition file: %s", err)
+		}
+
+		err = wmcb.parseIgnitionFileContents(ignitionFileContents, filesToTranslate)
 		if err != nil {
 			return fmt.Errorf("could not parse ignition file: %s", err)
 		}
