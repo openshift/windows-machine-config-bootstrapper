@@ -68,15 +68,14 @@ The `wni` destroys all resources (instances and security groups) specified in th
 Security groups will not be deleted if they are still in-use by other instances.
 
 
-### Azure Platform 
+### Azure Platform
 Create Instance:
-We can create instance with using azure create subcommand, Currently all the flags in create subcommand are optional,
-i.e they don't expect the user to fill in the values. One can also provide already created resources such IP & NIC names via 
-`ipName`, `nicName` towards node creation if you don't want the installer to create one. The other arguments are 
-`image-id` and  `instance-type` which deals with OS and the size settings for the virtual machine. The `image-id` is a URN which 
-is a combination of Publisher:Offer:Sku:Version ex:`RedHat:RHEL:7.4:latest`. Once the instance is created successfully a file 
-will be created under instance name in the `dir`explaining the steps on accessing the instance. For any reason if it couldn't write 
-the data into a file it writes output into the STDOUT. 
+We can create instance with using azure create subcommand, Currently all the flags in create subcommand are optional, i.e they don't expect 
+the user to fill in the values. One can also provide already created resources such IP & NIC names via `ipName`, `nicName` towards node creation 
+if you don't want the installer to create one. The other arguments are `image-id` and  `instance-type` which deals with OS and the size settings 
+for the virtual machine. The `image-id` is a URN which is a combination of Publisher:Offer:Sku:Version ex:`RedHat:RHEL:7.4:latest`. Once the instance is 
+created successfully a file will be created under instance name in the `dir`explaining the steps on accessing the instance. For any reason if it 
+couldn't write the data into a file it writes output into the STDOUT. 
 For more info on the details please visit `--help` on azure create subcommand.
 
 Sample Create Command:
@@ -89,4 +88,5 @@ Sample Delete Command:
 ```bash
 ./wni azure destroy --kubeconfig ~/OpenShift/azure/auth/kubeconfig --credentials ~/.azure/osServicePrincipal.json 
 --dir ~/windowsnodeinstaller/
+
 ```

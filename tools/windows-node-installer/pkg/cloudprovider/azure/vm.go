@@ -14,6 +14,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-04-01/network"
 	"github.com/Azure/go-autorest/autorest"
+	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
@@ -63,9 +64,9 @@ type AzureProvider struct {
 	resourceTrackerDir string
 }
 
-// New returns cloud specific interface for performing necessary functions related to creating or
+// New returns azure interface for performing necessary functions related to creating or
 // destroying an instance.
-// It takes in kubeconfig of an existing OpenShift cluster and a azure specific credential file.
+// It takes in kubeconfig of an existing OpenShift cluster and an azure specific credential file.
 // The resourceTrackerDir is where the `windows-node-installer.json` file which contains IDs of created instance and
 // security group will be created.
 func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
@@ -76,7 +77,7 @@ func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
 	}
 
 	infraID, _ := openShiftClient.GetInfrastructureID()
-	resourceAuthorizer, err := auth.NewAuthorizerFromCLI()
+	resourceAuthorizer, err := auth.NewAuthorizerFromFileWithResource(azure.PublicCloud.ResourceManagerEndpoint)
 	if errorCheck(err) {
 		return nil, err
 	}
@@ -187,16 +188,25 @@ func getMyIP() (ip *string, err error) {
 
 // getvnetProfile gets the vnet Profile of the existing openshift cluster.
 // there exists a single vnet in the openshift cluster.
-func (az *AzureProvider) getvnetProfile(ctx context.Context) (vnetProfile network.VirtualNetwork) {
+func (az *AzureProvider) getvnetProfile(ctx context.Context) (vnetProfile *network.VirtualNetwork, err error) {
 	vnetList, err := az.vnetClient.List(ctx, az.resourceGroupName)
 	if errorCheck(err) {
-		fmt.Errorf("cannot get the vnetProfile info: %v", err)
-		return
+		return nil, err
 	}
 	vnetListValues := vnetList.Values()
 	if len(vnetListValues) > 0 {
-		vnetProfile = vnetListValues[0]
+		vnetProfile = &vnetListValues[0]
 	}
+	return
+}
+
+// getvnetLocation returns the location of the vnet of the existing openshift cluster.
+func (az *AzureProvider) getvnetLocation(ctx context.Context) (location *string) {
+	vnetProfile, err := az.getvnetProfile(ctx)
+	if errorCheck(err) {
+		return nil
+	}
+	location = vnetProfile.Location
 	return
 }
 
@@ -213,8 +223,8 @@ func extractResourceName(rawresource string) (name string) {
 // createPublicIP creates the public IP for the instance
 func (az *AzureProvider) createPublicIP(ctx context.Context) (ip *network.PublicIPAddress, err error) {
 	var nodeLocation string
-	if !checkForNil(az.getvnetProfile(ctx).Location) {
-		nodeLocation = *(az.getvnetProfile(ctx).Location)
+	if !checkForNil(az.getvnetLocation(ctx)) {
+		nodeLocation = *(az.getvnetLocation(ctx))
 	} else {
 		return nil, fmt.Errorf("cannot get location of the openshift cluster: %v", err)
 	}
@@ -249,8 +259,8 @@ func (az *AzureProvider) createPublicIP(ctx context.Context) (ip *network.Public
 func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, nsgName,
 	ipConfigName string) (nic *network.Interface, err error) {
 	var nodeLocation string
-	if !checkForNil(az.getvnetProfile(ctx).Location) {
-		nodeLocation = *(az.getvnetProfile(ctx).Location)
+	if !checkForNil(az.getvnetLocation(ctx)) {
+		nodeLocation = *(az.getvnetLocation(ctx))
 	} else {
 		return nil, fmt.Errorf("cannot get location of the openshift cluster: %v", err)
 	}
@@ -304,12 +314,12 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 	return &nic_info, err
 }
 
-// createSecurityGroup tries to create a security group that allows to RDP to the windows node and allow for all the traffic
+// createSecurityGroupRules tries to create new security group rules that allows to RDP to the windows node and allow for all the traffic
 // coming from the nodes that belong to the same VNET.
-func (az *AzureProvider) createSecurityGroup(ctx context.Context, nsgName string) (err error) {
+func (az *AzureProvider) createSecurityGroupRules(ctx context.Context, nsgName string) (err error) {
 	var nodeLocation string
-	if !checkForNil(az.getvnetProfile(ctx).Location) {
-		nodeLocation = *(az.getvnetProfile(ctx).Location)
+	if !checkForNil(az.getvnetLocation(ctx)) {
+		nodeLocation = *(az.getvnetLocation(ctx))
 	} else {
 		return fmt.Errorf("cannot get location of the openshift cluster: %v", err)
 	}
@@ -467,7 +477,10 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
 	adminUserName := "core"
 	adminPassword := randomPasswordString(12)
 	computeWinRMConfig := constructWinRMConfig()
-	nodeLocation := *(az.getvnetProfile(ctx).Location)
+	var nodeLocation string
+	if !checkForNil(az.getvnetLocation(ctx)) {
+		nodeLocation = *(az.getvnetLocation(ctx))
+	}
 	timeZoneMap := getTimeZoneMap()
 	osProfile = &compute.OSProfile{
 		ComputerName:  to.StringPtr(instanceName),
@@ -488,12 +501,17 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
 // and if multiple ID's need to be configured select which one need to be primary.
 func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 	vmName string) (networkProfile *compute.NetworkProfile, err error) {
-	vnetProfile := az.getvnetProfile(ctx)
 	var index int
 	var vnetName, subnetName string
 	var subnetList []network.Subnet
 	var subnetProperties network.SubnetPropertiesFormat
 	var nsgStruct network.SecurityGroup
+	var vnetProfile *network.VirtualNetwork
+
+	vnetProfile, err = az.getvnetProfile(ctx)
+	if errorCheck(err) {
+		return nil, fmt.Errorf("cannot get vnet profile")
+	}
 
 	if !checkForNil(vnetProfile.Name) {
 		vnetName = *(vnetProfile.Name)
@@ -532,15 +550,15 @@ func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 	if !checkForNil(nsgStruct.ID) {
 		nsgID := *(nsgStruct.ID)
 		nsgName = extractResourceName(nsgID)
-		err := az.createSecurityGroup(ctx, nsgName)
+		err := az.createSecurityGroupRules(ctx, nsgName)
 		if errorCheck(err) {
-			return nil, fmt.Errorf("failed to create security group rules: %v", err)
+			return nil, fmt.Errorf("failed to update security group rules: %v", err)
 		}
 	} else {
 		nsgName = az.generateResourceName("nsg", vmRandString)
-		err := az.createSecurityGroup(ctx, nsgName)
+		err := az.createSecurityGroupRules(ctx, nsgName)
 		if errorCheck(err) {
-			return nil, fmt.Errorf("failed to create security group rules: %v", err)
+			return nil, fmt.Errorf("failed to update security group rules: %v", err)
 		}
 	}
 	az.NsgName = nsgName
@@ -610,13 +628,12 @@ func (az *AzureProvider) CreateWindowsVM() (err error) {
 	log.Info(fmt.Sprintf("constructed the network profile for the node"))
 
 	log.Info(fmt.Sprintf("constructed all the profiles, about to create instance."))
-	nodeLocation := *(az.getvnetProfile(ctx).Location)
 	future, err := az.vmClient.CreateOrUpdate(
 		ctx,
 		az.resourceGroupName,
 		instanceName,
 		compute.VirtualMachine{
-			Location: to.StringPtr(nodeLocation),
+			Location: az.getvnetLocation(ctx),
 			VirtualMachineProperties: &compute.VirtualMachineProperties{
 				HardwareProfile: vmHardwareProfile,
 				StorageProfile:  vmStorageProfile,
@@ -652,7 +669,7 @@ func (az *AzureProvider) CreateWindowsVM() (err error) {
 	}
 	resultData := fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:'%s' \n", *ipAddress, adminPassword)
 	resultPath := az.resourceTrackerDir + instanceName
-	err = resource.StoreResultData(resultPath, resultData)
+	err = resource.StoreCredentialData(resultPath, resultData)
 	if errorCheck(err) {
 		log.Error(err, fmt.Sprintf("unable to write data into file"))
 		log.Info(fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:%s", *ipAddress, adminPassword))
@@ -677,7 +694,7 @@ func (az *AzureProvider) getNICname(ctx context.Context, vmName string) (err err
 	return nil, nicName
 }
 
-// returnNicIpdetails returns ipName by taking instance name as an argument.
+// getIPname returns ipName by taking instance name as an argument.
 func (az *AzureProvider) getIPname(ctx context.Context, vmName string) (err error, ipName string) {
 	vmStruct, err := az.vmClient.Get(ctx, az.resourceGroupName, vmName, "instanceView")
 	if err != nil {
@@ -747,7 +764,7 @@ func (az *AzureProvider) deleteSpecificRule(s []network.SecurityRule, name strin
 	return
 }
 
-// destroyNSG deletes the security group rules by taking it's name as argument.
+// updateNSGRules deletes the security group rules by taking it's name as argument.
 // it deletes the rdp and vnet_traffic rules from the worker subnet security group rules.
 func (az *AzureProvider) updateNSGRules(ctx context.Context, nsgName string) (err error) {
 	var secGroupPropFormat network.SecurityGroupPropertiesFormat
@@ -773,7 +790,7 @@ func (az *AzureProvider) updateNSGRules(ctx context.Context, nsgName string) (er
 		az.resourceGroupName,
 		nsgName,
 		network.SecurityGroup{
-			Location: to.StringPtr(*(az.getvnetProfile(ctx).Location)),
+			Location: az.getvnetLocation(ctx),
 			SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
 				SecurityRules: &secGroupRules,
 			},
@@ -796,7 +813,6 @@ func (az *AzureProvider) destroyDisk(ctx context.Context, vmInfo compute.Virtual
 	vmStorageProfile := *(vmInfo.VirtualMachineProperties.StorageProfile)
 	vmOSdiskProperties := *(vmStorageProfile.OsDisk)
 	diskName := *(vmOSdiskProperties.Name)
-	az.diskClient.PollingDuration = time.Minute * 10
 	_, err = az.diskClient.Delete(ctx, az.resourceGroupName, diskName)
 	if errorCheck(err) {
 		log.Error(err, fmt.Sprintf("failed to delete the root disk: %s", diskName))
@@ -850,7 +866,7 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 		}
 
 		rdpFilePath := az.resourceTrackerDir + vmName
-		err = resource.DeleteResultData(rdpFilePath)
+		err = resource.DeleteCredentialData(rdpFilePath)
 		if errorCheck(err) {
 			log.Error(err, fmt.Sprintf("unable to remove the file: %s", rdpFilePath))
 		}
@@ -861,7 +877,7 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 	for _, nsgName := range installerInfo.SecurityGroupIDs {
 		err = az.updateNSGRules(ctx, nsgName)
 		if !errorCheck(err) {
-			log.Info(fmt.Sprintf("deleted the security group rule '%s'", nsgName))
+			log.Info(fmt.Sprintf("updated the security group rules '%s'", nsgName))
 		}
 
 		deletedSg = append(deletedSg, nsgName)

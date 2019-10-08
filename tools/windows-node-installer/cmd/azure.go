@@ -129,7 +129,7 @@ func azCreateCmd() *cobra.Command {
 
 	// specify the instance flavor for the node to be created, by default "Basic_A1" is considered, but to override
 	// pass the value with flag `instance-type`.
-	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.instanceType, "instance-type", "Standard_B1s",
+	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.instanceType, "instance-type", "Standard_B2ms",
 		"instance-type for node creation, for more info "+
 			" https://docs.microsoft.com/en-us/azure/virtual-machines/linux/sizes-general#b-series")
 
