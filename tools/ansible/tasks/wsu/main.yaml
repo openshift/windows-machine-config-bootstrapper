@@ -1,0 +1,58 @@
+---
+- hosts: localhost
+  vars:
+    project_root: "{{ playbook_dir }}/../../../.."
+    kubelet_location: "https://dl.k8s.io/v1.14.0/kubernetes-node-windows-amd64.tar.gz"
+    wmcb_exe: "wmcb.exe"
+
+  tasks:
+    - name: Gather required files
+      block:
+
+        - name: Create directory to store files to be used later
+          tempfile:
+            state: directory
+          register: tmp_dir
+
+        - name: Build WMCB
+          make:
+            target: build
+            chdir: "{{ project_root }}"
+
+        - name: Move WMCB to temporary directory
+          command: mv "{{ project_root }}/{{ wmcb_exe }}" "{{ tmp_dir.path }}/{{ wmcb_exe }}"
+
+        - name: Download Windows node kubelet
+          get_url:
+            url: "{{ kubelet_location }}"
+            dest: "{{ tmp_dir.path }}/kube.tar.gz"
+
+        - name: Extract kubelet
+          unarchive:
+            src: "{{ tmp_dir.path }}/kube.tar.gz"
+            dest: "{{ tmp_dir.path }}"
+
+        - name: Grab kubelet from extracted directories
+          copy:
+            src: "./tmp/kubernetes/node/bin/kubelet.exe"
+            dest: "./tmp/kubelet.exe"
+
+- hosts: win
+  vars:
+    tmp_path: "{{ playbook_dir }}/tmp"
+
+  tasks:
+    - name: Create temporary directory
+      win_tempfile:
+        state: directory
+      register: win_temp_dir
+    - name: Copy required files to Windows host
+      win_copy:
+        src: "{{ hostvars['localhost']['tmp_dir']['path'] }}/"
+        dest: "{{ win_temp_dir.path }}"
+
+    - name: Get ignition file
+      win_get_url:
+        url: "https://api-int.{{ cluster_address }}:22623/config/worker"
+        dest: "{{ win_temp_dir.path }}\\worker.ign"
+        validate_certs: no
