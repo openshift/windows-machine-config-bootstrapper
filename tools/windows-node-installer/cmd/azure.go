@@ -41,7 +41,7 @@ func init() {
 func newAZCmd() *cobra.Command {
 	azureCmd := &cobra.Command{
 		Use:   "azure",
-		Short: "Takes azure specific resource names from user",
+		Short: "Create and destroy windows instances in azure",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return requiredAZFlags(cmd)
 		},
@@ -79,7 +79,7 @@ func setEnvVariable(filePath string) (subscriptionID string, err error) {
 func azCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "create a windows node on the Azure cloud provider.",
+		Short: "Create a windows instance on the Azure cloud provider.",
 		Long: "creates a windows node under the same Vnet of" +
 			"the existing OpenShift cluster. " +
 			"The created instance would be used as a worker node for the OpenShift Cluster.",

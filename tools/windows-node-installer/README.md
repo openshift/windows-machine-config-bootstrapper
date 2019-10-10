@@ -32,8 +32,8 @@ requires extra information such as image id and instance type. Some optional fla
 windows-node-installer.json file and log level display. For more information please 
 visit `--help` for any commands or sub-commands.
 Available Commands:
-  aws         Takes aws specific resource names from user
-  azure       Takes azure specific resource names from user
+  aws         Create and destroy windows instances in aws
+  azure       Create and destroy windows instances in azure
   help        Help about any command
 
 ## AWS Platform
@@ -74,8 +74,8 @@ Security groups will not be deleted if they are still in-use by other instances.
 
 We can create an instance using azure create subcommand, Currently all the flags in create subcommand are optional, i.e they don't expect 
 the user to fill in the values. One can also provide already created resources such IP & NIC names via `ipName`, `nicName` options towards 
-node creation if you don't want the installer to create one. The other arguments are `image-id` and  `instance-type` which deals with OS and 
-the size settings for the virtual machine. The `image-id` is a URN which is a combination of Publisher:Offer:Sku:Version ex:`RedHat:RHEL:7.4:latest`. 
+node creation if you don't want the installer to create one. The other arguments are `image-id` and  `instance-type` which deals with OS 
+and the size settings for the virtual machine. The `image-id` is a URN which is a combination of Publisher:Offer:Sku:Version ex:`RedHat:RHEL:7.4:latest`. 
 Once the instance is created successfully a file will be created under instance name in the `dir` explaining the steps on accessing the instance,
 please make sure the `dir` exists. For any reason if it couldn't write the data into a file it writes output into the STDOUT. 
 For more info on the details please visit `--help` on azure create subcommand.
