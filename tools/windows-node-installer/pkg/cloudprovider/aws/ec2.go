@@ -114,7 +114,7 @@ func (a *AwsProvider) CreateWindowsVM() (rerr error) {
 	if err != nil {
 		return fmt.Errorf("failed to get network interface, %v", err)
 	}
-	workerIAM, err := a.getIAMWorkerRole(infraID)
+	workerIAM, err := a.GetIAMWorkerRole(infraID)
 	if err != nil {
 		return fmt.Errorf("failed to get cluster worker IAM, %v", err)
 	}
@@ -182,7 +182,7 @@ func (a *AwsProvider) DestroyWindowsVMs() error {
 
 	// Delete all instances from the json file.
 	for _, instanceID := range destroyList.InstanceIDs {
-		err = a.terminateInstance(instanceID)
+		err = a.TerminateInstance(instanceID)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("failed to terminate instance: %s", instanceID))
 		}
@@ -199,7 +199,7 @@ func (a *AwsProvider) DestroyWindowsVMs() error {
 
 	// Delete security groups after associated instances are terminated.
 	for _, sgID := range destroyList.SecurityGroupIDs {
-		err = a.deleteSG(sgID)
+		err = a.DeleteSG(sgID)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("failed to delete security group: %s", sgID))
 		} else {
@@ -223,7 +223,7 @@ func (a *AwsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkI
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VPC, %v", err)
 	}
-	workerSG, err := a.getClusterWorkerSGID(infraID)
+	workerSG, err := a.GetClusterWorkerSGID(infraID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cluster worker security group, %v", err)
 	}
@@ -273,7 +273,7 @@ func (a *AwsProvider) createInstance(imageID, instanceType, sshKey string,
 
 // getInfrastructureVPC gets the VPC of a given infrastructure or returns error.
 func (a *AwsProvider) getInfrastructureVPC(infraID string) (*ec2.Vpc, error) {
-	vpc, err := a.getVPCByInfrastructure(infraID)
+	vpc, err := a.GetVPCByInfrastructure(infraID)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +339,7 @@ func (a *AwsProvider) checkSgWinrmPort(sgId string) (bool, error) {
 // createWinrmPortToSg creates winrm https port 5986 for the given security group. If the port
 // doesn't not exist in the security group notify the user and generate one for the user.
 func (a *AwsProvider) addWinrmPortToSg(sgId string) error {
-	myIP, err := getMyIp()
+	myIP, err := GetMyIp()
 	if err != nil {
 		return err
 	}
@@ -394,7 +394,7 @@ func (a *AwsProvider) createWindowsWorkerSg(infraID string, vpc *ec2.Vpc) (strin
 // authorizeSgIngress attaches inbound rules for RDP from user's external IP address and all traffic within the VPC
 // on newly created security group for Windows instance. The function returns error if failed.
 func (a *AwsProvider) authorizeSgIngress(sgID string, vpc *ec2.Vpc) error {
-	myIP, err := getMyIp()
+	myIP, err := GetMyIp()
 	if err != nil {
 		return err
 	}
@@ -451,9 +451,10 @@ func (a *AwsProvider) findWindowsWorkerSg(infraID string) (string, error) {
 	return *sgs.SecurityGroups[0].GroupId, nil
 }
 
-// getMyIp get the external IP of user's machine from https://checkip.amazonaws.com and returns an address or an error.
+// GetMyIp get the external IP of user's machine from https://checkip.amazonaws.com and returns an address or an error.
 // The 'checkip' service is maintained by Amazon.
-func getMyIp() (string, error) {
+// This function is exposed for testing purpose.
+func GetMyIp() (string, error) {
 	resp, err := http.Get("https://checkip.amazonaws.com")
 	if err != nil {
 		return "", nil
@@ -505,8 +506,9 @@ func (a *AwsProvider) getInstanceZone(instance *ec2.Instance) (string, error) {
 	return *instance.Placement.AvailabilityZone, nil
 }
 
-// getVPCByInfrastructure finds the VPC of an infrastructure and returns the VPC struct or an error.
-func (a *AwsProvider) getVPCByInfrastructure(infraID string) (*ec2.Vpc, error) {
+// GetVPCByInfrastructure finds the VPC of an infrastructure and returns the VPC struct or an error.
+// This function is exposed for testing purpose.
+func (a *AwsProvider) GetVPCByInfrastructure(infraID string) (*ec2.Vpc, error) {
 	res, err := a.EC2.DescribeVpcs(&ec2.DescribeVpcsInput{
 		Filters: []*ec2.Filter{
 			{
@@ -574,8 +576,9 @@ func (a *AwsProvider) GetInstance(instanceID string) (*ec2.Instance, error) {
 	return instances.Reservations[0].Instances[0], err
 }
 
-// getClusterWorkerSGID gets worker security group id from the existing cluster or returns an error.
-func (a *AwsProvider) getClusterWorkerSGID(infraID string) (string, error) {
+// GetClusterWorkerSGID gets worker security group id from the existing cluster or returns an error.
+// This function is exposed for testing purpose.
+func (a *AwsProvider) GetClusterWorkerSGID(infraID string) (string, error) {
 	sg, err := a.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
 		Filters: []*ec2.Filter{
 			{
@@ -597,8 +600,9 @@ func (a *AwsProvider) getClusterWorkerSGID(infraID string) (string, error) {
 	return *sg.SecurityGroups[0].GroupId, nil
 }
 
-// getIAMWorkerRole gets worker IAM information from the existing cluster including IAM arn or an error.
-func (a *AwsProvider) getIAMWorkerRole(infraID string) (*ec2.IamInstanceProfileSpecification, error) {
+// GetIAMWorkerRole gets worker IAM information from the existing cluster including IAM arn or an error.
+// This function is exposed for testing purpose.
+func (a *AwsProvider) GetIAMWorkerRole(infraID string) (*ec2.IamInstanceProfileSpecification, error) {
 	iamspc, err := a.IAM.GetInstanceProfile(&iam.GetInstanceProfileInput{
 		InstanceProfileName: aws.String(fmt.Sprintf("%s-worker-profile", infraID)),
 	})
@@ -641,8 +645,9 @@ func (a *AwsProvider) isSGInUse(sgID string) (bool, error) {
 	return false, nil
 }
 
-// deleteSG checks if security group is in use, deletes it if not in use based on sgID, and returns error if fails.
-func (a *AwsProvider) deleteSG(sgID string) error {
+// DeleteSG checks if security group is in use, deletes it if not in use based on sgID, and returns error if fails.
+// This function is exposed for testing purpose.
+func (a *AwsProvider) DeleteSG(sgID string) error {
 	sgInUse, err := a.isSGInUse(sgID)
 	if err != nil {
 		return err
@@ -657,8 +662,9 @@ func (a *AwsProvider) deleteSG(sgID string) error {
 	return err
 }
 
-// terminateInstance will delete an AWS instance based on instance id and returns error if deletion fails.
-func (a *AwsProvider) terminateInstance(instanceID string) error {
+// TerminateInstance will delete an AWS instance based on instance id and returns error if deletion fails.
+// This function is exposed for testing purpose.
+func (a *AwsProvider) TerminateInstance(instanceID string) error {
 	_, err := a.EC2.TerminateInstances(&ec2.TerminateInstancesInput{
 		InstanceIds: aws.StringSlice([]string{instanceID}),
 	})
