@@ -302,12 +302,12 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 
 	future, err := az.nicClient.CreateOrUpdate(ctx, az.resourceGroupName, az.NicName, nicParams)
 	if errorCheck(err) {
-		return nil, fmt.Errorf("cannot create nic: %v", err)
+		return nil, fmt.Errorf("cannot create or update nic: %v", err)
 	}
 
 	err = future.WaitForCompletionRef(ctx, az.nicClient.Client)
 	if err != nil {
-		return nic, fmt.Errorf("cannot create nic: %v", err)
+		return nic, fmt.Errorf("cannot create or update nic: %v", err)
 	}
 
 	nic_info, err := future.Result(az.nicClient)
@@ -366,12 +366,12 @@ func (az *AzureProvider) createSecurityGroupRules(ctx context.Context, nsgName s
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("cannot create security group: %v", err)
+		return fmt.Errorf("cannot create or update security group rules of worker subnet: %v", err)
 	}
 
 	err = future.WaitForCompletionRef(ctx, az.nsgClient.Client)
 	if err != nil {
-		return fmt.Errorf("cannot create security group: %v", err)
+		return fmt.Errorf("cannot create or update security group rules of worker subnet: %v", err)
 	}
 
 	return nil
@@ -394,7 +394,7 @@ func (az *AzureProvider) constructStorageProfile(imageId string) (storageProfile
 	return storageProfile
 }
 
-// randonPasswordString generates random string with restrictions of given length.
+// randomPasswordString generates random string with restrictions of given length.
 // ex: 3i[g0|)z for n of size 8
 func randomPasswordString(n int) string {
 	digits := "0123456789"
@@ -576,7 +576,7 @@ func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 	if len(az.NicName) > 0 {
 		vmNic, err = az.nicClient.Get(ctx, az.resourceGroupName, az.NicName, "")
 		if errorCheck(err) {
-			return nil, fmt.Errorf("failed to create nic for the instance: %v", err)
+			return nil, fmt.Errorf("failed to attach user provided nic for the instance: %v", err)
 		}
 	} else {
 		nicName := az.generateResourceName("nic", vmRandString)
@@ -658,7 +658,11 @@ func (az *AzureProvider) CreateWindowsVM() (err error) {
 	if errorCheck(err) {
 		log.Error(err, fmt.Sprintf("unable to create a file"))
 	}
-	resource.AppendInstallerInfo([]string{*(vmInfo.Name)}, []string{az.NsgName}, resourceTrackerFilePath)
+
+	err = resource.AppendInstallerInfo([]string{*(vmInfo.Name)}, []string{az.NsgName}, resourceTrackerFilePath)
+	if errorCheck(err) {
+		log.Error(err, fmt.Sprintf("unable to append the resources"))
+	}
 
 	log.Info(fmt.Sprintf("Successfully created windows instance: %s", instanceName))
 
@@ -764,9 +768,9 @@ func (az *AzureProvider) deleteSpecificRule(s []network.SecurityRule, name strin
 	return
 }
 
-// updateNSGRules deletes the security group rules by taking it's name as argument.
+// deleteNSGRules deletes the security group rules by taking it's name as argument.
 // it deletes the rdp and vnet_traffic rules from the worker subnet security group rules.
-func (az *AzureProvider) updateNSGRules(ctx context.Context, nsgName string) (err error) {
+func (az *AzureProvider) deleteNSGRules(ctx context.Context, nsgName string) (err error) {
 	var secGroupPropFormat network.SecurityGroupPropertiesFormat
 	var secGroupRules []network.SecurityRule
 	secGroupProfile, err := az.nsgClient.Get(ctx, az.resourceGroupName, nsgName, "")
@@ -797,11 +801,11 @@ func (az *AzureProvider) updateNSGRules(ctx context.Context, nsgName string) (er
 		},
 	)
 	if errorCheck(err) {
-		return fmt.Errorf("cannot update the security group rules of the worker subnet: %v", err)
+		return fmt.Errorf("cannot delete the security group rules of the worker subnet: %v", err)
 	}
 	err = future.WaitForCompletionRef(ctx, az.nsgClient.Client)
 	if errorCheck(err) {
-		return fmt.Errorf("cannot update the security group rules of the worker subnet: %v", err)
+		return fmt.Errorf("cannot delete the security group rules of the worker subnet: %v", err)
 	}
 	_, err = future.Result(az.nsgClient)
 	return
@@ -835,6 +839,7 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 		return fmt.Errorf("unable to get saved info from json file")
 	}
 	var terminatedInstances, deletedSg []string
+	var rdpFilePath string
 
 	for _, vmName := range installerInfo.InstanceIDs {
 
@@ -865,7 +870,7 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 			log.Info(fmt.Sprintf("deleted the disk attached to the instance"))
 		}
 
-		rdpFilePath := az.resourceTrackerDir + vmName
+		rdpFilePath = az.resourceTrackerDir + vmName
 		err = resource.DeleteCredentialData(rdpFilePath)
 		if errorCheck(err) {
 			log.Error(err, fmt.Sprintf("unable to remove the file: %s", rdpFilePath))
@@ -875,9 +880,9 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 	}
 
 	for _, nsgName := range installerInfo.SecurityGroupIDs {
-		err = az.updateNSGRules(ctx, nsgName)
+		err = az.deleteNSGRules(ctx, nsgName)
 		if !errorCheck(err) {
-			log.Info(fmt.Sprintf("updated the security group rules '%s'", nsgName))
+			log.Info(fmt.Sprintf("deleted the created security group rules in worker subnet"))
 		}
 
 		deletedSg = append(deletedSg, nsgName)

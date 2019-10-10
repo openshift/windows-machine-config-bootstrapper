@@ -41,7 +41,7 @@ func init() {
 func newAZCmd() *cobra.Command {
 	azureCmd := &cobra.Command{
 		Use:   "azure",
-		Short: "Takes azure specific inputs from user",
+		Short: "Takes azure specific resource names from user",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return requiredAZFlags(cmd)
 		},
@@ -127,9 +127,9 @@ func azCreateCmd() *cobra.Command {
 			"https://docs.microsoft.com/bs-latn-ba/azure/virtual-machines/windows/cli-ps-findimage"+
 			"#table-of-commonly-used-windows-images\n")
 
-	// specify the instance flavor for the node to be created, by default "Basic_A1" is considered, but to override
+	// specify the instance flavor for the node to be created, by default "Standard_D2s_v3" is considered, but to override
 	// pass the value with flag `instance-type`.
-	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.instanceType, "instance-type", "Standard_B2ms",
+	cmd.PersistentFlags().StringVar(&azCreateFlagInfo.instanceType, "instance-type", "Standard_D2s_v3",
 		"instance-type for node creation, for more info "+
 			" https://docs.microsoft.com/en-us/azure/virtual-machines/linux/sizes-general#b-series")
 
