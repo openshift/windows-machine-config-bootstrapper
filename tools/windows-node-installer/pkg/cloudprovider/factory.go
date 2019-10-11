@@ -8,6 +8,7 @@ import (
 	"github.com/openshift/api/config/v1"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/aws"
+	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
 	"k8s.io/client-go/util/homedir"
 )
@@ -70,9 +71,12 @@ func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, r
 	switch provider := cloudProvider.Type; provider {
 	case v1.AWSPlatformType:
 		return aws.New(oc, imageID, instanceType, sshKey, credentialPath, credentialAccountID, resourceTrackerFilePath)
+	case v1.AzurePlatformType:
+		return azure.New(oc, credentialPath, credentialAccountID, resourceTrackerDir, imageID, instanceType)
 	default:
 		return nil, fmt.Errorf("the '%v' cloud provider is not supported", provider)
 	}
+	return nil, err
 }
 
 // makeValidAbsPath remakes a path into an absolute path and ensures that it exists.

@@ -35,7 +35,7 @@ func init() {
 func newAWSCmd() *cobra.Command {
 	awsCmd := &cobra.Command{
 		Use:   "aws",
-		Short: "Takes aws specific resource names from user",
+		Short: "Create and destroy windows instances in aws",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return requiredAWSFlags(cmd)
 		},
