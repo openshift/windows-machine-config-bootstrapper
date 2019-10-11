@@ -19,8 +19,8 @@ If any part of the project has bugs or documentation mistakes, please let us kno
 
 This is an outline of what a contributor's workflow looks like:
 
-- Fork the repository on GitHub
-- Clone the forked repository in your go path.
+- Fork the repository on GitHub.
+- Clone the forked repository outside your go path, or refer to the [Kubernetes repo's example](https://github.com/kubernetes/community/blob/master/contributors/guide/github-workflow.md#2-clone-fork-to-local-storage).
 - Create a topic branch from where to base the contribution. This is usually master.
 - Make commits of logical units. A commit should typically add a feature or fix a bug, but never both at the same
 time. Vendor commits should always be separate.
