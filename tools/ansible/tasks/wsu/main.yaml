@@ -34,8 +34,8 @@
 
         - name: Grab kubelet from extracted directories
           copy:
-            src: "./tmp/kubernetes/node/bin/kubelet.exe"
-            dest: "./tmp/kubelet.exe"
+            src: "{{ tmp_dir.path }}/kubernetes/node/bin/kubelet.exe"
+            dest: "{{ tmp_dir.path }}/kubelet.exe"
 
 - hosts: win
   vars:
