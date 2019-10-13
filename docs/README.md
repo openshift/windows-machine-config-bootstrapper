@@ -48,6 +48,19 @@ Repeat the above steps for the `system:node:$NODE_NAME` csr which will appear sh
 
 You can now do `oc get nodes`, and see the Windows node has joined the cluster.
 
+#### Unit testing
+
+On your Linux development machine, build the unit test binary:
+```
+make build-wmcb-unit-test
+```
+This will build a binary called `wmcb_unit_test.exe`. Copy this binary to a Windows node and execute it. The expected
+output should be as follows:
+```
+PS C:\wmcb> .\wmcb_test.exe
+PASS
+```
+
 ### Ansible
 
 Follow the instructions in `tools/ansible/README.md`, and ensure the playbook completes successfully.
