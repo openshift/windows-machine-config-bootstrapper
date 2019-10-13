@@ -26,7 +26,7 @@ build-tools:
 
 .PHONY: test-e2e-tools
 test-e2e-tools:
-	$(GO_BUILD_ARGS) go test $(TOOLS_DIR)/test/e2e/... -v
+	$(GO_BUILD_ARGS) go test $(TOOLS_DIR)/test/e2e/... -timeout 20m -v
 
 .PHONY: verify-all
 # TODO: Add other verifications
