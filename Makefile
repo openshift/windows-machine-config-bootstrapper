@@ -1,4 +1,4 @@
-all: build build-tools verify-all
+all: build build-tools build-wmcb-unit-test verify-all
 
 PACKAGE=github.com/openshift/windows-machine-config-operator
 MAIN_PACKAGE=$(PACKAGE)/cmd/bootstrapper
@@ -14,11 +14,12 @@ GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on
 build:
 	$(GO_BUILD_ARGS) GOOS=windows go build -o wmcb.exe  $(MAIN_PACKAGE)
 
+.PHONY: build-wmcb-unit-test
+build-wmcb-unit-test:
+	GOOS=windows GOFLAGS=-v go test -c ./pkg/... -o wmcb_unit_test.exe
+
 test-e2e-prepared-node:
 	GOOS=windows go test -run=TestBootstrapper ./test/e2e
-
-test-unit:
-	go test ./pkg/...
 
 .PHONY: build-tools
 build-tools:
