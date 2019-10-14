@@ -18,6 +18,7 @@ var (
 	kubeconfig     = os.Getenv("KUBECONFIG")
 	awscredentials = os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
 	dir            = os.Getenv("ARTIFACT_DIR")
+	privateKeyPath = os.Getenv("KUBE_SSH_KEY_PATH")
 
 	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0b8d82dea356226d3 for
 	// Microsoft Windows Server 2019 Base with Containers.
@@ -74,9 +75,19 @@ func testDestroyWindowsInstance(t *testing.T) {
 func setupAWSCloudProvider(t *testing.T) {
 	// The e2e test uses Microsoft Windows Server 2019 Base with Containers image, m4.large type, and libra ssh key.
 	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, awscredentials, "default", dir,
-		imageID, instanceType, sshKey)
+		imageID, instanceType, sshKey, privateKeyPath)
+	credentials, err := cloud.CreateWindowsVM()
 	if err != nil {
-		assert.FailNow(t, "unable to create an instance")
+		t.Fatalf("Error spinning up Windows VM with error %v", err)
+	}
+	if credentials == nil {
+		assert.FailNow(t, "Credentials returned are empty")
+	}
+	if len(credentials.GetPassword()) == 0 {
+		assert.FailNow(t, "Expected some password but got empty string")
+	}
+	if len(credentials.GetInstanceId()) == 0 {
+		assert.FailNow(t, "Expected some instance id but got empty string")
 	}
 
 	// Type assert to AWS so that we can test other functionality
@@ -91,7 +102,7 @@ func setupAWSCloudProvider(t *testing.T) {
 // createdInstanceID, and createdSgID. All information updates are required to be successful or instance will be
 // teared down.
 func setupWindowsInstanceWithResources(t *testing.T) {
-	err := awsProvider.CreateWindowsVM()
+	credentials, err := awsProvider.CreateWindowsVM()
 	if err != nil {
 		tearDownInstance(t, "error creating Windows instance", err)
 	}
@@ -100,7 +111,15 @@ func setupWindowsInstanceWithResources(t *testing.T) {
 	if err != nil {
 		tearDownInstance(t, "error while getting infrastructure ID for the OpenShift cluster", err)
 	}
-
+	if credentials == nil {
+		t.Fatal("Credentials returned are empty")
+	}
+	if len(credentials.GetPassword()) == 0 {
+		t.Fatal("Expected some password but got empty string")
+	}
+	if len(credentials.GetInstanceId()) == 0 {
+		t.Fatal("Expected instanceID to be present but got empty string")
+	}
 	// Check instance and security group information in windows-node-installer.json.
 	info, err := resource.ReadInstallerInfo(dir + "/" + "windows-node-installer.json")
 	if err != nil {

@@ -95,7 +95,7 @@ func azCreateCmd() *cobra.Command {
 			// Provide the azCreateFlagInfo.credentialAccountID as a default
 			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, azCreateFlagInfo.credentialPath,
 				azCreateFlagInfo.subscriptionID, rootInfo.resourceTrackerDir,
-				azCreateFlagInfo.imageID, azCreateFlagInfo.instanceType, "")
+				azCreateFlagInfo.imageID, azCreateFlagInfo.instanceType, "", "")
 			if err != nil {
 				return fmt.Errorf("error creating azure clients, %v", err)
 			}
@@ -110,8 +110,8 @@ func azCreateCmd() *cobra.Command {
 			} else {
 				return fmt.Errorf("error type asserting. %v", err)
 			}
-
-			err = cloud.CreateWindowsVM()
+			// TODO: Use the credentials object and print password, user name etc here.
+			_, err = cloud.CreateWindowsVM()
 			if err != nil {
 				return fmt.Errorf("error creating Windows Instance, %v", err)
 			}
@@ -164,7 +164,7 @@ func azDestroyCmd() *cobra.Command {
 			}
 			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, azCreateFlagInfo.credentialPath,
 				azCreateFlagInfo.subscriptionID, rootInfo.resourceTrackerDir,
-				azCreateFlagInfo.imageID, azCreateFlagInfo.instanceType, "")
+				azCreateFlagInfo.imageID, azCreateFlagInfo.instanceType, "", "")
 			if err != nil {
 				return fmt.Errorf("error creating azure clients, %v", err)
 			}

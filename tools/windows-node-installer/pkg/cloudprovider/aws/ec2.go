@@ -2,12 +2,12 @@ package aws
 
 import (
 	"bytes"
+	crand "crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
-	"net/http"
-	"os"
-	"strings"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	awssession "github.com/aws/aws-sdk-go/aws/session"
@@ -15,13 +15,28 @@ import (
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
+	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
+	"io/ioutil"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"net/http"
+	"os"
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
+	"strings"
+	"time"
 )
 
 const (
 	infraIDTagKeyPrefix = "kubernetes.io/cluster/"
 	infraIDTagValue     = "owned"
+	// durationFactor is amount of time to be multiplied with before each call to AWS api to get password for the
+	// Windows VM created
+	durationFactor = 10 * time.Second
+	// awsPasswordDataTimeout is the maximum amount of time we can wait before password is available
+	// for the Windows node created. From AWS docs:
+	// We recommend that you wait up to 15 minutes
+	//  after launching an instance before trying to retrieve the generated password.`
+	// Ref: https://godoc.org/github.com/aws/aws-sdk-go/service/ec2#EC2.GetPasswordData
+	awsPasswordDataTimeOut = 15 * time.Minute
 )
 
 // log is the global logger for the aws package. Each log record produced
@@ -45,7 +60,7 @@ type AwsProvider struct {
 	// instanceType is the flavor of VM to be used
 	instanceType string
 	// sshKey is the ssh key to access the VM created. Please note that key should be uploaded to AWS before
-	// using this flag
+	// using this flag. AWS encrypts the password of the Windows instance created with this public key
 	sshKey string
 	// A client for EC2.
 	EC2 *ec2.EC2
@@ -55,6 +70,9 @@ type AwsProvider struct {
 	openShiftClient *client.OpenShift
 	// resourceTrackerDir is where `windows-node-installer.json` file is stored.
 	resourceTrackerDir string
+	// privateKeyPath is the location of the private key on the machine for the public key uploaded to AWS
+	// This is used to decrypt the password for the Windows locally
+	privateKeyPath string
 }
 
 // New returns the AWS implementations of the Cloud interface with AWS session in the same region as OpenShift Cluster.
@@ -62,8 +80,9 @@ type AwsProvider struct {
 // credentialAccountID is the account name the user uses to create VM instance.
 // The credentialAccountID should exist in the AWS credentials file pointing at one specific credential.
 // resourceTrackerDir is where created instance and security group information is stored.
+// privateKeyPath is the path to private key which is used to decrypt the password for the Windows VM created
 func New(openShiftClient *client.OpenShift, imageID, instanceType, sshKey, credentialPath, credentialAccountID,
-	resourceTrackerDir string) (*AwsProvider, error) {
+	resourceTrackerDir, privateKeyPath string) (*AwsProvider, error) {
 	provider, err := openShiftClient.GetCloudProvider()
 	if err != nil {
 		return nil, err
@@ -77,6 +96,7 @@ func New(openShiftClient *client.OpenShift, imageID, instanceType, sshKey, crede
 		iam.New(session, aws.NewConfig()),
 		openShiftClient,
 		resourceTrackerDir,
+		privateKeyPath,
 	}, nil
 }
 
@@ -103,20 +123,21 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // - creates a unique name tag for the instance using the same prefix as the OpenShift cluster name, and
 // - logs id and security group information of the created instance in 'windows-node-installer.json' file at the
 // resourceTrackerDir.
-// On success, the function outputs RDP access information in the commandline interface.
-func (a *AwsProvider) CreateWindowsVM() (rerr error) {
+// On success, the function outputs RDP access information in the commandline interface. It also returns the
+// the credentials to access the Windows VM created,
+func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, rerr error) {
 	// Obtains information from AWS and the existing OpenShift cluster for creating an instance.
 	infraID, err := a.GetInfraID()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	networkInterface, err := a.getNetworkInterface(infraID)
 	if err != nil {
-		return fmt.Errorf("failed to get network interface, %v", err)
+		return nil, fmt.Errorf("failed to get network interface, %v", err)
 	}
 	workerIAM, err := a.GetIAMWorkerRole(infraID)
 	if err != nil {
-		return fmt.Errorf("failed to get cluster worker IAM, %v", err)
+		return nil, fmt.Errorf("failed to get cluster worker IAM, %v", err)
 	}
 
 	// PowerShell script to setup WinRM for Ansible
@@ -131,31 +152,149 @@ func (a *AwsProvider) CreateWindowsVM() (rerr error) {
 	instance, err := a.createInstance(a.imageID, a.instanceType, a.sshKey, networkInterface, workerIAM, userDataWinrm)
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 	instanceID := *instance.InstanceId
 
 	// Wait until instance is running and associate a unique name tag to the created instance.
 	err = a.waitUntilInstanceRunning(instanceID)
 	if err != nil {
-		return fmt.Errorf("failed to wait till instance is running, %v", err)
+		return nil, fmt.Errorf("failed to wait till instance is running, %v", err)
 	}
 	_, err = a.createInstanceNameTag(instance, infraID)
 	if err != nil {
 		log.V(0).Info(fmt.Sprintf("failed to assign name for instance: %s, %v", instanceID, err))
 	}
 
-	err = resource.AppendInstallerInfo([]string{instanceID}, []string{}, a.resourceTrackerDir)
+	// Get the public IP
+	publicIPAddress, err := a.GetPublicIP(instanceID)
 	if err != nil {
-		return fmt.Errorf("failed to record instance ID to file at '%s',instance will not be able to be deleted, "+
+		return nil, err
+	}
+
+	// Get the decrypted password
+	decryptedPassword, err := a.GetPassword(instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("error with instance creation %v", err)
+	}
+
+	// Build new credentials structure to be used by other actors
+	credentials = types.NewCredentials(instanceID, publicIPAddress, decryptedPassword)
+	err = resource.AppendInstallerInfo([]string{instanceID}, []string{}, a.resourceTrackerDir)
+	if err != nil || credentials == nil {
+		return nil, fmt.Errorf("failed to record instance ID to file at '%s',instance will not be able to be deleted, "+
 			"%v", a.resourceTrackerDir, err)
 	}
 
 	// Output commandline message to help RDP into the created instance.
-	log.V(0).Info(fmt.Sprintf("Successfully created windows instance: %s, please RDP into the Windows instance.",
-		instanceID))
+	log.Info(fmt.Sprintf("Successfully created windows instance: %s, "+
+		"please RDP into the Windows instance created at %s using Admininstrator as user and %s password",
+		instanceID, publicIPAddress, decryptedPassword))
+	// TODO: Output the information to a file
+	return credentials, nil
+}
 
-	return nil
+// GetPublicIP returns the public IP address associated with the instance. Make to sure to call this function
+// after the instance is in running state. Exposing this function to be used in testing later.
+func (a *AwsProvider) GetPublicIP(instanceID string) (string, error) {
+	// Till the instance comes to running state we cannot get the public ip address associated with it.
+	// So, it's better to query the AWS api again to get the instance object and the ip address.
+	instance, err := a.GetInstance(instanceID)
+	if err != nil {
+		return "", err
+	}
+	return *instance.PublicIpAddress, nil
+}
+
+// GetPassword returns the password associated with the string. Exposing this to be used in tests later
+func (a *AwsProvider) GetPassword(instanceID string) (string, error) {
+	privateKey, err := ioutil.ReadFile(a.privateKeyPath)
+	if err != nil {
+		return "", err
+	}
+	privateKeyBytes := privateKey
+	decodedEncryptedData, err := a.getDecodedPassword(instanceID)
+	if err != nil {
+		return "", err
+	}
+	decryptedPwd, err := rsaDecrypt(decodedEncryptedData, privateKeyBytes)
+	if err != nil {
+		return "", err
+	}
+	return string(decryptedPwd), nil
+}
+
+// getDecodedPassword gets the decoded password from the AWS cloud provider API
+func (a *AwsProvider) getDecodedPassword(instanceID string) ([]byte, error) {
+	// The docs within the aws-sdk says
+	// `If you try to retrieve the password before it's available,
+	// 	the output returns an empty string. We recommend that you wait up to 15 minutes
+	//  after launching an instance before trying to retrieve the generated password.`
+	// Ref: https://godoc.org/github.com/aws/aws-sdk-go/service/ec2#EC2.GetPasswordData
+	pwdData, err := a.waitUntilPasswordDataIsAvailable(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	// Decode password
+	decodedPassword, err := base64.StdEncoding.DecodeString(strings.Trim(*pwdData.PasswordData, "\r\n"))
+	if err != nil {
+		return nil, err
+	}
+	return decodedPassword, nil
+
+}
+
+// waitUntilPasswordDataIsAvailable waits till the ec2 password data is available.
+// AWS sdk's WaitUntilPasswordDataAvailable is returning inspite of password data being available.
+// So, building this function as a wrapper around AWS sdk's GetPasswordData method with constant back-off
+func (a *AwsProvider) waitUntilPasswordDataIsAvailable(instanceID string) (*ec2.GetPasswordDataOutput, error) {
+	startTime := time.Now()
+	for i := 0; ; i++ {
+		currTime := time.Since(startTime)
+		if currTime >= awsPasswordDataTimeOut {
+			return nil, fmt.Errorf("timed out waiting for password to be available")
+		}
+		// Get the ec2 passworddata output.
+		pwdData, err := a.getPasswordDataOutput(instanceID)
+		if err != nil {
+			// Eventually we may get succeed, so let's continue till we hit 15 min limit
+			log.Info("error while getting password", err)
+			continue
+		}
+		if len(*pwdData.PasswordData) > 0 {
+			return pwdData, nil
+		}
+		time.Sleep(time.Duration(i) * durationFactor)
+	}
+}
+
+// getPasswordData returns the password passworddataoutput, if this returns nil, the password is not yet generated for the
+// instance
+func (a *AwsProvider) getPasswordDataOutput(instanceID string) (*ec2.GetPasswordDataOutput, error) {
+	pwdData, err := a.EC2.GetPasswordData(&ec2.GetPasswordDataInput{
+		InstanceId: aws.String(instanceID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error getting encrypted password from aws cloud provider with %v", err)
+	}
+	return pwdData, nil
+}
+
+// rsaDecrypt decyptes the encrypted password and returns it.
+// From AWS docs:
+// The keys that Amazon EC2 uses are 2048-bit SSH-2 RSA keys. You can have up to five thousand key pairs per Region.
+// Ref: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html
+func rsaDecrypt(decodedEncryptedData, privateKeyBytes []byte) ([]byte, error) {
+	privateKeyBlock, _ := pem.Decode(privateKeyBytes)
+	privateKey, err := x509.ParsePKCS1PrivateKey(privateKeyBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key with %v", err)
+	}
+	decryptedPassword, err := rsa.DecryptPKCS1v15(crand.Reader, privateKey, decodedEncryptedData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt password with %v", err)
+	}
+	return decryptedPassword, nil
 }
 
 // GetInfraID returns the infrastructure ID associated with the OpenShift cluster. This is public for

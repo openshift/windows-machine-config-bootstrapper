@@ -3,6 +3,7 @@ package azure
 import (
 	"context"
 	"fmt"
+	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -607,7 +608,7 @@ func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 // resourceGroupName as the existing OpenShift
 // TODO: If it fails during the instance creation process it has to delete the resources created
 // untill that step.
-func (az *AzureProvider) CreateWindowsVM() (err error) {
+func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
 	// Construct the VirtualMachine properties
 	rand.Seed(time.Now().UnixNano())
 	ctx := context.Background()
@@ -623,7 +624,7 @@ func (az *AzureProvider) CreateWindowsVM() (err error) {
 
 	vmNetworkProfile, err := az.constructNetworkProfile(ctx, instanceName)
 	if errorCheck(err) {
-		return err
+		return nil, err
 	}
 	log.Info(fmt.Sprintf("constructed the network profile for the node"))
 
@@ -643,11 +644,11 @@ func (az *AzureProvider) CreateWindowsVM() (err error) {
 		},
 	)
 	if errorCheck(err) {
-		return fmt.Errorf("instance failed to create: %v", err)
+		return nil, fmt.Errorf("instance failed to create: %v", err)
 	}
 	err = future.WaitForCompletionRef(ctx, az.vmClient.Client)
 	if errorCheck(err) {
-		return fmt.Errorf("instance failed to create: %v", err)
+		return nil, fmt.Errorf("instance failed to create: %v", err)
 	}
 	vmInfo, err := future.Result(az.vmClient)
 	if errorCheck(err) {
@@ -681,7 +682,8 @@ func (az *AzureProvider) CreateWindowsVM() (err error) {
 		log.Info(fmt.Sprintf("Please Check for file %s in %s directory on how to access the node",
 			instanceName, az.resourceTrackerDir))
 	}
-	return nil
+	credentials := types.NewCredentials("", *ipAddress, adminPassword)
+	return credentials, nil
 }
 
 // getNICname returns nicName by taking instance name as an argument.
