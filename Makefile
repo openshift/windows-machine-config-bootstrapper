@@ -29,6 +29,10 @@ build-tools:
 test-e2e-tools:
 	$(GO_BUILD_ARGS) go test $(TOOLS_DIR)/test/e2e/... -timeout 20m -v
 
+.PHONY: run-wmcb-ci-e2e-test
+run-wmcb-ci-e2e-test:
+	hack/run-wmcb-ci-e2e-test.sh
+
 .PHONY: verify-all
 # TODO: Add other verifications
 verify-all:
