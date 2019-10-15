@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -47,6 +48,21 @@ const (
 	serviceWaitTime = time.Second * 10
 	// certDirectory is where the kubelet will look for certificates
 	certDirectory = "c:/var/lib/kubelet/pki/"
+	// cloudConfigOption is kubelet CLI option for cloud configuration
+	cloudConfigOption = "cloud-config"
+)
+
+// These regex are global, so that we only need to compile them once
+var (
+	// cloudProviderRegex searches for the cloud provider option given to the kubelet
+	cloudProviderRegex = regexp.MustCompile(`--cloud-provider=(\w*)`)
+
+	// cloudConfigRegex searches for the cloud config option given to the kubelet. We are assuming that the file has a
+	// conf extension.
+	cloudConfigRegex = regexp.MustCompile(`--` + cloudConfigOption + `=(\/.*conf)`)
+
+	// verbosityRegex searches for the verbosity option given to the kubelet
+	verbosityRegex = regexp.MustCompile(`--v=(\w*)`)
 )
 
 // winNodeBootstrapper is responsible for bootstrapping and ensuring kubelet runs as a Windows service
@@ -167,24 +183,51 @@ func (wmcb *winNodeBootstrapper) translateFile(ignitionSource string, fileTransl
 	return newContents, err
 }
 
-// These regex are global, so that we only need to compile them once
-// cloudProviderRegex searches for the cloud provider option given to the kubelet
-var cloudProviderRegex = regexp.MustCompile(`--cloud-provider=(\w*)`)
-
-// verbosityRegex searches for the verbosity option given to the kubelet
-var verbosityRegex = regexp.MustCompile(`--v=(\w*)`)
-
-// parseIgnitionFile parses the ignition file and writes the contents of the described files
-// to the k8s installation directory
-func (wmcb *winNodeBootstrapper) parseIgnitionFile(ignitionFilePath string, filesToTranslate map[string]fileTranslation) error {
-	ignitionFileContents, err := ioutil.ReadFile(ignitionFilePath)
-	if err != nil {
-		return err
-	}
+// parseIgnitionFileContents parses the ignition file contents and writes the contents of the described files to the k8s
+// installation directory
+func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents []byte,
+	filesToTranslate map[string]fileTranslation) error {
 	// Parse configuration file
 	configuration, _, err := ignitionv2.Parse(ignitionFileContents)
 	if err != nil {
 		return err
+	}
+
+	// Find the kubelet systemd service specified in the ignition file and grab the variable arguments
+	for _, unit := range configuration.Systemd.Units {
+		if unit.Name != kubeletSystemdName {
+			continue
+		}
+
+		results := cloudProviderRegex.FindStringSubmatch(unit.Contents)
+		if len(results) == 2 {
+			wmcb.kubeletArgs["cloud-provider"] = results[1]
+		}
+
+		// Check for the presence of "--cloud-config" option and if it is present append the value to
+		// filesToTranslate. This option is only present for Azure and hence we cannot assume it as a file that
+		// requires translation across clouds.
+		results = cloudConfigRegex.FindStringSubmatch(unit.Contents)
+		if len(results) == 2 {
+			cloudConfFilename := filepath.Base(results[1])
+
+			// Check if we were able to get a valid filename. Read filepath.Base() godoc for explanation.
+			if cloudConfFilename == "." || os.IsPathSeparator(cloudConfFilename[0]) {
+				return fmt.Errorf("could not get cloud config filename from %s", results[0])
+			}
+
+			filesToTranslate[results[1]] = fileTranslation{
+				dest: filepath.Join(wmcb.installDir, cloudConfFilename),
+			}
+
+			// Set the --cloud-config option value
+			wmcb.kubeletArgs[cloudConfigOption] = path.Join(wmcb.installDir, cloudConfFilename)
+		}
+
+		results = verbosityRegex.FindStringSubmatch(unit.Contents)
+		if len(results) == 2 {
+			wmcb.kubeletArgs["v"] = results[1]
+		}
 	}
 
 	// For each new file in the ignition file check if is a file we are interested in, if so, decode, transform,
@@ -201,19 +244,6 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFile(ignitionFilePath string, file
 		}
 	}
 
-	// Find the kubelet systemd service specified in the ignition file and grab the variable arguments
-	for _, unit := range configuration.Systemd.Units {
-		if unit.Name == kubeletSystemdName {
-			results := cloudProviderRegex.FindStringSubmatch(unit.Contents)
-			if len(results) == 2 {
-				wmcb.kubeletArgs["cloud-provider"] = results[1]
-			}
-			results = verbosityRegex.FindStringSubmatch(unit.Contents)
-			if len(results) == 2 {
-				wmcb.kubeletArgs["v"] = results[1]
-			}
-		}
-	}
 	return nil
 }
 
@@ -243,7 +273,12 @@ func (wmcb *winNodeBootstrapper) initializeKubelet() error {
 	}
 	// Populate destination directory with the files we need
 	if wmcb.ignitionFilePath != "" {
-		err = wmcb.parseIgnitionFile(wmcb.ignitionFilePath, filesToTranslate)
+		ignitionFileContents, err := ioutil.ReadFile(wmcb.ignitionFilePath)
+		if err != nil {
+			return fmt.Errorf("could not read ignition file: %s", err)
+		}
+
+		err = wmcb.parseIgnitionFileContents(ignitionFileContents, filesToTranslate)
 		if err != nil {
 			return fmt.Errorf("could not parse ignition file: %s", err)
 		}
@@ -276,6 +311,10 @@ func (wmcb *winNodeBootstrapper) createKubeletService() error {
 	if v, ok := wmcb.kubeletArgs["v"]; ok {
 		kubeletArgs = append(kubeletArgs, "--v="+v)
 	}
+	if cloudConfigValue, ok := wmcb.kubeletArgs[cloudConfigOption]; ok {
+		kubeletArgs = append(kubeletArgs, "--"+cloudConfigOption+"="+cloudConfigValue)
+	}
+
 	// Mostly default values here
 	c := mgr.Config{
 		ServiceType: 0,
