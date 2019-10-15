@@ -14,3 +14,6 @@
 # Directory of IDE settings
 *.idea/*
 *.vscode/*
+
+# Vendor director
+vendor/
