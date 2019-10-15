@@ -39,9 +39,6 @@ func newAWSCmd() *cobra.Command {
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return requiredAWSFlags(cmd)
 		},
-		Run: func(_ *cobra.Command, args []string) {
-			fmt.Println(args)
-		},
 	}
 	awsCmd.PersistentFlags().StringVar(&awsInfo.credentialPath, "credentials", "",
 		"file path to the cloud provider credentials of the existing OpenShift cluster (required)")
