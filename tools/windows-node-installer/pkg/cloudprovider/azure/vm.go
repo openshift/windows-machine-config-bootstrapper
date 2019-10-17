@@ -682,7 +682,7 @@ func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
 		log.Info(fmt.Sprintf("Please Check for file %s in %s directory on how to access the node",
 			instanceName, az.resourceTrackerDir))
 	}
-	credentials := types.NewCredentials("", *ipAddress, adminPassword)
+	credentials := types.NewCredentials(instanceName, *ipAddress, adminPassword)
 	return credentials, nil
 }
 

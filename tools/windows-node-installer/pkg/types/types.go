@@ -8,19 +8,19 @@ package types
 type Credentials struct {
 	// instanceID uniquely identifies the instanceID
 	instanceID string
-	// ipAddress contains the public ipaddress of the instance created
+	// ipAddress contains the public ip address of the instance created
 	ipAddress string
 	// password to access the instance created
 	password string
 }
 
-// NewCredentials takes the instanceID, ipaddress and password of the Windows instance created and returns the
+// NewCredentials takes the instanceID, ip address and password of the Windows instance created and returns the
 // Credentials structure
 func NewCredentials(instanceID, ipAddress, password string) *Credentials {
 	return &Credentials{instanceID: instanceID, ipAddress: ipAddress, password: password}
 }
 
-// GetIPAddress returns the ipaddress of the given node
+// GetIPAddress returns the ip address of the given node
 func (cred *Credentials) GetIPAddress() string {
 	return cred.ipAddress
 }

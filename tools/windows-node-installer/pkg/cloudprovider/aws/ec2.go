@@ -178,10 +178,12 @@ func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, rerr er
 		return nil, fmt.Errorf("error with instance creation %v", err)
 	}
 
-	// Build new credentials structure to be used by other actors
+	// Build new credentials structure to be used by other actors. The actor is responsible for checking if
+	// the credentials are being generated properly. This method won't guarantee the existence of credentials
+	// if the VM is spun up
 	credentials = types.NewCredentials(instanceID, publicIPAddress, decryptedPassword)
 	err = resource.AppendInstallerInfo([]string{instanceID}, []string{}, a.resourceTrackerDir)
-	if err != nil || credentials == nil {
+	if err != nil {
 		return nil, fmt.Errorf("failed to record instance ID to file at '%s',instance will not be able to be deleted, "+
 			"%v", a.resourceTrackerDir, err)
 	}
