@@ -10,6 +10,7 @@ import (
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/aws"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
+	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"k8s.io/client-go/util/homedir"
 )
 
@@ -18,7 +19,7 @@ import (
 type Cloud interface {
 	// CreateWindowsVM creates a Windows VM for a given cloud provider
 	// TODO: CreateWindowsVM should return a provider object for further interaction with the created instance.
-	CreateWindowsVM() error
+	CreateWindowsVM() (*types.Credentials, error)
 	// DestroyWindowsVMs uses 'windows-node-installer.json' file that contains IDs of created instance and
 	// security group and deletes them.
 	// Example 'windows-node-installer.json' file:
@@ -38,8 +39,9 @@ type Cloud interface {
 // this function requires specifying the credentialAccountID of the user's credential account.
 // The resourceTrackerDir is where the `windows-node-installer.json` file which contains IDs of created instance and
 // security group will be created.
+// privateKeyPath is the path of the private key which can be used to decrypt the password for the Windows VM created
 func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, resourceTrackerDir,
-	imageID, instanceType, sshKey string) (Cloud, error) {
+	imageID, instanceType, sshKey, privateKeyPath string) (Cloud, error) {
 	// File, dir, credential account sanity checks.
 	kubeconfigPath, err := makeValidAbsPath(kubeconfigPath)
 	if err != nil {
@@ -70,7 +72,7 @@ func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, r
 
 	switch provider := cloudProvider.Type; provider {
 	case v1.AWSPlatformType:
-		return aws.New(oc, imageID, instanceType, sshKey, credentialPath, credentialAccountID, resourceTrackerFilePath)
+		return aws.New(oc, imageID, instanceType, sshKey, credentialPath, credentialAccountID, resourceTrackerFilePath, privateKeyPath)
 	case v1.AzurePlatformType:
 		return azure.New(oc, credentialPath, credentialAccountID, resourceTrackerDir, imageID, instanceType)
 	default:

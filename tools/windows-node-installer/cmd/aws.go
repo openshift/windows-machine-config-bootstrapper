@@ -22,6 +22,9 @@ var (
 		credentialPath string
 		// credentialAccountID is the aws account id
 		credentialAccountID string
+		// privateKeyPath is the location of the private key on the machine for the public key uploaded to AWS
+		// This is used to decrypt the password for the Windows locally
+		privateKeyPath string
 	}
 )
 
@@ -78,11 +81,12 @@ func createCmd() *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, awsInfo.credentialPath,
 				awsInfo.credentialAccountID, rootInfo.resourceTrackerDir,
-				awsInfo.imageID, awsInfo.instanceType, awsInfo.sshKey)
+				awsInfo.imageID, awsInfo.instanceType, awsInfo.sshKey, awsInfo.privateKeyPath)
 			if err != nil {
 				return fmt.Errorf("error creating aws client, %v", err)
 			}
-			err = cloud.CreateWindowsVM()
+			// TODO: Use the credentials object and print password, user name etc here.
+			_, err = cloud.CreateWindowsVM()
 			if err != nil {
 				return fmt.Errorf("error creating Windows Instance, %v", err)
 			}
@@ -97,6 +101,8 @@ func createCmd() *cobra.Command {
 		"name of a type of instance (i.e.: m4.large for AWS, etc) (required)")
 	cmd.PersistentFlags().StringVar(&awsInfo.sshKey, "ssh-key", "",
 		"name of existing ssh key on cloud provider for accessing the instance after it is created (required)")
+	cmd.PersistentFlags().StringVar(&awsInfo.privateKeyPath, "private-key", "",
+		"path of the private key for accessing the instance after it is created (required)")
 	return cmd
 }
 
@@ -114,6 +120,10 @@ func validateCreateFlags(createCmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	err = createCmd.MarkPersistentFlagRequired("private-key")
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -128,7 +138,7 @@ func destroyCmd() *cobra.Command {
 
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, awsInfo.credentialPath,
-				awsInfo.credentialAccountID, rootInfo.resourceTrackerDir, "", "", "")
+				awsInfo.credentialAccountID, rootInfo.resourceTrackerDir, "", "", "", "")
 			if err != nil {
 				return fmt.Errorf("error creating cloud provider clients, %v", err)
 			}
