@@ -247,8 +247,8 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 	return nil
 }
 
-// Initializes the kubelet after copying the kubelet to the desired location
-func (wmcb *winNodeBootstrapper) initializeKubelet() error {
+// initializeKubeletFiles initializes the files required by the kubelet
+func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 	filesToTranslate := map[string]fileTranslation{
 		"/etc/kubernetes/kubelet.conf": {
 			dest:            wmcb.kubeletConfPath,
@@ -418,9 +418,9 @@ func (wmcb *winNodeBootstrapper) refreshServiceManager() error {
 	return err
 }
 
-// TODO: add OVN service start here as well
-// Run runs the bootstrapper. It sets up the install directory, creates the kubelet service, and then starts the kubelet service
-func (wmcb *winNodeBootstrapper) Run() error {
+// InitializeKubelet performs the initial kubelet configuration. It sets up the install directory, creates the kubelet
+// service, and then starts the kubelet service
+func (wmcb *winNodeBootstrapper) InitializeKubelet() error {
 	var err error
 	if wmcb.kubeletSVC != nil {
 		// if the kubelet service exists, we silently remove it and continue, to preserve idempotency
@@ -434,7 +434,7 @@ func (wmcb *winNodeBootstrapper) Run() error {
 			return err
 		}
 	}
-	err = wmcb.initializeKubelet()
+	err = wmcb.initializeKubeletFiles()
 	if err != nil {
 		return err
 	}
