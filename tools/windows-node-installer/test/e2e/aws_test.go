@@ -76,6 +76,9 @@ func setupAWSCloudProvider(t *testing.T) {
 	// The e2e test uses Microsoft Windows Server 2019 Base with Containers image, m4.large type, and libra ssh key.
 	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, awscredentials, "default", dir,
 		imageID, instanceType, sshKey, privateKeyPath)
+	if err != nil {
+		t.Fatalf("Error obtaining aws interface object %v", err)
+	}
 	credentials, err := cloud.CreateWindowsVM()
 	if err != nil {
 		t.Fatalf("Error spinning up Windows VM with error %v", err)
