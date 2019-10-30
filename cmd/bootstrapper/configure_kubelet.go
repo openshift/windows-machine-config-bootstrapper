@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	runCmd = &cobra.Command{
-		Use:   "run",
-		Short: "Runs the Windows Machine Config Bootstrapper",
+	initializeKubeletCmd = &cobra.Command{
+		Use:   "initialize-kubelet",
+		Short: "Initializes the kubelet service on the Windows node",
 		Long:  "",
-		Run:   runRunCmd,
+		Run:   runInitializeKubeletCmd,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			err := cmd.MarkPersistentFlagRequired("ignition-file")
 			if err != nil {
@@ -38,17 +38,17 @@ var (
 )
 
 func init() {
-	rootCmd.AddCommand(runCmd)
-	runCmd.PersistentFlags().StringVar(&runOpts.ignitionFile, "ignition-file", "",
-		"Ignition file location to bootstrap the windows node")
-	runCmd.PersistentFlags().StringVar(&runOpts.kubeletPath, "kubelet-path", "",
-		"Kubelet file location to bootstrap the windows node")
-	runCmd.PersistentFlags().StringVar(&runOpts.installDir, "install-dir", "c:\\k",
-		"Kubelet file location to bootstrap the windows node. Defaults to C:\\k")
+	rootCmd.AddCommand(initializeKubeletCmd)
+	initializeKubeletCmd.PersistentFlags().StringVar(&runOpts.ignitionFile, "ignition-file", "",
+		"Ignition file location to bootstrap the Windows node")
+	initializeKubeletCmd.PersistentFlags().StringVar(&runOpts.kubeletPath, "kubelet-path", "",
+		"Kubelet file location to bootstrap the Windows node")
+	initializeKubeletCmd.PersistentFlags().StringVar(&runOpts.installDir, "install-dir", "c:\\k",
+		"Kubelet file location to bootstrap the Windows node. Defaults to C:\\k")
 }
 
-// runRunCmd starts the windows machine config bootstrapper
-func runRunCmd(cmd *cobra.Command, args []string) {
+// runInitializeKubeletCmd starts the Windows Machine Config Bootstrapper
+func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 	flag.Parse()
 	// TODO: add validation for flags
 
@@ -58,7 +58,7 @@ func runRunCmd(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	err = wmcb.Run()
+	err = wmcb.InitializeKubelet()
 	if err != nil {
 		log.Error(err, "could not run bootstrapper")
 		os.Exit(1)
