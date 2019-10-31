@@ -23,7 +23,7 @@ make build
 ```
 
 ```
-wmcb configure-kubelet --ignition-file $IGNITION_FILE_PATH --kubelet-path $KUBELET_PATH
+wmcb initialize-kubelet --ignition-file $IGNITION_FILE_PATH --kubelet-path $KUBELET_PATH
 ```
 
 ## Testing
