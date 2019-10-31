@@ -37,6 +37,9 @@ const (
 	//  after launching an instance before trying to retrieve the generated password.`
 	// Ref: https://godoc.org/github.com/aws/aws-sdk-go/service/ec2#EC2.GetPasswordData
 	awsPasswordDataTimeOut = 15 * time.Minute
+	// sshPort to access the OpenSSH server installed on the windows node. This is needed
+	// for our CI testing.
+	sshPort = 22
 )
 
 // log is the global logger for the aws package. Each log record produced
@@ -140,12 +143,13 @@ func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, rerr er
 		return nil, fmt.Errorf("failed to get cluster worker IAM, %v", err)
 	}
 
-	// PowerShell script to setup WinRM for Ansible
+	// PowerShell script to setup WinRM for Ansible and installing OpenSSH server on the Windows node created
 	userDataWinrm := `<powershell>
         $url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
         $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
         (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
         powershell.exe -ExecutionPolicy ByPass -File $file
+        powershell -NonInteractive -ExecutionPolicy Bypass Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
         </powershell>
         <persist>true</persist>`
 
@@ -434,15 +438,15 @@ func (a *AwsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, erro
 
 	log.Info(fmt.Sprintf("Using existing Security Group: %s.", sgID))
 
-	// Check winrm port open status for the exist security group
-	portOpen, err := a.checkSgWinrmPort(sgID)
+	// Check winrm port open status for the existing security group
+	iswinrmPortOpen, err := a.IsPortOpen(sgID, WINRM_PORT)
 	if err != nil {
 		return "", err
 	}
-
+	// TODO: Add a map so that we can have a specific protocol to port mapping.
 	// Add winrm port to security group if it doesn't exist
-	if !portOpen {
-		err := a.addWinrmPortToSg(sgID)
+	if !iswinrmPortOpen {
+		err := a.addPortToSg(sgID, WINRM_PORT)
 		if err != nil {
 			return "", err
 		}
@@ -451,12 +455,29 @@ func (a *AwsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, erro
 		log.Info(fmt.Sprintf("Winrm port already opened for Security Group: %s.", sgID))
 	}
 
+	// Check if ssh port is open
+	isSSHPortOpen, err := a.IsPortOpen(sgID, sshPort)
+	if err != nil {
+		return "", err
+	}
+
+	// Add ssh port to security group if it doesn't exist
+	if !isSSHPortOpen {
+		err := a.addPortToSg(sgID, sshPort)
+		if err != nil {
+			return "", err
+		}
+		log.Info(fmt.Sprintf("ssh port is now added to Security Group %s", sgID))
+	} else {
+		log.Info(fmt.Sprintf("ssh port already opened for Security Group: %s.", sgID))
+	}
+
 	return sgID, nil
 }
 
-// checkSgWinrmPort checks whether the winrm https port is opened in the given security group.
+// IsPort checks whether the given port is open in the given security group.
 // Return boolean for the checking result.
-func (a *AwsProvider) checkSgWinrmPort(sgId string) (bool, error) {
+func (a *AwsProvider) IsPortOpen(sgId string, port int64) (bool, error) {
 	// Get security group information
 	SgResult, err := a.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
 		GroupIds: []*string{
@@ -469,17 +490,16 @@ func (a *AwsProvider) checkSgWinrmPort(sgId string) (bool, error) {
 
 	// Search winrm port in the inbound rule of the security group
 	for _, rule := range SgResult.SecurityGroups[0].IpPermissions {
-		if rule.FromPort != nil && *rule.FromPort == WINRM_PORT {
+		if (rule.FromPort != nil && *rule.FromPort == port) && (rule.ToPort != nil && *rule.ToPort == port) {
 			return true, nil
 		}
 	}
-	log.Info(fmt.Sprintf("Winrm port is not open for Security Group: %s.", sgId))
+	log.Info(fmt.Sprintf("Given port %v is not open for Security Group: %s.", port, sgId))
 	return false, nil
 }
 
-// createWinrmPortToSg creates winrm https port 5986 for the given security group. If the port
-// doesn't not exist in the security group notify the user and generate one for the user.
-func (a *AwsProvider) addWinrmPortToSg(sgId string) error {
+// addPortToSg adds the given port to the given security group.
+func (a *AwsProvider) addPortToSg(sgId string, port int64) error {
 	myIP, err := GetMyIp()
 	if err != nil {
 		return err
@@ -492,8 +512,8 @@ func (a *AwsProvider) addWinrmPortToSg(sgId string) error {
 		IpPermissions: []*ec2.IpPermission{
 			(&ec2.IpPermission{}).
 				SetIpProtocol("tcp").
-				SetFromPort(WINRM_PORT).
-				SetToPort(WINRM_PORT).
+				SetFromPort(port).
+				SetToPort(port).
 				SetIpRanges([]*ec2.IpRange{
 					(&ec2.IpRange{}).
 						SetCidrIp(myIP + "/32"),
@@ -511,7 +531,7 @@ func (a *AwsProvider) createWindowsWorkerSg(infraID string, vpc *ec2.Vpc) (strin
 	sgName := strings.Join([]string{infraID, "windows", "worker", "sg"}, "-")
 	sg, err := a.EC2.CreateSecurityGroup(&ec2.CreateSecurityGroupInput{
 		GroupName:   aws.String(sgName),
-		Description: aws.String("security group for RDP and all traffic within VPC"),
+		Description: aws.String("security group for RDP, winrm, ssh and all traffic within VPC"),
 		VpcId:       vpc.VpcId,
 	})
 	if err != nil {
@@ -563,6 +583,17 @@ func (a *AwsProvider) authorizeSgIngress(sgID string, vpc *ec2.Vpc) error {
 				// winrm ansible https port
 				SetFromPort(WINRM_PORT).
 				SetToPort(WINRM_PORT).
+				SetIpRanges([]*ec2.IpRange{
+					(&ec2.IpRange{}).
+						SetCidrIp(myIP + "/32"),
+				}),
+			(&ec2.IpPermission{}).
+				SetIpProtocol("tcp").
+				// SSH port to be opened for
+				// TODO: add validation to check if the port is already opened, inform the user
+				// of the same and this should be a no-op
+				SetFromPort(sshPort).
+				SetToPort(sshPort).
 				SetIpRanges([]*ec2.IpRange{
 					(&ec2.IpRange{}).
 						SetCidrIp(myIP + "/32"),

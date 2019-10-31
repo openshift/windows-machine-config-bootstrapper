@@ -286,6 +286,14 @@ func testInstanceIsAssociatedWithWindowsWorkerSg(t *testing.T) {
 				Values: aws.StringSlice([]string{"-1", "3389"}),
 			},
 			{
+				Name:   aws.String("ip-permission.from-port"),
+				Values: aws.StringSlice([]string{"-1", "22"}),
+			},
+			{
+				Name:   aws.String("ip-permission.to-port"),
+				Values: aws.StringSlice([]string{"-1", "22"}),
+			},
+			{
 				Name:   aws.String("ip-permission.protocol"),
 				Values: aws.StringSlice([]string{"tcp"}),
 			},
