@@ -27,7 +27,7 @@ var (
 		},
 	}
 
-	runOpts struct {
+	initializeKubeletOpts struct {
 		// The location of the ignition file
 		ignitionFile string
 		// The location where the kubelet.exe has been downloaded to
@@ -39,11 +39,11 @@ var (
 
 func init() {
 	rootCmd.AddCommand(initializeKubeletCmd)
-	initializeKubeletCmd.PersistentFlags().StringVar(&runOpts.ignitionFile, "ignition-file", "",
+	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.ignitionFile, "ignition-file", "",
 		"Ignition file location to bootstrap the Windows node")
-	initializeKubeletCmd.PersistentFlags().StringVar(&runOpts.kubeletPath, "kubelet-path", "",
+	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.kubeletPath, "kubelet-path", "",
 		"Kubelet file location to bootstrap the Windows node")
-	initializeKubeletCmd.PersistentFlags().StringVar(&runOpts.installDir, "install-dir", "c:\\k",
+	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.installDir, "install-dir", "c:\\k",
 		"Kubelet file location to bootstrap the Windows node. Defaults to C:\\k")
 }
 
@@ -52,7 +52,8 @@ func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 	flag.Parse()
 	// TODO: add validation for flags
 
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(runOpts.installDir, runOpts.ignitionFile, runOpts.kubeletPath)
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(initializeKubeletOpts.installDir,
+		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath)
 	if err != nil {
 		log.Error(err, "could not create bootstrapper")
 		os.Exit(1)
