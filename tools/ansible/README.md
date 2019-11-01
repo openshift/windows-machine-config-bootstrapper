@@ -7,6 +7,11 @@
     - If you are using a cloud provider, you may have to add a tag to the Windows instance.
       It will be of the format `key:kubernetes.io/cluster/<infraID>` with `value: owned`.
       - You can find the infraID in the Ignition config file metadata `metadata.json`
+- Ansible 2.9 and pywinrm installed, and selinux bindings exist on the system
+```
+sudo dnf install libselinux-python
+pip install selinux ansible==2.9 pywinrm
+```
 - A `hosts` file with the required variables defined. See below for an example:
 ```
 [win]
