@@ -16,10 +16,10 @@ build:
 
 .PHONY: build-wmcb-unit-test
 build-wmcb-unit-test:
-	GOOS=windows GOFLAGS=-v go test -c ./pkg/... -o wmcb_unit_test.exe
+	$(GO_BUILD_ARGS) GOOS=windows GOFLAGS=-v go test -c ./pkg/... -o wmcb_unit_test.exe
 
 test-e2e-prepared-node:
-	GOOS=windows go test -run=TestBootstrapper ./test/e2e
+	$(GO_BUILD_ARGS) GOOS=windows go test -run=TestBootstrapper ./test/e2e
 
 .PHONY: build-tools
 build-tools:
