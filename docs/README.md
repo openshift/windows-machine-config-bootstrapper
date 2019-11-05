@@ -30,13 +30,22 @@ wmcb initialize-kubelet --ignition-file $IGNITION_FILE_PATH --kubelet-path $KUBE
 
 ### Windows Machine Config Bootstrapper
 
+#### End to end testing
+
 On an existing Windows instance which is ready to join the cluster, copy the worker ignition file to C:\Windows\Temp\worker.ign, and the kubelet to C:\Windows\Temp\kubelet.exe
 
-On the Windows instance, run:
+On your Linux development machine, build the e2e test binary:
 ```
-make test-e2e-prepared-node
+make build-wmcb-e2e-test
 ```
-If the test passes:
+This will build a binary called `wmcb_e2e_test.exe`. Copy this binary to the Windows node and execute it. The expected
+output should be as follows:
+```
+PS C:\wmcb> .\wmcb_e2e_test.exe
+PASS
+```
+If the test passes run the following on your Linux development machine that has access to the cluster where the Windows
+node is present:
 ```
 oc get csr
 ```
