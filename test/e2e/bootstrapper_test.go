@@ -53,7 +53,7 @@ func TestBootstrapper(t *testing.T) {
 	// Run the bootstrapper, which will start the kubelet service
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath)
 	assert.Nilf(t, err, "Could not create WinNodeBootstrapper: %s", err)
-	err = wmcb.Run()
+	err = wmcb.InitializeKubelet()
 	assert.Nilf(t, err, "Could not run bootstrapper: %s", err)
 	err = wmcb.Disconnect()
 	assert.Nilf(t, err, "Could not disconnect from windows svc API: %s", err)
@@ -77,7 +77,7 @@ func TestBootstrapper(t *testing.T) {
 	time.Sleep(5 * time.Second)
 	wmcb, err = bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath)
 	assert.Nilf(t, err, "Could not create WinNodeBootstrapper: %s", err)
-	err = wmcb.Run()
+	err = wmcb.InitializeKubelet()
 	assert.Nilf(t, err, "Could not run bootstrapper: %s", err)
 	err = wmcb.Disconnect()
 	assert.Nilf(t, err, "Could not disconnect from windows svc API: %s", err)
