@@ -24,6 +24,17 @@ import (
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
+const (
+	// the '*' is used to match all the ports of the source IP address
+	sourcePortRange = "*"
+	// the '*' is used to match all the source IP addresses
+	destinationAddressPrefix = "*"
+	// winRM HTTPS port
+	winRM = "5986"
+	// includes the priority of opening winRm port in security group rules.
+	winRMPortPriority = 300
+)
+
 var log = logger.Log.WithName("azure-vm")
 var windowsWorker string = "winworker-"
 
@@ -342,8 +353,8 @@ func (az *AzureProvider) createSecurityGroupRules(ctx context.Context, nsgName s
 						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
 							Protocol:                 network.SecurityRuleProtocolTCP,
 							SourceAddressPrefix:      to.StringPtr(*myIP + "/32"),
-							SourcePortRange:          to.StringPtr("*"),
-							DestinationAddressPrefix: to.StringPtr("*"),
+							SourcePortRange:          to.StringPtr(sourcePortRange),
+							DestinationAddressPrefix: to.StringPtr(destinationAddressPrefix),
 							DestinationPortRange:     to.StringPtr("3389"),
 							Access:                   network.SecurityRuleAccessAllow,
 							Direction:                network.SecurityRuleDirectionInbound,
@@ -355,25 +366,27 @@ func (az *AzureProvider) createSecurityGroupRules(ctx context.Context, nsgName s
 						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
 							Protocol:                 network.SecurityRuleProtocolTCP,
 							SourceAddressPrefix:      to.StringPtr("10.0.0.0/16"),
-							SourcePortRange:          to.StringPtr("*"),
-							DestinationAddressPrefix: to.StringPtr("*"),
+							SourcePortRange:          to.StringPtr(sourcePortRange),
+							DestinationAddressPrefix: to.StringPtr(destinationAddressPrefix),
 							DestinationPortRanges:    &[]string{"1-65535"},
 							Access:                   network.SecurityRuleAccessAllow,
 							Direction:                network.SecurityRuleDirectionInbound,
 							Priority:                 to.Int32Ptr(200),
 						},
 					},
+					// WINRM is an inbound security group rule allows incoming WinRM traffic
+					// on to the windows node.
 					{
 						Name: to.StringPtr("WINRM"),
 						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
 							Protocol:                 network.SecurityRuleProtocolTCP,
 							SourceAddressPrefix:      to.StringPtr(*myIP + "/32"),
-							SourcePortRange:          to.StringPtr("*"),
-							DestinationAddressPrefix: to.StringPtr("*"),
-							DestinationPortRange:     to.StringPtr("5986"),
+							SourcePortRange:          to.StringPtr(sourcePortRange),
+							DestinationAddressPrefix: to.StringPtr(destinationAddressPrefix),
+							DestinationPortRange:     to.StringPtr(winRM),
 							Access:                   network.SecurityRuleAccessAllow,
 							Direction:                network.SecurityRuleDirectionInbound,
-							Priority:                 to.Int32Ptr(300),
+							Priority:                 to.Int32Ptr(winRMPortPriority),
 						},
 					},
 				},
@@ -470,26 +483,13 @@ func (az *AzureProvider) getIPAddress(ctx context.Context) (ipAddress *string, e
 	return
 }
 
-// constructWinRMConfig constructs the winrm Listeners for the instance for now it will configure only one listener, but this may
-// scale to multiple listeners depending on the use case. By default they listen via Http protocol.
-// TODO: Provide the CertificateURL for the winRMListeners, the url need to be grabbed from the Key Vault.
-func constructWinRMConfig() (winRMConfig *compute.WinRMConfiguration) {
-
-	winRMListeners := &[]compute.WinRMListener{
-		{
-			Protocol: "Http",
-		},
-	}
-	winRMConfig = &compute.WinRMConfiguration{
-		Listeners: winRMListeners,
-	}
-	return winRMConfig
-}
-
 // constructAdditionalContent constructs the commands need to executed upon windows node set up.
 // "AutoLogon" setting is responsible to logging into the windows instance and "FirstLogonCommands" is responsible
 // for executing the commands on start i.e in this case it will set up WinRM for Ansible to execute remote commands.
 func constructAdditionalContent(instanceName, adminUserName, adminPassword string) *[]compute.AdditionalUnattendContent {
+	// On first time Logon it will copy the custom file injected to a temporary directory
+	// on windows node, and then it will execute the steps inside the custom script
+	// which will configure winRM Https & Http listeners running on port 5986 & 5985 respectively.
 	firstLogonData :=
 		"<FirstLogonCommands> " +
 			"<SynchronousCommand> " +
@@ -515,16 +515,25 @@ func constructAdditionalContent(instanceName, adminUserName, adminPassword strin
 		"<LogonCount>1</LogonCount><Enabled>true</Enabled></AutoLogon>", instanceName, adminUserName, adminPassword)
 	additionalContent := &[]compute.AdditionalUnattendContent{
 		{
-			PassName:      "OobeSystem",
+			// OobeSystem is a configuration setting that is applied during the end-user first boot experience, also
+			// called as Out-Of-Box experience. The configuration settings are processed before user first logon
+			// to the Windows node. It is a const provided by the azure SDK module.
+			PassName: "OobeSystem",
+			// Microsoft-Windows-Shell-Setup contains elements and settings that control how the Windows shell need to
+			// be installed. This component is selected so that AutoLogon and FirstLogonCommands settings can be used.
+			// Currently the azure SDK module allows only to set up shell component.
 			ComponentName: "Microsoft-Windows-Shell-Setup",
-			SettingName:   "AutoLogon",
-			Content:       to.StringPtr(autoLogonData),
+			// AutoLogon specifies credentials for an account that is used to automatically log on to the
+			// windows node.
+			SettingName: "AutoLogon",
+			Content:     to.StringPtr(autoLogonData),
 		},
 		{
 			PassName:      "OobeSystem",
 			ComponentName: "Microsoft-Windows-Shell-Setup",
-			SettingName:   "FirstLogonCommands",
-			Content:       to.StringPtr(firstLogonData),
+			// FirstLogonCommands specifies commands to run the first time that an end user logs on to the windows node.
+			SettingName: "FirstLogonCommands",
+			Content:     to.StringPtr(firstLogonData),
 		},
 	}
 	return additionalContent
@@ -536,8 +545,9 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
 	instanceName := windowsWorker + randomString(5)
 	adminUserName := "core"
 	adminPassword := randomPasswordString(12)
-	computeWinRMConfig := constructWinRMConfig()
 	additionalContent := constructAdditionalContent(instanceName, adminUserName, adminPassword)
+	// the data runs the script from the url location, script sets up both HTTP & HTTPS WinRM listeners so that
+	// Ansible can connect to it and run remote scripts on the windows node.
 	data := `$url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
         $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
         (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
@@ -558,7 +568,6 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
 			EnableAutomaticUpdates:    to.BoolPtr(false),
 			TimeZone:                  to.StringPtr(timeZoneMap[nodeLocation]),
 			AdditionalUnattendContent: additionalContent,
-			WinRM:                     computeWinRMConfig,
 		},
 	}
 	return osProfile, instanceName, adminPassword

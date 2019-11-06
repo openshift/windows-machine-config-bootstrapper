@@ -32,6 +32,7 @@ build-tools:
 .PHONY: test-e2e-tools
 test-e2e-tools:
 	cd ./tools/windows-node-installer && $(GO_BUILD_ARGS) go test $(TOOLS_DIR)/test/e2e/... -timeout 20m -v
+	$(GO_BUILD_ARGS) go test -run=TestAwsE2eSerial $(TOOLS_DIR)/test/e2e/... -timeout 20m -v
 
 .PHONY: run-wmcb-ci-e2e-test
 run-wmcb-ci-e2e-test:
