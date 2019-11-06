@@ -3,6 +3,9 @@
 
 FROM centos:centos8
 
+# Setting the user to root so that future layers will not run into permission issues
+USER root
+
 RUN yum -y update && yum -y install git make
 
 # Download and install Go
