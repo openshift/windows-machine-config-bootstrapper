@@ -3,7 +3,7 @@
 
 FROM centos:centos8
 
-RUN yum -y update && yum -y install git make
+RUN yum -y update && yum -y install git make python2 python2-pip
 
 # Download and install Go
 RUN curl -L -s https://dl.google.com/go/go1.13.4.linux-amd64.tar.gz > go1.13.4.linux-amd64.tar.gz \
