@@ -3,9 +3,6 @@
 
 FROM centos:centos8
 
-# Setting the user to root so that future layers will not run into permission issues
-USER root
-
 RUN yum -y update && yum -y install git make
 
 # Download and install Go
@@ -27,4 +24,8 @@ RUN curl -L -s https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.2.2/o
 
 ENV PATH="${PATH}:/usr/local/go/bin"
 ENV GOPATH="/usr/local/go"
+
+# This is being set to avoid permission errors in future layers
+ENV GOCACHE="/tmp/gocache"
+
 ENTRYPOINT [ "/bin/bash" ]
