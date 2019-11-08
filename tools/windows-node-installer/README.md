@@ -93,12 +93,15 @@ Sample Delete Command:
 --dir ./windowsnodeinstaller/
 ```
 
-### e2e Test
+
+### End to end testing
 The e2e test for azure run under the assumption that Windows instance is already created and the instanceId's,
 subnetGroupId's are present in the windows-node-installer.json file in `--dir`. Currently it tests if `winRM` port is opened on the
 worker subnet and can ansible can execute remote commands on the Windows node.
 
 To run the e2e do:
 ```bash
- go test -run=TestWinRMSetup github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/test/e2e/... -v
+export PACKAGE=github.com/openshift/windows-machine-config-operator
+export TOOLS_DIR=$PACKAGE/tools/windows-node-installer
+go test -run=TestWinRMSetup $TOOLS_DIR/test/e2e/... -v
 ```    

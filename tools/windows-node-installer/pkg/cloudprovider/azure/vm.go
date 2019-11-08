@@ -33,6 +33,8 @@ const (
 	winRM = "5986"
 	// includes the priority of opening winRm port in security group rules.
 	winRMPortPriority = 300
+	// winRM security group rule name
+	winRMRule = "WINRM"
 )
 
 var log = logger.Log.WithName("azure-vm")
@@ -353,8 +355,8 @@ func (az *AzureProvider) createSecurityGroupRules(ctx context.Context, nsgName s
 						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
 							Protocol:                 network.SecurityRuleProtocolTCP,
 							SourceAddressPrefix:      to.StringPtr(*myIP + "/32"),
-							SourcePortRange:          to.StringPtr(sourcePortRange),
-							DestinationAddressPrefix: to.StringPtr(destinationAddressPrefix),
+							SourcePortRange:          to.StringPtr("*"),
+							DestinationAddressPrefix: to.StringPtr("*"),
 							DestinationPortRange:     to.StringPtr("3389"),
 							Access:                   network.SecurityRuleAccessAllow,
 							Direction:                network.SecurityRuleDirectionInbound,
@@ -366,18 +368,18 @@ func (az *AzureProvider) createSecurityGroupRules(ctx context.Context, nsgName s
 						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
 							Protocol:                 network.SecurityRuleProtocolTCP,
 							SourceAddressPrefix:      to.StringPtr("10.0.0.0/16"),
-							SourcePortRange:          to.StringPtr(sourcePortRange),
-							DestinationAddressPrefix: to.StringPtr(destinationAddressPrefix),
+							SourcePortRange:          to.StringPtr("*"),
+							DestinationAddressPrefix: to.StringPtr("*"),
 							DestinationPortRanges:    &[]string{"1-65535"},
 							Access:                   network.SecurityRuleAccessAllow,
 							Direction:                network.SecurityRuleDirectionInbound,
 							Priority:                 to.Int32Ptr(200),
 						},
 					},
-					// WINRM is an inbound security group rule allows incoming WinRM traffic
+					// winRMRule is an inbound security group rule allows incoming WinRM traffic
 					// on to the windows node.
 					{
-						Name: to.StringPtr("WINRM"),
+						Name: to.StringPtr(winRMRule),
 						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
 							Protocol:                 network.SecurityRuleProtocolTCP,
 							SourceAddressPrefix:      to.StringPtr(*myIP + "/32"),
@@ -483,9 +485,7 @@ func (az *AzureProvider) getIPAddress(ctx context.Context) (ipAddress *string, e
 	return
 }
 
-// constructAdditionalContent constructs the commands need to executed upon windows node set up.
-// "AutoLogon" setting is responsible to logging into the windows instance and "FirstLogonCommands" is responsible
-// for executing the commands on start i.e in this case it will set up WinRM for Ansible to execute remote commands.
+// constructAdditionalContent constructs the commands needed to be executed on first login into the Windows node.
 func constructAdditionalContent(instanceName, adminUserName, adminPassword string) *[]compute.AdditionalUnattendContent {
 	// On first time Logon it will copy the custom file injected to a temporary directory
 	// on windows node, and then it will execute the steps inside the custom script
