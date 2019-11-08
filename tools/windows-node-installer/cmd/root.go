@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	wmco "github.com/openshift/windows-machine-config-operator/log"
+	wnilog "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/log"
 	"github.com/spf13/cobra"
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
@@ -26,7 +26,7 @@ var (
 			return validateRootFlags(cmd)
 		},
 		PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
-			return wmco.SetLogLevel([]byte(rootInfo.logLevel))
+			return wnilog.SetLogLevel([]byte(rootInfo.logLevel))
 		},
 	}
 

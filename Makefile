@@ -27,11 +27,11 @@ test-e2e-prepared-node:
 
 .PHONY: build-tools
 build-tools:
-	$(GO_BUILD_ARGS) go build -o wni $(TOOLS_DIR)
+	cd ./tools/windows-node-installer && $(GO_BUILD_ARGS) go build -o wni $(TOOLS_DIR)
 
 .PHONY: test-e2e-tools
 test-e2e-tools:
-	$(GO_BUILD_ARGS) go test $(TOOLS_DIR)/test/e2e/... -timeout 20m -v
+	cd ./tools/windows-node-installer && $(GO_BUILD_ARGS) go test $(TOOLS_DIR)/test/e2e/... -timeout 20m -v
 
 .PHONY: run-wmcb-ci-e2e-test
 run-wmcb-ci-e2e-test:
