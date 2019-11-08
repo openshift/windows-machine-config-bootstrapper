@@ -104,4 +104,4 @@ To run the e2e do:
 export PACKAGE=github.com/openshift/windows-machine-config-operator
 export TOOLS_DIR=$PACKAGE/tools/windows-node-installer
 go test -run=TestWinRMSetup $TOOLS_DIR/test/e2e/... -v
-```    
+```

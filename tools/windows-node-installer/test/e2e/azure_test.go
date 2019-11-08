@@ -196,7 +196,9 @@ func testAnsiblePing(t *testing.T) {
 		b, err := ioutil.ReadFile(vmCredentialPath)
 		assert.NoError(t, err, "failed to read file %s", vmName)
 		ipAddress := ipAddressPattern.FindString(string(b))
+		assert.NotEmpty(t, ipAddress, "the IP address can't be empty")
 		password := passwordPattern.FindString(string(b))[3:]
+		assert.NotEmpty(t, password, "the password can't be empty")
 		// we are trimming out the unnecessary single quotes.
 		password = strings.Trim(password, `'`)
 		hostFileName, err := createHostFile(ipAddress, password)
