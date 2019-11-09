@@ -50,6 +50,18 @@ const (
 	certDirectory = "c:/var/lib/kubelet/pki/"
 	// cloudConfigOption is kubelet CLI option for cloud configuration
 	cloudConfigOption = "cloud-config"
+	// windowsTaints defines the taints that need to be applied on the Windows nodes.
+	/*
+			TODO: As of now, this is limited to os=Windows, so every Windows pod in
+			OpenShift cluster should have a toleration for this.
+			Example toleration in the pod spec:
+			tolerations:
+			  - key: "os"
+		      	operator: "Equal"
+		      	value: "Windows"
+		      	effect: "NoSchedule"
+	*/
+	windowsTaints = "os=Windows:NoSchedule"
 )
 
 // These regex are global, so that we only need to compile them once
@@ -298,6 +310,11 @@ func (wmcb *winNodeBootstrapper) createKubeletService() error {
 		"--windows-service",
 		"--logtostderr=false",
 		"--log-file=" + filepath.Join(wmcb.installDir, "kubelet.log"),
+		// Registers the Kubelet with Windows specific taints so that linux pods won't get scheduled onto
+		// Windows nodes.
+		// TODO: Write a `against the cluster` e2e test which checks for the Windows node object created
+		// and check for taint.
+		"--register-with-taints=" + windowsTaints,
 		// TODO: Uncomment this when we have a CNI solution
 		/*
 			network-plugin=cni",

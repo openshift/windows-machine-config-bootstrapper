@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"k8s.io/client-go/tools/clientcmd"
 	"log"
 	"os"
 	"testing"
@@ -17,6 +18,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/ssh"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sclient "k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -29,6 +33,13 @@ const (
 	// winrm port to be used
 	winRMPort = 5986
 )
+
+// windowsTaint is the taint that needs to be applied to the Windows node
+var windowsTaint = v1.Taint{
+	Key:    "os",
+	Value:  "Windows",
+	Effect: v1.TaintEffectNoSchedule,
+}
 
 // testFramework holds the info to run the test suite
 type testFramework struct {
@@ -216,6 +227,42 @@ func TestWMCBUnit(t *testing.T) {
 	assert.NoError(t, err, "error reading stdout from the remote Windows VM")
 	os.Stdout = stdout
 	assert.NotContains(t, string(out), "FAIL")
+}
+
+// getKubeClient gets the kubernetes client needed for testing.
+func getKubeClient() (*k8sclient.Clientset, error) {
+	kubeconfig := os.Getenv("KUBECONFIG")
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	kclient, err := k8sclient.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	return kclient, nil
+}
+
+// TestWMCBCluster runs the cluster tests for the nodes
+func TestWMCBCluster(t *testing.T) {
+	//TODO: Transfer the WMCB binary to the Windows node and approve CSR for the Windows node.
+	// I want this to be moved to another test. We've another card for this, so let's come back
+	// to that later(WINC-82). As of now, this test is limited to check if the taint has been
+	// applied to the Windows node and skipped for now.
+	client, err := getKubeClient()
+	require.NoErrorf(t, err, "error getting kubeclient: %v", err)
+	winNodes, err := client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: "kubernetes.io/os=windows"})
+	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
+	hasWindowsTaint := false
+	for _, node := range winNodes.Items {
+		for _, taint := range node.Spec.Taints {
+			if taint.Key == windowsTaint.Key && taint.Value == windowsTaint.Value && taint.Effect == windowsTaint.Effect {
+				hasWindowsTaint = true
+				break
+			}
+		}
+	}
+	assert.Equalf(t, hasWindowsTaint, true, "expected Windows Taint to be present on the Windows Node")
 }
 
 // tearDown tears down the set up done for test suite
