@@ -3,9 +3,11 @@
 
 FROM centos:centos8
 
+WORKDIR /go/src/github.com/openshift/windows-machine-config-operator/
+
 COPY . .
 
-RUN yum -y update && yum -y install git make python2 python2-pip
+RUN yum -y update && yum -y install git make python2 python2-pip gcc
 
 # Download and install Go
 RUN curl -L -s https://dl.google.com/go/go1.12.13.linux-amd64.tar.gz > go1.12.13.linux-amd64.tar.gz \
@@ -25,9 +27,15 @@ RUN curl -L -s https://mirror.openshift.com/pub/openshift-v4/clients/ocp/4.2.2/o
     && oc version
 
 # Install ansible and required packages
-RUN pip2 install --user ansible pywinrm
+RUN pip2 install ansible pywinrm
+
+# Make Ansible happy with arbitrary UID/GID in OpenShift.
+RUN chmod g=u /etc/passwd /etc/group
+
+# Allow building the WMCB
+RUN chmod -R g=u /go
 
 ENV PATH="${PATH}:/usr/local/go/bin"
-ENV GOPATH="/usr/local/go"
+ENV GOPATH="/go"
 
 ENTRYPOINT [ "/bin/bash" ]
