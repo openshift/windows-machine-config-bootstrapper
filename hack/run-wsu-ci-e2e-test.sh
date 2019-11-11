@@ -10,10 +10,6 @@ TEST_DIR=$WMCO_ROOT/tools/ansible/tasks/wsu/test/e2e
 #      which is a requirement to run this script
 exit 0
 
-# Required packages to run the test suite
-sudo yum install -y python libselinux-python python-pip
-pip install --user ansible pywinrm
-
 # The WSU playbook requires the cluster address, we parse that here using oc
 CLUSTER_ADDR=$(oc cluster-info | head -n1 | sed 's/.*\/\/api.//g'| sed 's/:.*//g')
 
