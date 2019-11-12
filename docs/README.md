@@ -7,6 +7,18 @@ jobs that the bootstrapper does:
 - Ensures that the kubelet gets the correct kubelet config
 - Run the kubelet as a windows service
 
+Once the bootstrapper has been run and the CSR associated with the Windows node is approved, the Windows 
+node will have a taint called `os=Windows:NoSchedule`, only the pods with matching toleration can 
+be scheduled onto the Windows node. An example pod spec with the toleration would be:
+
+```
+tolerations:
+  - key: "os"
+    operator: "Equal"
+    value: "Windows"
+    effect: "NoSchedule"
+```
+
 This will be remotely invoked from a Ansible script or can be run locally
 
 ## Requirements

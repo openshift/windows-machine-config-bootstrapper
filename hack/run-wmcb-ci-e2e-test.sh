@@ -14,5 +14,5 @@ make build-wmcb-unit-test
 # Transfer the binary and run the unit tests
 cd "${INTERNAL_TEST_DIR}"
 CGO_ENABLED=0 GO111MODULE=on go test -c wmcb_test.go -o wmcb_framework
-./wmcb_framework -binaryToBeTransferred=../../wmcb_unit_test.exe
+./wmcb_framework -test.run=TestWMCBUnit -binaryToBeTransferred=../../wmcb_unit_test.exe
 
