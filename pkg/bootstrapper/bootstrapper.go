@@ -62,6 +62,8 @@ const (
 		      	effect: "NoSchedule"
 	*/
 	windowsTaints = "os=Windows:NoSchedule"
+	// workerLabel contains the label that needs to be applied to the worker nodes in the cluster
+	workerLabel = "node-role.kubernetes.io/worker"
 )
 
 // These regex are global, so that we only need to compile them once
@@ -75,6 +77,11 @@ var (
 
 	// verbosityRegex searches for the verbosity option given to the kubelet
 	verbosityRegex = regexp.MustCompile(`--v=(\w*)`)
+
+	// nodeLabelRegex searches for all the node labels that needs to be applied to kubelet. Usually labels are
+	// comma separated values.
+	// Example: --node-labels=node-role.kubernetes.io/worker,node.openshift.io/os_id=${ID}
+	nodeLabelRegex = regexp.MustCompile(`--node-labels=(.*)`)
 )
 
 // winNodeBootstrapper is responsible for bootstrapping and ensuring kubelet runs as a Windows service
@@ -240,6 +247,22 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 		if len(results) == 2 {
 			wmcb.kubeletArgs["v"] = results[1]
 		}
+
+		// Set the worker label
+		results = nodeLabelRegex.FindStringSubmatch(unit.Contents)
+		if len(results) == 2 {
+			// Since labels are comma separated values, split them, as we're only interested in applying the worker
+			// label.
+			// TODO: Check if we can apply all the labels in future. As of now, we're interested only in the worker
+			// label the rest can be ignored
+			nodeLabels := strings.Split(results[1], ",")
+			for _, nodeLabel := range nodeLabels {
+				// Get the worker label, usually it's a standard label
+				if strings.Contains(nodeLabel, workerLabel) {
+					wmcb.kubeletArgs["node-labels"] = nodeLabel
+				}
+			}
+		}
 	}
 
 	// For each new file in the ignition file check if is a file we are interested in, if so, decode, transform,
@@ -330,6 +353,9 @@ func (wmcb *winNodeBootstrapper) createKubeletService() error {
 	}
 	if cloudConfigValue, ok := wmcb.kubeletArgs[cloudConfigOption]; ok {
 		kubeletArgs = append(kubeletArgs, "--"+cloudConfigOption+"="+cloudConfigValue)
+	}
+	if nodeWorkerLabel, ok := wmcb.kubeletArgs["node-labels"]; ok {
+		kubeletArgs = append(kubeletArgs, "--"+"node-labels"+"="+nodeWorkerLabel)
 	}
 
 	// Mostly default values here
