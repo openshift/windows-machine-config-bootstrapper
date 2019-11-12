@@ -26,7 +26,7 @@ const (
 	// winRm Https port for the Windows node.
 	winRM = "5986"
 	// winRm protocol type.
-	winRMProtocol = "TCP"
+	winRMProtocol = "Tcp"
 	// winRmPriority value
 	winRMPriority = 300
 	// winRM action type
@@ -44,9 +44,9 @@ type azureProvider struct {
 }
 
 var (
-	// get the azureCredentials from the env variable "AZURE_AUTH_LOCATION".
+	// azureCredentials is the location of the env variable "AZURE_AUTH_LOCATION".
 	azureCredentials = os.Getenv("AZURE_AUTH_LOCATION")
-	// variable to be used for running the tests
+	// azureInfo initializes the azureProvider type, holds the info to drive the tests.
 	azureInfo = azureProvider{}
 	// instanceIDs that are obtained from the windows-node-installer.json
 	instanceIDs []string
@@ -194,7 +194,7 @@ func testAnsiblePing(t *testing.T) {
 	for _, vmName := range instanceIDs {
 		vmCredentialPath := filepath.Join(dir, "/", vmName)
 		b, err := ioutil.ReadFile(vmCredentialPath)
-		assert.NoError(t, err, "failed to read file %s", vmName)
+		require.NoError(t, err, "failed to read file %s", vmName)
 		ipAddress := ipAddressPattern.FindString(string(b))
 		assert.NotEmpty(t, ipAddress, "the IP address can't be empty")
 		password := passwordPattern.FindString(string(b))[3:]
