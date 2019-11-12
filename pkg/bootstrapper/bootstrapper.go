@@ -321,43 +321,38 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 	return nil
 }
 
+// constructKubeletArgs constructs the kubeletargs that can be passed onto the Windows Service Manager as a slice
+func (wmcb *winNodeBootstrapper) constructKubeletArgs() []string {
+	wmcb.kubeletArgs["config"] = wmcb.kubeletConfPath
+	wmcb.kubeletArgs["bootstrap-kubeconfig"] = filepath.Join(wmcb.installDir, "bootstrap-kubeconfig")
+	wmcb.kubeletArgs["kubeconfig"] = wmcb.kubeconfigPath
+	wmcb.kubeletArgs["pod-infra-container-image"] = kubeletPauseContainerImage
+	wmcb.kubeletArgs["cert-dir"] = certDirectory
+	wmcb.kubeletArgs["windows-service"] = "true"
+	wmcb.kubeletArgs["logtostderr"] = "false"
+	wmcb.kubeletArgs["log-file"] = filepath.Join(wmcb.installDir, "kubelet.log")
+	// Registers the Kubelet with Windows specific taints so that linux pods won't get scheduled onto
+	// Windows nodes.
+	// TODO: Write a `against the cluster` e2e test which checks for the Windows node object created
+	// and check for taint.
+	wmcb.kubeletArgs["register-with-taints"] = windowsTaints
+	// TODO: Uncomment this when we have a CNI solution
+	/*
+		wmcb.kubeletArgs["network-plugin"]= "cni",
+		wmcb.kubeletArgs["cni-bin-dir"]= filepath.Join(k8sInstallDir, "cni")
+		wmcb.kubeletArgs["cni-conf-dir"] = filepath.Join(k8sInstallDir, "cni")
+	*/
+	kubeletArgs := make([]string, 0, len(wmcb.kubeletArgs))
+	for arg, val := range wmcb.kubeletArgs {
+		kubeletArgs = append(kubeletArgs, "--"+arg+"="+val)
+	}
+	return kubeletArgs
+}
+
 // createKubeletService creates a new kubelet service to our specifications
 func (wmcb *winNodeBootstrapper) createKubeletService() error {
 	var err error
-	kubeletArgs := []string{
-		"--config=" + wmcb.kubeletConfPath,
-		"--bootstrap-kubeconfig=" + filepath.Join(wmcb.installDir, "bootstrap-kubeconfig"),
-		"--kubeconfig=" + wmcb.kubeconfigPath,
-		"--pod-infra-container-image=" + kubeletPauseContainerImage,
-		"--cert-dir=" + certDirectory,
-		"--windows-service",
-		"--logtostderr=false",
-		"--log-file=" + filepath.Join(wmcb.installDir, "kubelet.log"),
-		// Registers the Kubelet with Windows specific taints so that linux pods won't get scheduled onto
-		// Windows nodes.
-		// TODO: Write a `against the cluster` e2e test which checks for the Windows node object created
-		// and check for taint.
-		"--register-with-taints=" + windowsTaints,
-		// TODO: Uncomment this when we have a CNI solution
-		/*
-			network-plugin=cni",
-			cni-bin-dir=" + filepath.Join(k8sInstallDir, "cni"),
-			cni-conf-dir=" + filepath.Join(k8sInstallDir, "cni"),
-		*/
-	}
-	if cloudProvider, ok := wmcb.kubeletArgs["cloud-provider"]; ok {
-		kubeletArgs = append(kubeletArgs, "--cloud-provider="+cloudProvider)
-	}
-	if v, ok := wmcb.kubeletArgs["v"]; ok {
-		kubeletArgs = append(kubeletArgs, "--v="+v)
-	}
-	if cloudConfigValue, ok := wmcb.kubeletArgs[cloudConfigOption]; ok {
-		kubeletArgs = append(kubeletArgs, "--"+cloudConfigOption+"="+cloudConfigValue)
-	}
-	if nodeWorkerLabel, ok := wmcb.kubeletArgs["node-labels"]; ok {
-		kubeletArgs = append(kubeletArgs, "--"+"node-labels"+"="+nodeWorkerLabel)
-	}
-
+	kubeletArgs := wmcb.constructKubeletArgs()
 	// Mostly default values here
 	c := mgr.Config{
 		ServiceType: 0,
