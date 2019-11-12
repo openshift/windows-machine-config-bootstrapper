@@ -14,7 +14,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-04-01/network"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
@@ -39,14 +38,12 @@ type azureProvider struct {
 	resourceGroupName string
 	// nsgClient to check if winRmHttps port is opened or not.
 	nsgClient network.SecurityGroupsClient
-	// vmClient to check for ansible ping on the windows node.
-	vmClient compute.VirtualMachinesClient
 }
 
 var (
 	// azureCredentials is the location of the env variable "AZURE_AUTH_LOCATION".
 	azureCredentials = os.Getenv("AZURE_AUTH_LOCATION")
-	// azureInfo initializes the azureProvider type, holds the info to drive the tests.
+	// azureInfo initializes the azureProvider type, holds the info that will be used in the tests.
 	azureInfo = azureProvider{}
 	// instanceIDs that are obtained from the windows-node-installer.json
 	instanceIDs []string
@@ -91,12 +88,9 @@ func setup() (err error) {
 	if subscriptionId == "" {
 		return fmt.Errorf("failed to get the subscriptionId from AZURE_AUTH_LOCATION: %s", azureCredentials)
 	}
-	vmClient := compute.NewVirtualMachinesClient(subscriptionId)
-	vmClient.Authorizer = resourceAuthorizer
 	nsgClient := network.NewSecurityGroupsClient(subscriptionId)
 	nsgClient.Authorizer = resourceAuthorizer
 	azureInfo.resourceGroupName = provider.Azure.ResourceGroupName
-	azureInfo.vmClient = vmClient
 	azureInfo.nsgClient = nsgClient
 	return nil
 }
@@ -193,18 +187,18 @@ func testAnsiblePing(t *testing.T) {
 	passwordPattern := regexp.MustCompile(`/p:.{13}`)
 	for _, vmName := range instanceIDs {
 		vmCredentialPath := filepath.Join(dir, "/", vmName)
-		b, err := ioutil.ReadFile(vmCredentialPath)
+		rdpCmd, err := ioutil.ReadFile(vmCredentialPath)
 		require.NoError(t, err, "failed to read file %s", vmName)
-		ipAddress := ipAddressPattern.FindString(string(b))
+		ipAddress := ipAddressPattern.FindString(string(rdpCmd))
 		assert.NotEmpty(t, ipAddress, "the IP address can't be empty")
-		password := passwordPattern.FindString(string(b))[3:]
+		password := passwordPattern.FindString(string(rdpCmd))[3:]
 		assert.NotEmpty(t, password, "the password can't be empty")
 		// we are trimming out the unnecessary single quotes.
 		password = strings.Trim(password, `'`)
 		hostFileName, err := createHostFile(ipAddress, password)
 		require.NoError(t, err, "failed to create a temp file")
-		cmd := exec.Command("ansible", "win", "-i", hostFileName, "-m", "win_ping")
-		out, err := cmd.CombinedOutput()
+		pingCmd := exec.Command("ansible", "win", "-i", hostFileName, "-m", "win_ping")
+		out, err := pingCmd.CombinedOutput()
 		assert.NoError(t, err, "ansible ping check failed with error: %s", string(out))
 	}
 }
