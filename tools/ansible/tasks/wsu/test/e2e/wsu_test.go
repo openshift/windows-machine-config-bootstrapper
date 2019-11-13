@@ -33,7 +33,7 @@ var (
 	// Microsoft Windows Server 2019 Base with Containers.
 	imageID      = "ami-0b8d82dea356226d3"
 	instanceType = "m4.large"
-	sshKey       = "openshift-dev"
+	sshKey       = "libra"
 
 	// Cloud provider factory that we will use in these tests
 	cloud cloudprovider.Cloud
@@ -104,7 +104,7 @@ func TestWSU(t *testing.T) {
 	require.NoErrorf(t, err, "Could not write to host file: %s", err)
 	cmd := exec.Command("ansible-playbook", "-vvv", "-i", hostFilePath, playbookPath)
 	out, err := cmd.CombinedOutput()
-	assert.NoError(t, err, "WSU playbook returned error: %s, with output: ", err, string(out))
+	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, string(out))
 
 	// Ansible will copy files to a temporary directory with a path such as:
 	// C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible.z5wa1pc5.vhn\\
