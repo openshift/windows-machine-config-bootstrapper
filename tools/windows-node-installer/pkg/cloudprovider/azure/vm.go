@@ -2,6 +2,7 @@ package azure
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"io/ioutil"
@@ -21,6 +22,19 @@ import (
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
+)
+
+const (
+	// the '*' is used to match all the ports of the source IP address
+	sourcePortRange = "*"
+	// the '*' is used to match all the source IP addresses
+	destinationAddressPrefix = "*"
+	// winRM HTTPS port
+	winRM = "5986"
+	// includes the priority of opening winRm port in security group rules.
+	winRMPortPriority = 300
+	// winRM security group rule name
+	winRMRule = "WINRM"
 )
 
 var log = logger.Log.WithName("azure-vm")
@@ -362,6 +376,21 @@ func (az *AzureProvider) createSecurityGroupRules(ctx context.Context, nsgName s
 							Priority:                 to.Int32Ptr(200),
 						},
 					},
+					// winRMRule is an inbound security group rule allows incoming WinRM traffic
+					// on to the windows node.
+					{
+						Name: to.StringPtr(winRMRule),
+						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+							Protocol:                 network.SecurityRuleProtocolTCP,
+							SourceAddressPrefix:      to.StringPtr(*myIP + "/32"),
+							SourcePortRange:          to.StringPtr(sourcePortRange),
+							DestinationAddressPrefix: to.StringPtr(destinationAddressPrefix),
+							DestinationPortRange:     to.StringPtr(winRM),
+							Access:                   network.SecurityRuleAccessAllow,
+							Direction:                network.SecurityRuleDirectionInbound,
+							Priority:                 to.Int32Ptr(winRMPortPriority),
+						},
+					},
 				},
 			},
 		},
@@ -456,19 +485,58 @@ func (az *AzureProvider) getIPAddress(ctx context.Context) (ipAddress *string, e
 	return
 }
 
-// constructWinRMConfig constructs the winrm Listeners for the instance for now it will configure only one listener, but this may
-// scale to multiple listeners depending on the use case. By default they listen via Http protocol.
-// TODO: Provide the CertificateURL for the winRMListeners, the url need to be grabbed from the Key Vault.
-func constructWinRMConfig() (winRMConfig *compute.WinRMConfiguration) {
-	winRMListeners := &[]compute.WinRMListener{
+// constructAdditionalContent constructs the commands needed to be executed on first login into the Windows node.
+func constructAdditionalContent(instanceName, adminUserName, adminPassword string) *[]compute.AdditionalUnattendContent {
+	// On first time Logon it will copy the custom file injected to a temporary directory
+	// on windows node, and then it will execute the steps inside the custom script
+	// which will configure winRM Https & Http listeners running on port 5986 & 5985 respectively.
+	firstLogonData :=
+		"<FirstLogonCommands> " +
+			"<SynchronousCommand> " +
+			"<CommandLine>cmd /c mkdir \"%TEMP%\"\\script</CommandLine> " +
+			"<Description>Create the script directory</Description> " +
+			"<Order>11</Order> " +
+			"</SynchronousCommand> " +
+			"<SynchronousCommand> " +
+			"<CommandLine>cmd /c copy C:\\AzureData\\CustomData.bin " +
+			"\"%TEMP%\"\\script\\winrm.ps1\"</CommandLine> " +
+			"<Description>Move the CustomData file to the working directory</Description> " +
+			"<Order>12</Order>" +
+			"</SynchronousCommand> " +
+			"<SynchronousCommand> " +
+			"<CommandLine>cmd /c powershell.exe -sta -ExecutionPolicy Unrestricted -file " +
+			"\"%TEMP%\"\\script\\winrm.ps1</CommandLine> " +
+			"<Description>Execute the WinRM enabling script</Description> " +
+			"<Order>13</Order> " +
+			"</SynchronousCommand> " +
+			"</FirstLogonCommands>"
+
+	autoLogonData := fmt.Sprintf("<AutoLogon><Domain>%s</Domain><Username>%s</Username><Password><Value>%s</Value></Password>"+
+		"<LogonCount>1</LogonCount><Enabled>true</Enabled></AutoLogon>", instanceName, adminUserName, adminPassword)
+	additionalContent := &[]compute.AdditionalUnattendContent{
 		{
-			Protocol: "Http",
+			// OobeSystem is a configuration setting that is applied during the end-user first boot experience, also
+			// called as Out-Of-Box experience. The configuration settings are processed before user first logon
+			// to the Windows node. It is a const provided by the azure SDK module.
+			PassName: "OobeSystem",
+			// Microsoft-Windows-Shell-Setup contains elements and settings that control how the Windows shell need to
+			// be installed. This component is selected so that AutoLogon and FirstLogonCommands settings can be used.
+			// Currently the azure SDK module allows only to set up shell component.
+			ComponentName: "Microsoft-Windows-Shell-Setup",
+			// AutoLogon specifies credentials for an account that is used to automatically log on to the
+			// windows node.
+			SettingName: "AutoLogon",
+			Content:     to.StringPtr(autoLogonData),
+		},
+		{
+			PassName:      "OobeSystem",
+			ComponentName: "Microsoft-Windows-Shell-Setup",
+			// FirstLogonCommands specifies commands to run the first time that an end user logs on to the windows node.
+			SettingName: "FirstLogonCommands",
+			Content:     to.StringPtr(firstLogonData),
 		},
 	}
-	winRMConfig = &compute.WinRMConfiguration{
-		Listeners: winRMListeners,
-	}
-	return winRMConfig
+	return additionalContent
 }
 
 // constructOSProfile constructs the OS Profile for the creation of windows instance. The OS Profile consists of information
@@ -477,7 +545,14 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
 	instanceName := windowsWorker + randomString(5)
 	adminUserName := "core"
 	adminPassword := randomPasswordString(12)
-	computeWinRMConfig := constructWinRMConfig()
+	additionalContent := constructAdditionalContent(instanceName, adminUserName, adminPassword)
+	// the data runs the script from the url location, script sets up both HTTP & HTTPS WinRM listeners so that
+	// Ansible can connect to it and run remote scripts on the windows node.
+	data := `$url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
+        $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
+        (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
+        powershell.exe -ExecutionPolicy ByPass -File $file`
+
 	var nodeLocation string
 	if !checkForNil(az.getvnetLocation(ctx)) {
 		nodeLocation = *(az.getvnetLocation(ctx))
@@ -487,11 +562,12 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
 		ComputerName:  to.StringPtr(instanceName),
 		AdminUsername: to.StringPtr(adminUserName),
 		AdminPassword: to.StringPtr(adminPassword),
+		CustomData:    to.StringPtr(base64.StdEncoding.EncodeToString([]byte(data))),
 		WindowsConfiguration: &compute.WindowsConfiguration{
-			ProvisionVMAgent:       to.BoolPtr(true),
-			EnableAutomaticUpdates: to.BoolPtr(false),
-			TimeZone:               to.StringPtr(timeZoneMap[nodeLocation]),
-			WinRM:                  computeWinRMConfig,
+			ProvisionVMAgent:          to.BoolPtr(true),
+			EnableAutomaticUpdates:    to.BoolPtr(false),
+			TimeZone:                  to.StringPtr(timeZoneMap[nodeLocation]),
+			AdditionalUnattendContent: additionalContent,
 		},
 	}
 	return osProfile, instanceName, adminPassword
