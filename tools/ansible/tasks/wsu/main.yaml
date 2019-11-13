@@ -56,3 +56,46 @@
         url: "https://api-int.{{ cluster_address }}:22623/config/worker"
         dest: "{{ win_temp_dir.path }}\\worker.ign"
         validate_certs: no
+
+    - name: Run bootstrapper
+      win_shell: "{{ win_temp_dir.path }}\\wmcb.exe initialize-kubelet --ignition-file {{ win_temp_dir.path }}\\worker.ign --kubelet-path {{ win_temp_dir.path }}\\kubelet.exe"
+      register: bootstrap_out
+
+    - name: Check if bootstrap was successful
+      fail:
+        msg: "Bootstrapper error"
+      when: '"Bootstrapping completed successfully" not in bootstrap_out.stderr'
+
+    - name: Initial wait for bootstrap CSR
+      pause:
+        seconds: 60
+
+    - name: Check for bootstrap CSR
+      delegate_to: localhost
+      shell: "oc get csr | awk '/system:serviceaccount:openshift-machine-config-operator:node-bootstrapper/ && /Pending/ {print $1}'"
+      register: bootstrap_csrs
+      until: bootstrap_csrs.stdout != ""
+      retries: 2
+      delay: 60
+
+    - name: Approve pending bootstrap CSRs
+      delegate_to: localhost
+      shell: "oc adm certificate approve {{ item }}"
+      with_items: "{{ bootstrap_csrs.stdout_lines }}"
+
+    - name: Initial wait for node CSR
+      pause:
+        seconds: 60
+
+    - name: Wait for node CSR
+      delegate_to: localhost
+      shell: "oc get csr | awk '/system:node:/ && /Pending/ {print $1}'"
+      register: node_csrs
+      until: node_csrs.stdout != ""
+      retries: 2
+      delay: 60
+
+    - name: Approve pending node CSRs
+      delegate_to: localhost
+      shell: "oc adm certificate approve {{ item }}"
+      with_items: "{{ node_csrs.stdout_lines }}"
