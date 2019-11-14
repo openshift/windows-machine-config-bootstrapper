@@ -479,15 +479,15 @@ func (wmcb *winNodeBootstrapper) InitializeKubelet() error {
 	}
 	err = wmcb.initializeKubeletFiles()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to initialize kubelet: %v", err)
 	}
 	err = wmcb.createKubeletService()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create kubelet windows service: %v", err)
 	}
 	err = wmcb.startKubeletService()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to start kubelet windows service: %v", err)
 	}
 	return nil
 }
