@@ -47,8 +47,6 @@ type testFramework struct {
 	credentials *types.Credentials
 	// winrmClient to access the Windows VM created
 	winrmClient *winrm.Client
-	// fileNames contains a list of files to be transferred to the Windows VM
-	fileNames []string
 	// remoteDir is the directory to which files will be transferred to, on the Windows VM
 	remoteDir string
 	// sshClient contains the ssh client information to access the Windows VM via ssh
