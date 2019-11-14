@@ -253,32 +253,6 @@ func TestCloudConfNotPresent(t *testing.T) {
 	assert.False(t, present, "cloud-config option is not present in kubelet args")
 }
 
-// TestKubeletArgs tests if proper kubelet arguments are present after parsing the ignition file
-func TestKubeletArgs(t *testing.T) {
-	// ignitionContents is the actual worker ignition contents from an azure cluster with dummy credentials and
-	// resources
-	ignitionContents := `{"ignition":{"config":{},"security":{"tls":{}},"timeouts":{},"version":"2.2.0"},"networkd":{},"passwd":{"users":[{"name":"core","sshAuthorizedKeys":["ssh-rsa dummy"]}]},"storage":{"files":[]},"systemd":{"units":[{"contents":"[Unit]\nDescription=Kubernetes Kubelet\nWants=rpc-statd.service crio.service\nAfter=crio.service\n\n[Service]\nType=notify\nExecStartPre=/bin/mkdir --parents /etc/kubernetes/manifests\nExecStartPre=/bin/rm -f /var/lib/kubelet/cpu_manager_state\nEnvironmentFile=/etc/os-release\nEnvironmentFile=-/etc/kubernetes/kubelet-workaround\nEnvironmentFile=-/etc/kubernetes/kubelet-env\n\nExecStart=/usr/bin/hyperkube \\\n    kubelet \\\n      --config=/etc/kubernetes/kubelet.conf \\\n      --bootstrap-kubeconfig=/etc/kubernetes/kubeconfig \\\n      --kubeconfig=/var/lib/kubelet/kubeconfig \\\n      --container-runtime=remote \\\n      --container-runtime-endpoint=/var/run/crio/crio.sock \\\n      --node-labels=node-role.kubernetes.io/worker,node.openshift.io/os_id=${ID} \\\n      --minimum-container-ttl-duration=6m0s \\\n      --volume-plugin-dir=/etc/kubernetes/kubelet-plugins/volume/exec \\\n      --cloud-provider=aws \\\n      --v=3\n\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n","enabled":true,"name":"kubelet.service"}]}}`
-
-	// Create a temp directory with wmcb prefix
-	dir, err := ioutil.TempDir("", "wmcb")
-	require.NoError(t, err, "error creating temp directory")
-	// Ignore the return error as there is not much we can do if the temporary directory is not deleted
-	defer os.RemoveAll(dir)
-
-	wnb := winNodeBootstrapper{
-		installDir:  dir,
-		kubeletArgs: make(map[string]string),
-	}
-
-	err = wnb.parseIgnitionFileContents([]byte(ignitionContents), map[string]fileTranslation{})
-	require.NoError(t, err, "error parsing ignition file contents")
-
-	// Check that the node-labels option value is present in the kubelet args
-	workerLabelAdded, present := wnb.kubeletArgs["node-labels"]
-	assert.True(t, present, "node-labels option is not present in kubelet args")
-	assert.Equal(t, workerLabel, workerLabelAdded)
-}
-
 // TestCloudConfInvalidNames tests that an error is thrown when an ignition file has an invalid "--cloud-config"
 // kubelet argument
 func TestCloudConfInvalidNames(t *testing.T) {
