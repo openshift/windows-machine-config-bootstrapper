@@ -52,11 +52,11 @@ func TestBootstrapper(t *testing.T) {
 
 	// Run the bootstrapper, which will start the kubelet service
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath)
-	assert.Nilf(t, err, "Could not create WinNodeBootstrapper: %s", err)
+	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
-	assert.Nilf(t, err, "Could not run bootstrapper: %s", err)
+	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)
 	err = wmcb.Disconnect()
-	assert.Nilf(t, err, "Could not disconnect from windows svc API: %s", err)
+	assert.NoErrorf(t, err, "Could not disconnect from windows svc API: %s", err)
 
 	t.Run("Kubelet Windows service starts", func(t *testing.T) {
 		// Wait for the service to start
@@ -76,11 +76,11 @@ func TestBootstrapper(t *testing.T) {
 	// Run it again, to ensure it maintains state if the bootstrapper is already started
 	time.Sleep(5 * time.Second)
 	wmcb, err = bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath)
-	assert.Nilf(t, err, "Could not create WinNodeBootstrapper: %s", err)
+	assert.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
-	assert.Nilf(t, err, "Could not run bootstrapper: %s", err)
+	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)
 	err = wmcb.Disconnect()
-	assert.Nilf(t, err, "Could not disconnect from windows svc API: %s", err)
+	assert.NoErrorf(t, err, "Could not disconnect from windows svc API: %s", err)
 
 	t.Run("Kubelet Windows service starts after bootstrapper is run a second time", func(t *testing.T) {
 		// Wait for the service to start
@@ -97,22 +97,22 @@ func ensureIgnitionFileExists(t *testing.T, path string) {
 	}
 	fp, err := os.Create(path)
 	defer fp.Close()
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	_, err = fp.WriteString(defaultIgnitionFileContents)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 }
 
 // svcRunning returns true if the service with the name svcName is running
 func svcRunning(t *testing.T, svcName string) bool {
 	state, err := getSvcState(svcName)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	return svc.Running == state
 }
 
 // svcExists returns true with the service with the name svcName is installed, the state of the service does not matter
 func svcExists(t *testing.T, svcName string) bool {
 	svcMgr, err := mgr.Connect()
-	assert.Nil(t, err)
+	require.NoError(t, err)
 	defer svcMgr.Disconnect()
 	mySvc, err := svcMgr.OpenService(svcName)
 	if err != nil {
@@ -156,6 +156,6 @@ func removeFileIfExists(t *testing.T, path string) {
 // isKubeletRunning checks if the kubelet was able to start sucessfully
 func isKubeletRunning(t *testing.T, logPath string) bool {
 	buf, err := ioutil.ReadFile(logPath)
-	assert.Nil(t, err)
+	assert.NoError(t, err)
 	return strings.Contains(string(buf), "Started kubelet")
 }

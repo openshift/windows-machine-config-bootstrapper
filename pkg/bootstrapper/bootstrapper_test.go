@@ -82,7 +82,7 @@ rqLuyNO+hCh/ZclPL+UiGJH1dlQ=
 		t.Run(tt.name, func(t *testing.T) {
 			bs := winNodeBootstrapper{installDir: filepath.Base("tmp")}
 			got, err := bs.translateFile(tt.args.input, tt.args.lambda)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			assert.Equalf(t, tt.want, got, "got = %v, want %v", string(got), string(tt.want))
 		})
 	}
@@ -108,7 +108,7 @@ func TestPrepKubeletConfForWindows(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			bs := winNodeBootstrapper{installDir: `C:\k`}
 			got, err := prepKubeletConfForWindows(&bs, tt.args.in)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 			assert.Equalf(t, tt.want, got, "got = %v, want %v", string(got), string(tt.want))
 		})
 	}
