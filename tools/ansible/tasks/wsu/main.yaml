@@ -2,7 +2,7 @@
 - hosts: localhost
   vars:
     project_root: "{{ playbook_dir }}/../../../.."
-    kubelet_location: "https://dl.k8s.io/v1.14.0/kubernetes-node-windows-amd64.tar.gz"
+    kubelet_location: "https://dl.k8s.io/v1.16.2/kubernetes-node-windows-amd64.tar.gz"
     wmcb_exe: "wmcb.exe"
 
   tasks:
