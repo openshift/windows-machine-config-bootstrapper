@@ -32,14 +32,18 @@ const (
 	remotePowerShellCmdPrefix = "powershell.exe -NonInteractive -ExecutionPolicy Bypass "
 	// winrm port to be used
 	winRMPort = 5986
+	// nodeLabels represents the node label that need to be applied to the Windows node created
+	nodeLabel = "node.openshift.io/os_id=Windows"
 )
 
-// windowsTaint is the taint that needs to be applied to the Windows node
-var windowsTaint = v1.Taint{
-	Key:    "os",
-	Value:  "Windows",
-	Effect: v1.TaintEffectNoSchedule,
-}
+var (
+	// windowsTaint is the taint that needs to be applied to the Windows node
+	windowsTaint = v1.Taint{
+		Key:    "os",
+		Value:  "Windows",
+		Effect: v1.TaintEffectNoSchedule,
+	}
+)
 
 // testFramework holds the info to run the test suite
 type testFramework struct {
@@ -251,16 +255,24 @@ func TestWMCBCluster(t *testing.T) {
 	require.NoErrorf(t, err, "error getting kubeclient: %v", err)
 	winNodes, err := client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: "kubernetes.io/os=windows"})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
-	hasWindowsTaint := false
-	for _, node := range winNodes.Items {
+	assert.Equal(t, hasWindowsTaint(winNodes.Items), true, "expected Windows Taint to be present on the Windows Node")
+	winNodes, err = client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: nodeLabel})
+	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
+	assert.Lenf(t, winNodes.Items, 1, "expected one node to have node label but found: %v", len(winNodes.Items))
+}
+
+// hasWindowsTaint returns true if the given Windows node has the Windows taint
+func hasWindowsTaint(winNodes []v1.Node) bool {
+	// We've just created one Windows node as part of our CI suite. So, it's ok to return instead of checking for all
+	// the items in the node
+	for _, node := range winNodes {
 		for _, taint := range node.Spec.Taints {
 			if taint.Key == windowsTaint.Key && taint.Value == windowsTaint.Value && taint.Effect == windowsTaint.Effect {
-				hasWindowsTaint = true
-				break
+				return true
 			}
 		}
 	}
-	assert.Equalf(t, hasWindowsTaint, true, "expected Windows Taint to be present on the Windows Node")
+	return false
 }
 
 // tearDown tears down the set up done for test suite

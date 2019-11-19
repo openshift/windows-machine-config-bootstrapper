@@ -62,8 +62,10 @@ const (
 		      	effect: "NoSchedule"
 	*/
 	windowsTaints = "os=Windows:NoSchedule"
-	// workerLabel contains the label that needs to be applied to the worker nodes in the cluster
-	workerLabel = "node-role.kubernetes.io/worker"
+	// nodeLabel contains the os specific label that will be applied to the Windows node object. This can be used to
+	// identify the nodes managed by WSU and future operators. (We could have gotten this from boostrap kubeconfig too
+	// however the label value is resolved on the host side, making it convenient when we run WMCB within a container)
+	nodeLabel = "node.openshift.io/os_id=Windows"
 )
 
 // These regex are global, so that we only need to compile them once
@@ -77,11 +79,6 @@ var (
 
 	// verbosityRegex searches for the verbosity option given to the kubelet
 	verbosityRegex = regexp.MustCompile(`--v=(\w*)`)
-
-	// nodeLabelRegex searches for all the node labels that needs to be applied to kubelet. Usually labels are
-	// comma separated values.
-	// Example: --node-labels=node-role.kubernetes.io/worker,node.openshift.io/os_id=${ID}
-	nodeLabelRegex = regexp.MustCompile(`--node-labels=(.*)`)
 )
 
 // winNodeBootstrapper is responsible for bootstrapping and ensuring kubelet runs as a Windows service
@@ -247,22 +244,6 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 		if len(results) == 2 {
 			wmcb.kubeletArgs["v"] = results[1]
 		}
-
-		// Set the worker label
-		results = nodeLabelRegex.FindStringSubmatch(unit.Contents)
-		if len(results) == 2 {
-			// Since labels are comma separated values, split them, as we're only interested in applying the worker
-			// label.
-			// TODO: Check if we can apply all the labels in future. As of now, we're interested only in the worker
-			// label the rest can be ignored
-			nodeLabels := strings.Split(results[1], ",")
-			for _, nodeLabel := range nodeLabels {
-				// Get the worker label, usually it's a standard label
-				if strings.Contains(nodeLabel, workerLabel) {
-					wmcb.kubeletArgs["node-labels"] = nodeLabel
-				}
-			}
-		}
 	}
 
 	// For each new file in the ignition file check if is a file we are interested in, if so, decode, transform,
@@ -338,6 +319,8 @@ func (wmcb *winNodeBootstrapper) createKubeletService() error {
 		// TODO: Write a `against the cluster` e2e test which checks for the Windows node object created
 		// and check for taint.
 		"--register-with-taints=" + windowsTaints,
+		// Label that WMCB uses
+		"--node-labels=" + nodeLabel,
 		// TODO: Uncomment this when we have a CNI solution
 		/*
 			network-plugin=cni",
