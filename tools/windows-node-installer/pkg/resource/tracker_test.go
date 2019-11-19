@@ -3,6 +3,7 @@ package resource
 import (
 	"encoding/json"
 	"github.com/coreos/etcd/pkg/fileutil"
+	"github.com/stretchr/testify/require"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -42,7 +43,7 @@ var (
 // expectedInfo.
 func TestAppendInstallerInfo(t *testing.T) {
 	tmpFile, err := ioutil.TempFile("."+string(os.PathSeparator), "*.json")
-	assert.NoError(t, err, "error making temp file in the current folder")
+	require.NoError(t, err, "error making temp file in the current folder")
 	filePath := tmpFile.Name()
 	defer os.Remove(filePath)
 
@@ -71,7 +72,7 @@ func TestReadInstallerInfo(t *testing.T) {
 // up by deleting the file.
 func TestRemoveInstallerInfo(t *testing.T) {
 	tmpFile, err := ioutil.TempFile("."+string(os.PathSeparator), "*.json")
-	assert.NoError(t, err, "error making temp file in the current folder")
+	require.NoError(t, err, "error making temp file in the current folder")
 	filePath := tmpFile.Name()
 
 	expectedInfoByte, err := json.Marshal(expectedInfo)

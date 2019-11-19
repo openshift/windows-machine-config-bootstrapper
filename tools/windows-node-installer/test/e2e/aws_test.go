@@ -11,6 +11,7 @@ import (
 	awscp "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/aws"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -76,28 +77,16 @@ func setupAWSCloudProvider(t *testing.T) {
 	// The e2e test uses Microsoft Windows Server 2019 Base with Containers image, m4.large type, and libra ssh key.
 	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, awscredentials, "default", dir,
 		imageID, instanceType, sshKey, privateKeyPath)
-	if err != nil {
-		t.Fatalf("Error obtaining aws interface object %v", err)
-	}
+	require.NoError(t, err, "Error obtaining aws interface object")
 	credentials, err := cloud.CreateWindowsVM()
-	if err != nil {
-		t.Fatalf("Error spinning up Windows VM with error %v", err)
-	}
-	if credentials == nil {
-		assert.FailNow(t, "Credentials returned are empty")
-	}
-	if len(credentials.GetPassword()) == 0 {
-		assert.FailNow(t, "Expected some password but got empty string")
-	}
-	if len(credentials.GetInstanceId()) == 0 {
-		assert.FailNow(t, "Expected some instance id but got empty string")
-	}
+	require.NoError(t, err, "Error spinning up Windows VM")
+	require.NotEmpty(t, credentials, "Credentials returned are empty")
+	require.NotEmpty(t, credentials.GetPassword(), "Expected some password but got empty string")
+	require.NotEmpty(t, credentials.GetInstanceId(), "Expected some instance id but got empty string")
 
 	// Type assert to AWS so that we can test other functionality
 	provider, ok := cloud.(*awscp.AwsProvider)
-	if !ok {
-		assert.FailNow(t, "Error asserting cloudprovider to awsProvider")
-	}
+	assert.True(t, ok, "Error asserting cloudprovider to awsProvider")
 	awsProvider = provider
 }
 
@@ -114,15 +103,10 @@ func setupWindowsInstanceWithResources(t *testing.T) {
 	if err != nil {
 		tearDownInstance(t, "error while getting infrastructure ID for the OpenShift cluster", err)
 	}
-	if credentials == nil {
-		t.Fatal("Credentials returned are empty")
-	}
-	if len(credentials.GetPassword()) == 0 {
-		t.Fatal("Expected some password but got empty string")
-	}
-	if len(credentials.GetInstanceId()) == 0 {
-		t.Fatal("Expected instanceID to be present but got empty string")
-	}
+	require.NotEmpty(t, credentials, "Credentials returned are empty")
+	require.NotEmpty(t, credentials.GetPassword(), "Expected some password but got empty string")
+	require.NotEmpty(t, credentials.GetInstanceId(), "Expected instanceID to be present but got empty string")
+
 	// Check instance and security group information in windows-node-installer.json.
 	info, err := resource.ReadInstallerInfo(dir + "/" + "windows-node-installer.json")
 	if err != nil {
