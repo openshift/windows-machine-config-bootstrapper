@@ -42,7 +42,7 @@ Available Commands:
 ```bash
 ./wni aws create --kubeconfig <path to OpenShift cluster>/kubeconfig --credentials <path to aws>/credentials 
 --credential-account default --image-id ami-06a4e829b8bbad61e --instance-type m4.large --ssh-key <name of the 
-existing ssh key, ie: libra> --private-key <private key to decrypt the aws instance password>
+existing ssh keypair in aws> --private-key <private key to decrypt the aws instance password.>
 ```
 
 The default properties of the created instance are:
