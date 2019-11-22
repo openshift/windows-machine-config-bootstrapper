@@ -41,6 +41,11 @@ var (
 	createdInstanceCreds *types.Credentials
 	// Temp directory ansible created on the windows host
 	ansibleTempDir = ""
+	// kubernetes-node-windows-amd64.tar.gz SHA512
+	// Value from https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.16.md#node-binaries-1
+	// This value should be updated when we change the kubelet version in WSU
+	expectedKubeTarSha = "a88e7a1c6f72ea6073dbb4ddfe2e7c8bd37c9a56d94a33823f531e303a9915e7a844ac5880097724e44dfa7f4" +
+		"a9659d14b79cc46e2067f6b13e6df3f3f1b0f64"
 )
 
 // createAWSWindowsInstance creates a windows instance and populates the "cloud" and "createdInstanceCreds" global
@@ -118,7 +123,7 @@ func TestWSU(t *testing.T) {
 
 // testFilesCopied tests that the files we attempted to copy to the Windows host, exist on the Windows host
 func testFilesCopied(t *testing.T) {
-	expectedFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe"}
+	expectedFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe", "kube.tar.gz"}
 	endpoint := winrm.NewEndpoint(createdInstanceCreds.GetIPAddress(), 5986, true, true,
 		nil, nil, nil, 0)
 	client, err := winrm.NewClient(endpoint, "Administrator", createdInstanceCreds.GetPassword())
@@ -135,4 +140,19 @@ func testFilesCopied(t *testing.T) {
 		assert.Emptyf(t, stdout.String(), "Missing file: %s", fullPath)
 	}
 
+	// Check the SHA of kube.tar.gz downloaded
+	kubeTarPath := ansibleTempDir + "\\" + "kube.tar.gz"
+	// certutil is part of default OS installation Windows 7+
+	command := fmt.Sprintf("certutil -hashfile %s SHA512", kubeTarPath)
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	_, err = client.Run(command, stdout, stderr)
+	require.NoError(t, err, "Error generating SHA512 for %s", kubeTarPath)
+	require.Equalf(t, stderr.Len(), 0, "Error generating SHA512 for %s", kubeTarPath)
+	// CertUtil output example:
+	// SHA512 hash of <filepath>:\r\n<SHA-output>\r\nCertUtil: -hashfile command completed successfully.
+	// Extracting SHA value from the output
+	actualKubeTarSha := strings.Split(stdout.String(), "\r\n")[1]
+	assert.Equal(t, expectedKubeTarSha, actualKubeTarSha,
+		"kube.tar.gz downloaded does not match expected checksum")
 }
