@@ -76,7 +76,7 @@ func TestBootstrapper(t *testing.T) {
 	// Run it again, to ensure it maintains state if the bootstrapper is already started
 	time.Sleep(5 * time.Second)
 	wmcb, err = bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath)
-	assert.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
+	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
 	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)
 	err = wmcb.Disconnect()
