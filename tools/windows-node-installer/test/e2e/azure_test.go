@@ -188,7 +188,7 @@ func testAnsiblePing(t *testing.T) {
 	for _, vmName := range instanceIDs {
 		vmCredentialPath := filepath.Join(dir, "/", vmName)
 		rdpCmd, err := ioutil.ReadFile(vmCredentialPath)
-		require.NoError(t, err, "failed to read file %s", vmName)
+		require.NoErrorf(t, err, "failed to read file %s", vmName)
 		ipAddress := ipAddressPattern.FindString(string(rdpCmd))
 		assert.NotEmpty(t, ipAddress, "the IP address can't be empty")
 		password := passwordPattern.FindString(string(rdpCmd))[3:]
@@ -199,6 +199,6 @@ func testAnsiblePing(t *testing.T) {
 		require.NoError(t, err, "failed to create a temp file")
 		pingCmd := exec.Command("ansible", "win", "-i", hostFileName, "-m", "win_ping")
 		out, err := pingCmd.CombinedOutput()
-		assert.NoError(t, err, "ansible ping check failed with error: %s", string(out))
+		assert.NoErrorf(t, err, "ansible ping check failed with error: %s", string(out))
 	}
 }
