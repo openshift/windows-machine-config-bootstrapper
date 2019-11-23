@@ -53,6 +53,10 @@ var (
 		"a9659d14b79cc46e2067f6b13e6df3f3f1b0f64"
 	// k8sclientset is the kubernetes clientset we will use to query the cluster's status
 	k8sclientset *kubernetes.Clientset
+	// workerLabel is the worker label that needs to be applied to the Windows node
+	workerLabel = "node-role.kubernetes.io/worker"
+	// windowsLabel represents the node label that need to be applied to the Windows node created
+	windowsLabel = "node.openshift.io/os_id=Windows"
 )
 
 // createAWSWindowsInstance creates a windows instance and populates the "cloud" and "createdInstanceCreds" global
@@ -118,6 +122,13 @@ func TestWSU(t *testing.T) {
 	var err error
 	k8sclientset, err = getKubeClient(kubeconfig)
 	require.NoError(t, err)
+	existingWindowsNodes, err := k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	require.NoError(t, err)
+	// The test should fail, if there are existing Windows nodes in the cluster as we're just relying on the
+	// windowsLabel to be present on the node
+	// TODO: Label or annotate the windows node to have more determinism when running test suite.
+	require.Equalf(t, len(existingWindowsNodes.Items), 0, "expected 0 windows nodes to be present but found %v",
+		len(existingWindowsNodes.Items))
 
 	// TODO: Check if other cloud provider credentials are available
 	if awsCredentials == "" {
@@ -144,6 +155,8 @@ func TestWSU(t *testing.T) {
 	t.Run("Files copied to Windows node", testFilesCopied)
 	t.Run("Pending CSRs were approved", testNoPendingCSRs)
 	t.Run("Node is in ready state", testNodeReady)
+	// test if the Windows node has proper worker label.
+	t.Run("Check if worker label has been applied to the Windows node", testWorkerLabelsArePresent)
 }
 
 // testFilesCopied tests that the files we attempted to copy to the Windows host, exist on the Windows host
@@ -229,4 +242,15 @@ func testNoPendingCSRs(t *testing.T) {
 			assert.Equalf(t, v1beta1.CertificateApproved, condition.Type, "csr %v has non-approved condition", csr)
 		}
 	}
+}
+
+// testWorkerLabelsArePresent tests if the worker labels are present on the Windows Node.
+func testWorkerLabelsArePresent(t *testing.T) {
+	// Check if the Windows node has the required label needed.
+	windowsNodes, err := k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
+	assert.Equalf(t, len(windowsNodes.Items), 1, "expected 1 windows nodes to be present but found %v",
+		len(windowsNodes.Items))
+	assert.Contains(t, windowsNodes.Items[0].Labels, workerLabel,
+		"expected worker label to be present on the Windows node but did not find any")
 }
