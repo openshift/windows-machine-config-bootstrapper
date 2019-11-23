@@ -8,6 +8,8 @@
       It will be of the format `key:kubernetes.io/cluster/<infraID>` with `value: owned`.
       - You can find the infraID in the Ignition config file metadata `metadata.json`
 - Ansible 2.9 and pywinrm installed, and selinux bindings exist on the system
+- [oc](https://docs.openshift.com/container-platform/4.2/cli_reference/openshift_cli/getting-started-cli.html) is installed
+- The KUBECONFIG environment variable is set to the cluster's kubeconfig location
 ```
 sudo dnf install libselinux-python
 pip install selinux ansible==2.9 pywinrm
