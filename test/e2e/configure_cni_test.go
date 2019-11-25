@@ -64,6 +64,13 @@ func testConfigureCNI(t *testing.T) {
 	isConfiguredCorrectly, err := isCNIConfigured(t, kubeletLogPath)
 	require.NoError(t, err, "Error reading kubelet log")
 	assert.True(t, isConfiguredCorrectly, "CNI was not configured correctly")
+
+	// Kubelet arguments with paths that are set by configure-cni
+	// Does not include arguments with paths that do not depend on underlying OS
+	checkPathsFor := []string{"--cni-bin-dir", "--cni-conf-dir"}
+	t.Run("Test the paths in Kubelet arguments", func(t *testing.T) {
+		testPathInKubeletArgs(t, checkPathsFor)
+	})
 }
 
 // isCNIConfigured checks if the kubelet start successfully and after applying the CNI config

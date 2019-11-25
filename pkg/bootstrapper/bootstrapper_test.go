@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -239,9 +238,9 @@ func TestCloudConfExtraction(t *testing.T) {
 
 	err = wnb.parseIgnitionFileContents([]byte(ignitionContents), map[string]fileTranslation{})
 	assert.NoError(t, err, "error parsing ignition file contents")
-	assert.FileExists(t, path.Join(dir, "cloud.conf"), "cloud.conf was not created")
+	assert.FileExists(t, filepath.Join(dir, "cloud.conf"), "cloud.conf was not created")
 
-	confContents, err := ioutil.ReadFile(path.Join(dir, "cloud.conf"))
+	confContents, err := ioutil.ReadFile(filepath.Join(dir, "cloud.conf"))
 	assert.NoError(t, err, "error reading cloud.conf")
 
 	conf := string(confContents)
@@ -288,8 +287,9 @@ func TestCloudConfExtraction(t *testing.T) {
 	// Check that the --cloud-conf option value is present in the kubelet args and matches tempdir + /cloud.conf
 	cloudConfigOptValue, present := wnb.kubeletArgs["cloud-config"]
 	assert.True(t, present, "cloud-config option is not present in kubelet args")
-	assert.Equal(t, path.Join(dir, "cloud.conf"), cloudConfigOptValue,
+	assert.Equal(t, filepath.Join(dir, "cloud.conf"), cloudConfigOptValue,
 		"unexpected --cloud-config value %s", cloudConfigOptValue)
+	assert.Contains(t, cloudConfigOptValue, string(os.PathSeparator), "Path not correctly set for cloud-config")
 }
 
 // TestCloudConfNotPresent tests that parseIgnitionFileContents will only create a cloud.conf file and add the
@@ -313,7 +313,7 @@ func TestCloudConfNotPresent(t *testing.T) {
 	err = wnb.parseIgnitionFileContents([]byte(ignitionContents), map[string]fileTranslation{})
 	assert.NoError(t, err, "error parsing ignition file contents")
 
-	_, err = os.Stat(path.Join(dir, "cloud.conf"))
+	_, err = os.Stat(filepath.Join(dir, "cloud.conf"))
 	assert.Error(t, err, "cloud.conf was created")
 
 	// Check that the --cloud-conf option value is not present in the kubelet args
