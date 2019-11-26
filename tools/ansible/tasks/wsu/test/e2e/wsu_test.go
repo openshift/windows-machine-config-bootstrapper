@@ -55,10 +55,16 @@ var (
 		"a9659d14b79cc46e2067f6b13e6df3f3f1b0f64"
 	// k8sclientset is the kubernetes clientset we will use to query the cluster's status
 	k8sclientset *kubernetes.Clientset
+	// winRMClient is the WinRM client we can use to remotely run commands on the Windows node
+	winRMClient *winrm.Client
 	// workerLabel is the worker label that needs to be applied to the Windows node
 	workerLabel = "node-role.kubernetes.io/worker"
 	// windowsLabel represents the node label that need to be applied to the Windows node created
 	windowsLabel = "node.openshift.io/os_id=Windows"
+	// hybridOverlaySubnet is an annotation applied by the cluster network operator which is used by the hybrid overlay
+	hybridOverlaySubnet = "k8s.ovn.org/hybrid-overlay-hostsubnet"
+	// hybridOverlayMac is an annotation applied by the hybrid overlay
+	hybridOverlayMac = "k8s.ovn.org/hybrid-overlay-distributed-router-gateway-mac"
 )
 
 // createAWSWindowsInstance creates a windows instance and populates the "cloud" and "createdInstanceCreds" global
@@ -154,20 +160,24 @@ func TestWSU(t *testing.T) {
 	require.True(t, len(initialSplit) > 1, "Could not find Windows temp dir: %s", out)
 	ansibleTempDir = "C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible." + strings.Split(initialSplit[1], "\"")[0]
 
+	// Connect to the bootstrapped host
+	endpoint := winrm.NewEndpoint(createdInstanceCreds.GetIPAddress(), 5986, true, true,
+		nil, nil, nil, 0)
+	winRMClient, err = winrm.NewClient(endpoint, "Administrator", createdInstanceCreds.GetPassword())
+	require.NoErrorf(t, err, "Could not create winrm client: %s", err)
+
 	t.Run("Files copied to Windows node", testFilesCopied)
 	t.Run("Pending CSRs were approved", testNoPendingCSRs)
 	t.Run("Node is in ready state", testNodeReady)
 	// test if the Windows node has proper worker label.
 	t.Run("Check if worker label has been applied to the Windows node", testWorkerLabelsArePresent)
+	t.Run("Network annotations were applied to node", testHybridOverlayAnnotations)
+	t.Run("HNS Networks were created", testHNSNetworksCreated)
 }
 
 // testFilesCopied tests that the files we attempted to copy to the Windows host, exist on the Windows host
 func testFilesCopied(t *testing.T) {
-	expectedFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe", "kube.tar.gz"}
-	endpoint := winrm.NewEndpoint(createdInstanceCreds.GetIPAddress(), 5986, true, true,
-		nil, nil, nil, 0)
-	client, err := winrm.NewClient(endpoint, "Administrator", createdInstanceCreds.GetPassword())
-	require.NoErrorf(t, err, "Could not create winrm client: %s", err)
+	expectedFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe", "hybrid-overlay.exe", "kube.tar.gz"}
 
 	// Check if each of the files we expect on the Windows host are there
 	for _, filename := range expectedFileList {
@@ -175,7 +185,7 @@ func testFilesCopied(t *testing.T) {
 		// This command will write to stdout, only if the file we are looking for does not exist
 		command := fmt.Sprintf("if not exist %s echo fail", fullPath)
 		stdout := new(bytes.Buffer)
-		_, err := client.Run(command, stdout, os.Stderr)
+		_, err := winRMClient.Run(command, stdout, os.Stderr)
 		assert.NoError(t, err, "Error looking for %s: %s", fullPath, err)
 		assert.Emptyf(t, stdout.String(), "Missing file: %s", fullPath)
 	}
@@ -186,7 +196,7 @@ func testFilesCopied(t *testing.T) {
 	command := fmt.Sprintf("certutil -hashfile %s SHA512", kubeTarPath)
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
-	_, err = client.Run(command, stdout, stderr)
+	_, err := winRMClient.Run(command, stdout, stderr)
 	require.NoError(t, err, "Error generating SHA512 for %s", kubeTarPath)
 	require.Equalf(t, stderr.Len(), 0, "Error generating SHA512 for %s", kubeTarPath)
 	// CertUtil output example:
@@ -255,4 +265,26 @@ func testWorkerLabelsArePresent(t *testing.T) {
 		len(windowsNodes.Items))
 	assert.Contains(t, windowsNodes.Items[0].Labels, workerLabel,
 		"expected worker label to be present on the Windows node but did not find any")
+}
+
+// testHybridOverlayAnnotations tests that the correct annotations have been added to the bootstrapped node
+func testHybridOverlayAnnotations(t *testing.T) {
+	windowsNodes, err := k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	require.NoError(t, err, "Could not get list of Windows nodes")
+	assert.Equalf(t, len(windowsNodes.Items), 1, "expected one windows node to be present but found %v",
+		len(windowsNodes.Items))
+	assert.Contains(t, windowsNodes.Items[0].Annotations, hybridOverlaySubnet)
+	assert.Contains(t, windowsNodes.Items[0].Annotations, hybridOverlayMac)
+}
+
+// testHNSNetworksCreated tests that the required HNS Networks have been created on the bootstrapped node
+func testHNSNetworksCreated(t *testing.T) {
+	stdout := new(bytes.Buffer)
+	_, err := winRMClient.Run("powershell Get-HnsNetwork", stdout, os.Stderr)
+	require.NoError(t, err, "Could not run Get-HnsNetwork command")
+	stdoutString := stdout.String()
+	assert.Contains(t, stdoutString, "Name                   : BaseOpenShiftNetwork",
+		"Could not find BaseOpenShiftNetwork in list of HNS Networks")
+	assert.Contains(t, stdoutString, "Name                   : OpenShiftNetwork",
+		"Could not find OpenShiftNetwork in list of HNS Networks")
 }

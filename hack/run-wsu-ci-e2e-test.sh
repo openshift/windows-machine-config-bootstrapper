@@ -28,6 +28,6 @@ oc patch network.operator cluster --type=merge -p '{"spec":{"defaultNetwork":{"o
 
 # Run the test suite
 cd $TEST_DIR
-GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on CLUSTER_ADDR=$CLUSTER_ADDR WSU_PATH=$WMCO_ROOT/tools/ansible/tasks/wsu/main.yaml go test -v -timeout 20m .
+GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on CLUSTER_ADDR=$CLUSTER_ADDR WSU_PATH=$WMCO_ROOT/tools/ansible/tasks/wsu/main.yaml go test -v -timeout 30m .
 
 exit 0

@@ -57,6 +57,17 @@
         dest: "{{ win_temp_dir.path }}\\worker.ign"
         validate_certs: no
 
+    - name: Get hybrid overlay exe
+      win_get_url:
+        url: "https://github.com/openshift/windows-machine-config-operator/releases/download/0.1/hybrid-overlay.exe"
+        dest: "{{ win_temp_dir.path }}\\hybrid-overlay.exe"
+        follow_redirects: all
+
+    - name: Check hybrid overlay SHA256
+      win_shell: "certutil -hashfile {{ win_temp_dir.path }}\\hybrid-overlay.exe sha256"
+      register: hybrid_sha256
+      failed_when: "hybrid_sha256.stdout_lines[1] != 'fa0ecdc4abd3e3cf6b88541a32eba59e947be08b783be9a39951126182f30f65'"
+
     - name: Run bootstrapper
       win_shell: "{{ win_temp_dir.path }}\\wmcb.exe initialize-kubelet --ignition-file {{ win_temp_dir.path }}\\worker.ign --kubelet-path {{ win_temp_dir.path }}\\kubelet.exe"
       register: bootstrap_out
@@ -126,3 +137,17 @@
       delegate_to: localhost
       shell: "oc label node {{ node_name.stdout_lines[0] }} node-role.kubernetes.io/worker="
       when: node_name.stdout_lines | length == 1 and checklabels.rc == 1
+
+    - name: Start the hybrid overlay
+      win_shell: "Start-Process -NoNewWindow -FilePath \"{{  win_temp_dir.path }}\\hybrid-overlay.exe\" -ArgumentList \"--node  {{ node_name.stdout }} --k8s-kubeconfig c:\\k\\kubeconfig\""
+      async: 60
+      poll: 0
+      register: async_results
+
+    - name: Wait for the hybrid overlay
+      delegate_to: localhost
+      shell: "oc get nodes {{ node_name.stdout }} -o=jsonpath='{.metadata.annotations}'"
+      register: overlay
+      until: '"k8s.ovn.org/hybrid-overlay-distributed-router-gateway-mac" in overlay.stdout'
+      retries: 12
+      delay: 5
