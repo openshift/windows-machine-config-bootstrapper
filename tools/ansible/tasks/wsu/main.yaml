@@ -99,3 +99,30 @@
       delegate_to: localhost
       shell: "oc adm certificate approve {{ item }}"
       with_items: "{{ node_csrs.stdout_lines }}"
+
+    # Get the bootstrapped windows node name. We're using the IP address of the Windows VM created
+    # in the inventory file and if the node has multiple internal IP's or external IP's it may not work well.
+    # TODO: Move this to a more deterministic way of identifying the node we just bootstrapped
+    - name: Get bootstrapped node name
+      delegate_to: localhost
+      shell: "oc get node -o wide |awk '/{{ inventory_hostname }}/ {print $1}'"
+      register: node_name
+      until: node_name.stdout != ""
+      retries: 3
+      delay: 5
+
+    # Check if worker label is already applied to the Windows nodes bootstrapped via WMCB
+    # We should always get a single node that we've bootstrapped recently, if not skip this
+    # step
+    - name: Check if worker label is already applied to the Windows nodes bootstrapped via WMCB
+      delegate_to: localhost
+      shell: "oc get node {{ node_name.stdout_lines[0] }} -o yaml | grep -i node-role.kubernetes.io/worker"
+      ignore_errors: yes
+      register: checklabels
+      when: node_name.stdout_lines | length == 1
+
+    # Apply worker label to the Windows nodes bootstrapped via WMCB
+    - name: Label the Windows node that was just bootstrapped with worker labels
+      delegate_to: localhost
+      shell: "oc label node {{ node_name.stdout_lines[0] }} node-role.kubernetes.io/worker="
+      when: node_name.stdout_lines | length == 1 and checklabels.rc == 1
