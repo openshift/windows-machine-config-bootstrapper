@@ -36,8 +36,10 @@ var (
 
 	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0b8d82dea356226d3 for
 	// Microsoft Windows Server 2019 Base with Containers.
-	imageID      = "ami-0b8d82dea356226d3"
-	instanceType = "m4.large"
+	imageID = "ami-0b8d82dea356226d3"
+	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
+	// the Intel 82599 network driver
+	instanceType = "m5a.large"
 	sshKey       = "libra"
 
 	// Cloud provider factory that we will use in these tests
