@@ -50,8 +50,10 @@ func TestBootstrapper(t *testing.T) {
 		removeFileIfExists(t, kubeletLogPath)
 	}
 
+	t.Run("Configure CNI without kubelet service present", testConfigureCNIWithoutKubeletSvc)
+
 	// Run the bootstrapper, which will start the kubelet service
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath)
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "")
 	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
 	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)
@@ -75,7 +77,7 @@ func TestBootstrapper(t *testing.T) {
 
 	// Run it again, to ensure it maintains state if the bootstrapper is already started
 	time.Sleep(5 * time.Second)
-	wmcb, err = bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath)
+	wmcb, err = bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "")
 	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
 	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)

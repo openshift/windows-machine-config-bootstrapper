@@ -12,8 +12,9 @@ var (
 	initializeKubeletCmd = &cobra.Command{
 		Use:   "initialize-kubelet",
 		Short: "Initializes the kubelet service on the Windows node",
-		Long:  "",
-		Run:   runInitializeKubeletCmd,
+		Long: "Initializes the kubelet service on the Windows node. " +
+			"If this command is run after configure-cni is executed, it will overwrite the CNI options.",
+		Run: runInitializeKubeletCmd,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
 			err := cmd.MarkPersistentFlagRequired("ignition-file")
 			if err != nil {
@@ -53,7 +54,7 @@ func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 	// TODO: add validation for flags
 
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(initializeKubeletOpts.installDir,
-		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath)
+		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath, "", "")
 	if err != nil {
 		log.Error(err, "could not create bootstrapper")
 		os.Exit(1)
