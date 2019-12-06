@@ -118,7 +118,9 @@ func (f *TestFramework) setupWinRMClient() error {
 	host := f.Credentials.GetIPAddress()
 	password := f.Credentials.GetPassword()
 
-	endpoint := winrm.NewEndpoint(host, winRMPort, true, true, nil, nil, nil, 0)
+	// Connect to the bootstrapped host. Timeout is high as the Windows Server image is slow to download
+	endpoint := winrm.NewEndpoint(host, winRMPort, true, true,
+		nil, nil, nil, time.Minute*10)
 	winrmClient, err := winrm.NewClient(endpoint, user, password)
 	if err != nil {
 		return fmt.Errorf("failed to set up winrm client with error: %v", err)

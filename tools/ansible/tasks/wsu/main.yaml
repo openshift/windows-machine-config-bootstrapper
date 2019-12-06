@@ -37,6 +37,17 @@
             src: "{{ tmp_dir.path }}/kubernetes/node/bin/kubelet.exe"
             dest: "{{ tmp_dir.path }}/kubelet.exe"
 
+        - name: Create temporary cni directory
+          file:
+            path: "{{ tmp_dir.path }}/cni"
+            state: directory
+
+        - name: Get cni plugins
+          unarchive:
+            src: "https://github.com/containernetworking/plugins/releases/download/v0.8.2/cni-plugins-windows-amd64-v0.8.2.tgz"
+            dest: "{{ tmp_dir.path }}/cni"
+            remote_src: yes
+
 - hosts: win
   vars:
     tmp_path: "{{ playbook_dir }}/tmp"
@@ -151,3 +162,27 @@
       until: '"k8s.ovn.org/hybrid-overlay-distributed-router-gateway-mac" in overlay.stdout'
       retries: 12
       delay: 5
+
+    - name: Get hybrid overlay subnet
+      delegate_to: localhost
+      shell: oc get nodes "{{ node_name.stdout }}" -o=jsonpath='{.metadata.annotations.k8s\.ovn\.org/hybrid-overlay-hostsubnet}'
+      register: hybrid_subnet
+
+    - name: Create cni config directory
+      win_file:
+        path: "{{ win_temp_dir.path }}\\cni\\config"
+        state: directory
+
+    - name: Create cni config
+      win_copy:
+        content: "{\"cniVersion\":\"0.2.0\",\"name\":\"OpenShiftNetwork\",\"type\":\"win-overlay\",\"capabilities\":{\"dns\":true},\"ipam\":{\"type\":\"host-local\",\"subnet\":\"{{ hybrid_subnet.stdout }}\"},\"policies\":[{\"name\":\"EndpointPolicy\",\"value\":{\"Type\":\"OutBoundNAT\",\"ExceptionList\":[\"10.132.0.0/16\"]}},{\"name\":\"EndpointPolicy\",\"value\":{\"Type\":\"ROUTE\",\"DestinationPrefix\":\"10.132.0.0/16\",\"NeedEncap\":true}}]}"
+        dest: "{{ win_temp_dir.path }}\\cni\\config\\cni.conf"
+
+    - name: Configure CNI
+      win_shell: "{{ win_temp_dir.path }}\\wmcb.exe configure-cni --cni-dir=\"{{ win_temp_dir.path }}\\cni\" --cni-config=\"{{ win_temp_dir.path }}\\cni\\config\\cni.conf\""
+      register: bootstrap_out
+
+    - name: Check if CNI configuration was successful
+      fail:
+        msg: "CNI Configuration error"
+      when: '"CNI configuration completed successfully" not in bootstrap_out.stderr'
