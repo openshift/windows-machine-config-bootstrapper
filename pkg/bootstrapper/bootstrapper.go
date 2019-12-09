@@ -350,6 +350,17 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 			dest: filepath.Join(wmcb.installDir, "kubelet-ca.crt"),
 		},
 	}
+
+	// Create the manifest directory needed by kubelet for the static pods, we shouldn't override if the pod manifest
+	// directory already exists
+	podManifestDirectory := filepath.Join(wmcb.installDir, "etc", "kubernetes", "manifests")
+	if _, err := os.Stat(podManifestDirectory); os.IsNotExist(err) {
+		err := os.MkdirAll(podManifestDirectory, os.ModeDir)
+		if err != nil {
+			return fmt.Errorf("could not make pod manifest directory: %s", err)
+		}
+	}
+
 	err := os.MkdirAll(wmcb.installDir, os.ModeDir)
 	if err != nil {
 		return fmt.Errorf("could not make install directory: %s", err)
