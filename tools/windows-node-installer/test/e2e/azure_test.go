@@ -3,8 +3,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -14,23 +12,55 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Azure/go-autorest/autorest/to"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-04-01/network"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
+	wniAzure "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
 )
 
 const (
-	// winRm Https port for the Windows node.
-	winRM = "5986"
-	// winRm protocol type.
-	winRMProtocol = "Tcp"
-	// winRmPriority value
-	winRMPriority = 300
-	// winRM action type
-	winRMAction = "Allow"
+	// winRMPort is the secure WinRM port
+	winRMPort = "5986"
+	// winRMPortPriority is the priority for the WinRM rule
+	winRMPortPriority = 600
+	// winRMRuleName security group rule name for the WinRM rule
+	winRMRuleName = "WinRM"
+	// rdpPort is the RDP port
+	rdpPort = "3389"
+	// rdpRulePriority is the priority for the RDP rule
+	rdpRulePriority = 601
+	// rdpRuleName is the security group rule name for the RDP rule
+	rdpRuleName = "RDP"
+	// vnetPorts is the port range for vnet rule
+	vnetPorts = "1-65535"
+	// vnetRulePriority is the priority for the vnet traffic rule
+	vnetRulePriority = 602
+	// vnetRuleName is the security group rule name for vnet traffic within the cluster
+	vnetRuleName = "vnet_traffic"
+	// ruleProtocol is the default protocol for all rules
+	ruleProtocol = "Tcp"
+	// ruleAction is the default actions for all rules
+	ruleAction = "Allow"
 )
+
+type requiredRule struct {
+	// name is the required name of the security rule
+	name string
+	// sourceAddress is the required source address in the security rule
+	sourceAddress *string
+	// destinationPortRange are the required destination ports of the rule
+	destinationPortRange string
+	// priority is the rules required priority in the NSG
+	priority int32
+	// present indicates that the rule was present as expected in a security group
+	present bool
+}
 
 // azureProvider stores Azure clients and resourceGroupName to access the windows node.
 type azureProvider struct {
@@ -38,6 +68,8 @@ type azureProvider struct {
 	resourceGroupName string
 	// nsgClient to check if winRmHttps port is opened or not.
 	nsgClient network.SecurityGroupsClient
+	// requiredRules is the set of SG rules that need to be created or deleted
+	requiredRules map[string]*requiredRule
 }
 
 var (
@@ -51,12 +83,12 @@ var (
 	secGroupsIDs []string
 )
 
-// TestWinRMSetup runs two tests i.e
-// 1. checks if the winRMHttps port is opened or not.
+// TestCreateVM is used to the test the following after a successful run of "wni azure create"
+// 1. check if required rules are present
 // 2. ansible ping check to confirm that windows node is correctly
 //    configured to execute the remote ansible commands.
-func TestWinRMSetup(t *testing.T) {
-	t.Run("check if WinRmHttps port is opened in the inbound security group rules list", testWinRmPort)
+func TestCreateVM(t *testing.T) {
+	t.Run("check if required security rules are present", testRequiredRules)
 	t.Run("check if ansible is able to ping on the WinRmHttps port", testAnsiblePing)
 }
 
@@ -64,6 +96,22 @@ func TestWinRMSetup(t *testing.T) {
 func isNil(v interface{}) bool {
 	return v == nil || (reflect.ValueOf(v).Kind() == reflect.Ptr &&
 		reflect.ValueOf(v).IsNil())
+}
+
+// constructRequiredRules populates the required rules map
+func constructRequiredRules() (map[string]*requiredRule,
+	error) {
+	myIP, err := wniAzure.GetMyIP()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get public IP address: %v", err)
+	}
+
+	requiredRules := make(map[string]*requiredRule)
+	requiredRules[rdpRuleName] = &requiredRule{rdpRuleName, myIP, rdpPort, rdpRulePriority, false}
+	requiredRules[winRMRuleName] = &requiredRule{winRMRuleName, myIP, winRMPort, winRMPortPriority, false}
+	requiredRules[vnetRuleName] = &requiredRule{vnetRuleName, to.StringPtr("10.0.0.0/16"), vnetPorts,
+		vnetRulePriority, false}
+	return requiredRules, nil
 }
 
 // setup initializes the azureProvider to be used for running the tests.
@@ -92,6 +140,13 @@ func setup() (err error) {
 	nsgClient.Authorizer = resourceAuthorizer
 	azureInfo.resourceGroupName = provider.Azure.ResourceGroupName
 	azureInfo.nsgClient = nsgClient
+
+	requiredRules, err := constructRequiredRules()
+	if err != nil {
+		return fmt.Errorf("unable to construct required rules: %v", err)
+	}
+	azureInfo.requiredRules = requiredRules
+
 	return nil
 }
 
@@ -114,34 +169,54 @@ func readInstallerInfo() (err error) {
 	return nil
 }
 
-// isWinRMPortOpen returns a bool response if winRmHttps port is opened on
-// windows instance or not.
-func isWinRMPortOpen(secGroupRules []network.SecurityRule) bool {
+// areRequiredRulesPresent returns true if all the required rules are present in the SecurityRule slice
+func areRequiredRulesPresent(secGroupRules []network.SecurityRule) bool {
 	for _, secGroupRule := range secGroupRules {
+		if isNil(secGroupRule.Name) {
+			continue
+		}
+		reqRule, found := azureInfo.requiredRules[*secGroupRule.Name]
+		if !found {
+			continue
+		}
+
 		if isNil(secGroupRule.SecurityRulePropertiesFormat) {
 			continue
 		}
 		secRulePropFormat := *(secGroupRule.SecurityRulePropertiesFormat)
 		if isNil(secRulePropFormat.DestinationPortRange) || isNil(secRulePropFormat.Priority) ||
-			isNil(secRulePropFormat.SourceAddressPrefix) {
+			isNil(secRulePropFormat.SourceAddressPrefixes) {
 			continue
 		}
 		destPortRange := *(secRulePropFormat.DestinationPortRange)
 		protocol := secRulePropFormat.Protocol
 		access := secRulePropFormat.Access
 		priority := *(secRulePropFormat.Priority)
-		sourceAddressPrefix := *(secRulePropFormat.SourceAddressPrefix)
-		if destPortRange == winRM && access == winRMAction && protocol == winRMProtocol &&
-			priority == winRMPriority && len(sourceAddressPrefix) != 0 {
-			return true
+		if destPortRange == reqRule.destinationPortRange && access == ruleAction && protocol == ruleProtocol &&
+			priority == reqRule.priority {
+			sourceAddressIsPresent := false
+			for _, sourceAddress := range *secRulePropFormat.SourceAddressPrefixes {
+				if sourceAddress == *reqRule.sourceAddress {
+					sourceAddressIsPresent = true
+				}
+			}
+			if sourceAddressIsPresent {
+				reqRule.present = true
+			}
 		}
 	}
-	return false
+
+	// Check if all the required rules are present. Return false on the first instance a rule is not present
+	for _, reqRule := range azureInfo.requiredRules {
+		if !reqRule.present {
+			return false
+		}
+	}
+	return true
 }
 
-// testWinRmPort checks if winRmHttps port is mentioned in the inbound security
-// group rules in the worker subnet.
-func testWinRmPort(t *testing.T) {
+// testRequiredRules checks if all the required rules are present in all the NSGs in the win
+func testRequiredRules(t *testing.T) {
 	ctx := context.Background()
 	err := setup()
 	require.NoError(t, err, "failed to initialize azureProvider")
@@ -154,7 +229,12 @@ func testWinRmPort(t *testing.T) {
 		secGroupPropFormat := *(secGroupProfile.SecurityGroupPropertiesFormat)
 		require.NotEmpty(t, secGroupProfile.SecurityRules, "failed to get the security rules list")
 		secGroupRules := *(secGroupPropFormat.SecurityRules)
-		assert.True(t, isWinRMPortOpen(secGroupRules), "winRmHttps port is not opened")
+		assert.True(t, areRequiredRulesPresent(secGroupRules), "required rules are not present")
+
+		// reset the presence of all the required rules
+		for _, reqRule := range azureInfo.requiredRules {
+			reqRule.present = false
+		}
 	}
 }
 
@@ -172,7 +252,7 @@ func createHostFile(ip, password string) (string, error) {
 ansible_user=core
 ansible_port=%s
 ansible_connection=winrm
-ansible_winrm_server_cert_validation=ignore`, ip, password, winRM))
+ansible_winrm_server_cert_validation=ignore`, ip, password, winRMPort))
 	return hostFile.Name(), err
 }
 

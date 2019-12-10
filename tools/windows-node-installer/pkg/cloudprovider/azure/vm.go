@@ -3,8 +3,8 @@ package azure
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"io/ioutil"
 	"math/rand"
 	"net/http"
@@ -21,6 +21,7 @@ import (
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
+	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
@@ -29,12 +30,24 @@ const (
 	sourcePortRange = "*"
 	// the '*' is used to match all the source IP addresses
 	destinationAddressPrefix = "*"
-	// winRM HTTPS port
-	winRM = "5986"
-	// includes the priority of opening winRm port in security group rules.
-	winRMPortPriority = 300
-	// winRM security group rule name
-	winRMRule = "WINRM"
+	// winRMPort is the secure WinRM port
+	winRMPort = "5986"
+	// winRMPortPriority is the priority for the WinRM rule
+	winRMPortPriority = 600
+	// winRMRuleName security group rule name for the WinRM rule
+	winRMRuleName = "WinRM"
+	// rdpPort is the RDP port
+	rdpPort = "3389"
+	// rdpRulePriority is the priority for the RDP rule
+	rdpRulePriority = 601
+	// rdpRuleName is the security group rule name for the RDP rule
+	rdpRuleName = "RDP"
+	// vnetPorts is the port range for vnet rule
+	vnetPorts = "1-65535"
+	// vnetRulePriority is the priority for the vnet traffic rule
+	vnetRulePriority = 602
+	// vnetRuleName is the security group rule name for vnet traffic within the cluster
+	vnetRuleName = "vnet_traffic"
 )
 
 var log = logger.Log.WithName("azure-vm")
@@ -77,6 +90,25 @@ type AzureProvider struct {
 	instanceType string
 	// workspace to store all the results.
 	resourceTrackerDir string
+	// requiredRules is the set of SG rules that need to be created or deleted
+	requiredRules map[string]*nsgRuleWrapper
+}
+
+// nsgRuleWrapper encapsulates an Azure NSG security rule from a WNI perspective
+type nsgRuleWrapper struct {
+	// client is the Azure security rules client
+	client network.SecurityRulesClient
+	// rgName is the name of the resource group that the NSG belongs to
+	rgName string
+	// requiredName is the required name of the security rule
+	requiredName string
+	// requiredSourceAddress is the required source address in the security rule
+	requiredSourceAddress *string
+	// requiredDestinationPortRange are the required destination ports of the rule
+	requiredDestinationPortRange string
+	// requiredPriority is the rules required priority in the NSG
+	requiredPriority int32
+	network.SecurityRule
 }
 
 // New returns azure interface for performing necessary functions related to creating or
@@ -104,12 +136,38 @@ func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
 	nicClient := getNicClient(resourceAuthorizer, subscriptionID)
 	nsgClient := getNsgClient(resourceAuthorizer, subscriptionID)
 	diskClient := getDiskClient(resourceAuthorizer, subscriptionID)
+	rulesClient := getRulesClient(resourceAuthorizer, subscriptionID)
+
+	requiredRules, err := constructRequiredRules(rulesClient, resourceGroupName)
+	if err != nil {
+		return nil, fmt.Errorf("unable to construct required rules: %v", err)
+	}
+
 	var IpName, NicName, NsgName string
 
 	return &AzureProvider{vnetClient, vmClient, ipClient,
 		subnetClient, nicClient, nsgClient, diskClient, resourceAuthorizer,
 		resourceGroupName, subscriptionID, infraID, IpName, NicName, NsgName,
-		imageID, instanceType, resourceTrackerDir}, nil
+		imageID, instanceType, resourceTrackerDir, requiredRules}, nil
+}
+
+// constructRequiredRules populates the required rules map
+func constructRequiredRules(rulesClient network.SecurityRulesClient, resourceGroupName string) (map[string]*nsgRuleWrapper,
+	error) {
+	myIP, err := GetMyIP()
+	if err != nil {
+		return nil, fmt.Errorf("unable to get public IP address: %v", err)
+	}
+
+	requiredRules := make(map[string]*nsgRuleWrapper)
+	requiredRules[rdpRuleName] = &nsgRuleWrapper{rulesClient, resourceGroupName, rdpRuleName, myIP, rdpPort,
+		rdpRulePriority, network.SecurityRule{}}
+	requiredRules[winRMRuleName] = &nsgRuleWrapper{rulesClient, resourceGroupName, winRMRuleName, myIP, winRMPort,
+		winRMPortPriority, network.SecurityRule{}}
+	requiredRules[vnetRuleName] = &nsgRuleWrapper{rulesClient, resourceGroupName, vnetRuleName,
+		to.StringPtr("10.0.0.0/16"), vnetPorts, vnetRulePriority, network.SecurityRule{}}
+
+	return requiredRules, nil
 }
 
 // getVnetClient gets the Networking Client by passing the authorizer token.
@@ -154,6 +212,13 @@ func getNsgClient(authorizer autorest.Authorizer, subscriptionID string) network
 	return nsgClient
 }
 
+// getRulesClient returns the SecurityRulesClient
+func getRulesClient(authorizer autorest.Authorizer, subscriptionID string) network.SecurityRulesClient {
+	rulesClient := network.NewSecurityRulesClient(subscriptionID)
+	rulesClient.Authorizer = authorizer
+	return rulesClient
+}
+
 // getDiskClient gets the disk client by passing the authorizer token.
 func getDiskClient(authorizer autorest.Authorizer, subscriptionID string) compute.DisksClient {
 	diskClient := compute.NewDisksClient(subscriptionID)
@@ -183,9 +248,9 @@ func findIP(input string) string {
 	return regEx.FindString(input)
 }
 
-// getMyIP returns the IP address string of the user
+// GetMyIP returns the IP address string of the user
 // by talking to https://checkip.azurewebsites.net/
-func getMyIP() (ip *string, err error) {
+func GetMyIP() (ip *string, err error) {
 	resp, err := http.Get("https://checkip.azurewebsites.net/")
 	if errorCheck(err) {
 		return nil, err
@@ -329,82 +394,49 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 	return &nic_info, err
 }
 
-// createSecurityGroupRules tries to create new security group rules that allows to RDP to the windows node and allow for all the traffic
-// coming from the nodes that belong to the same VNET.
-func (az *AzureProvider) createSecurityGroupRules(ctx context.Context, nsgName string) (err error) {
-	var nodeLocation string
-	if !checkForNil(az.getvnetLocation(ctx)) {
-		nodeLocation = *(az.getvnetLocation(ctx))
-	} else {
-		return fmt.Errorf("cannot get location of the openshift cluster: %v", err)
-	}
-	myIP, err := getMyIP()
-	if errorCheck(err) {
-		return err
-	}
-	future, err := az.nsgClient.CreateOrUpdate(
-		ctx,
-		az.resourceGroupName,
-		nsgName,
-		network.SecurityGroup{
-			Location: to.StringPtr(nodeLocation),
-			SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
-				SecurityRules: &[]network.SecurityRule{
-					{
-						Name: to.StringPtr("RDP"),
-						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-							Protocol:                 network.SecurityRuleProtocolTCP,
-							SourceAddressPrefix:      to.StringPtr(*myIP + "/32"),
-							SourcePortRange:          to.StringPtr("*"),
-							DestinationAddressPrefix: to.StringPtr("*"),
-							DestinationPortRange:     to.StringPtr("3389"),
-							Access:                   network.SecurityRuleAccessAllow,
-							Direction:                network.SecurityRuleDirectionInbound,
-							Priority:                 to.Int32Ptr(100),
-						},
-					},
-					{
-						Name: to.StringPtr("vnet_traffic"),
-						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-							Protocol:                 network.SecurityRuleProtocolTCP,
-							SourceAddressPrefix:      to.StringPtr("10.0.0.0/16"),
-							SourcePortRange:          to.StringPtr("*"),
-							DestinationAddressPrefix: to.StringPtr("*"),
-							DestinationPortRanges:    &[]string{"1-65535"},
-							Access:                   network.SecurityRuleAccessAllow,
-							Direction:                network.SecurityRuleDirectionInbound,
-							Priority:                 to.Int32Ptr(200),
-						},
-					},
-					// winRMRule is an inbound security group rule allows incoming WinRM traffic
-					// on to the windows node.
-					{
-						Name: to.StringPtr(winRMRule),
-						SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
-							Protocol:                 network.SecurityRuleProtocolTCP,
-							SourceAddressPrefix:      to.StringPtr(*myIP + "/32"),
-							SourcePortRange:          to.StringPtr(sourcePortRange),
-							DestinationAddressPrefix: to.StringPtr(destinationAddressPrefix),
-							DestinationPortRange:     to.StringPtr(winRM),
-							Access:                   network.SecurityRuleAccessAllow,
-							Direction:                network.SecurityRuleDirectionInbound,
-							Priority:                 to.Int32Ptr(winRMPortPriority),
-						},
-					},
-				},
-			},
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("cannot create or update security group rules of worker subnet: %v", err)
+// ensureSecurityGroupRules ensures that the required security group rules are present in the given NSG
+func (az *AzureProvider) ensureSecurityGroupRules(ctx context.Context, nsgRules []network.SecurityRule) error {
+
+	// Collect the existing rules
+	for _, nsgRule := range nsgRules {
+		switch *nsgRule.Name {
+		case rdpRuleName:
+			az.requiredRules[rdpRuleName].SecurityRule = nsgRule
+		case winRMRuleName:
+			az.requiredRules[winRMRuleName].SecurityRule = nsgRule
+		case vnetRuleName:
+			az.requiredRules[vnetRuleName].SecurityRule = nsgRule
+		}
+		if az.requiredRules[rdpRuleName].Name != nil && az.requiredRules[winRMRuleName].Name != nil &&
+			az.requiredRules[vnetRuleName].Name != nil {
+			break
+		}
 	}
 
-	err = future.WaitForCompletionRef(ctx, az.nsgClient.Client)
-	if err != nil {
-		return fmt.Errorf("cannot create or update security group rules of worker subnet: %v", err)
+	for _, rule := range az.requiredRules {
+		if err := rule.createOrUpdate(ctx, az.NsgName); err != nil {
+			return fmt.Errorf("unable to create or update %s/%s: %v", az.NsgName, rule.requiredName, err)
+		}
 	}
 
 	return nil
+}
+
+// updateSecurityGroup updates the given NSG with the required set of security group rules
+func (az *AzureProvider) updateSecurityGroup(ctx context.Context) error {
+	sg, err := az.nsgClient.Get(ctx, az.resourceGroupName, az.NsgName, "")
+	if err != nil {
+		return fmt.Errorf("cannot obtain the security group %s: %v", az.NsgName, err)
+	}
+
+	var nsgRules []network.SecurityRule
+	if !checkForNil(sg.SecurityGroupPropertiesFormat) && !checkForNil(sg.SecurityGroupPropertiesFormat.SecurityRules) {
+		nsgRules = *sg.SecurityGroupPropertiesFormat.SecurityRules
+	} else {
+		return fmt.Errorf("cannot obtain the security group properties format for %s: %v", az.NsgName, err)
+	}
+
+	return az.ensureSecurityGroupRules(ctx, nsgRules)
 }
 
 // constructStorageProfile constructs the Storage Profile for the creation of windows instance.
@@ -622,23 +654,19 @@ func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 		return nil, fmt.Errorf("cannot obtain security group rules of worker subnet")
 	}
 
-	vmRandString := strings.Split(vmName, "-")[1]
-	var nsgName string
-	if !checkForNil(nsgStruct.ID) {
-		nsgID := *(nsgStruct.ID)
-		nsgName = extractResourceName(nsgID)
-		err := az.createSecurityGroupRules(ctx, nsgName)
-		if errorCheck(err) {
-			return nil, fmt.Errorf("failed to update security group rules: %v", err)
-		}
-	} else {
-		nsgName = az.generateResourceName("nsg", vmRandString)
-		err := az.createSecurityGroupRules(ctx, nsgName)
-		if errorCheck(err) {
-			return nil, fmt.Errorf("failed to update security group rules: %v", err)
-		}
+	if checkForNil(nsgStruct.ID) {
+		return nil, fmt.Errorf("failed to find worker NSG")
 	}
+
+	vmRandString := strings.Split(vmName, "-")[1]
+	nsgID := *(nsgStruct.ID)
+	nsgName := extractResourceName(nsgID)
 	az.NsgName = nsgName
+
+	err = az.updateSecurityGroup(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update security group rules: %v", err)
+	}
 
 	if len(az.IpName) == 0 {
 		ipName := az.generateResourceName("ip", vmRandString)
@@ -846,46 +874,25 @@ func (az *AzureProvider) deleteSpecificRule(s []network.SecurityRule, name strin
 	return
 }
 
-// deleteNSGRules deletes the security group rules by taking it's name as argument.
-// it deletes the rdp and vnet_traffic rules from the worker subnet security group rules.
+// deleteNSGRules deletes the rdp, vnet and WinRM traffic rules from the worker subnet security group rules.
 func (az *AzureProvider) deleteNSGRules(ctx context.Context, nsgName string) (err error) {
-	var secGroupPropFormat network.SecurityGroupPropertiesFormat
-	var secGroupRules []network.SecurityRule
-	secGroupProfile, err := az.nsgClient.Get(ctx, az.resourceGroupName, nsgName, "")
-	if errorCheck(err) {
+	_, err = az.nsgClient.Get(ctx, az.resourceGroupName, nsgName, "")
+	if err != nil {
 		return fmt.Errorf("cannot obtain the worker subnet security group rules: %v", err)
 	}
-	if !checkForNil(secGroupProfile.SecurityGroupPropertiesFormat) {
-		secGroupPropFormat = *(secGroupProfile.SecurityGroupPropertiesFormat)
-	} else {
-		return fmt.Errorf("cannot obtain the security group properties format: %v", err)
+
+	errMsg := ""
+	for _, rule := range az.requiredRules {
+		if err := rule.delete(ctx, nsgName); err != nil {
+			errMsg += err.Error() + "\n"
+		}
 	}
-	if !checkForNil(secGroupPropFormat.SecurityRules) {
-		secGroupRules = *(secGroupPropFormat.SecurityRules)
-	} else {
-		fmt.Errorf("cannot obtain the security group rules: %v", err)
+
+	if errMsg != "" {
+		err = errors.New(errMsg)
+		log.Error(err, fmt.Sprintf("unable to delete SG rules"))
+
 	}
-	secGroupRules = az.deleteSpecificRule(secGroupRules, "RDP")
-	secGroupRules = az.deleteSpecificRule(secGroupRules, "vnet_traffic")
-	future, err := az.nsgClient.CreateOrUpdate(
-		ctx,
-		az.resourceGroupName,
-		nsgName,
-		network.SecurityGroup{
-			Location: az.getvnetLocation(ctx),
-			SecurityGroupPropertiesFormat: &network.SecurityGroupPropertiesFormat{
-				SecurityRules: &secGroupRules,
-			},
-		},
-	)
-	if errorCheck(err) {
-		return fmt.Errorf("cannot delete the security group rules of the worker subnet: %v", err)
-	}
-	err = future.WaitForCompletionRef(ctx, az.nsgClient.Client)
-	if errorCheck(err) {
-		return fmt.Errorf("cannot delete the security group rules of the worker subnet: %v", err)
-	}
-	_, err = future.Result(az.nsgClient)
 	return
 }
 
@@ -972,4 +979,63 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 		log.Info(fmt.Sprintf("%s file was not updated, %v", resourceTrackerFilePath, err))
 	}
 	return nil
+}
+
+// populateSecurityRule populates the SecurityRule struct with required values
+func (n *nsgRuleWrapper) populateSecurityRule() {
+	n.SecurityRule = network.SecurityRule{
+		Name: to.StringPtr(n.requiredName),
+		SecurityRulePropertiesFormat: &network.SecurityRulePropertiesFormat{
+			Protocol:                 network.SecurityRuleProtocolTCP,
+			SourcePortRange:          to.StringPtr(sourcePortRange),
+			SourceAddressPrefixes:    &[]string{*n.requiredSourceAddress},
+			DestinationAddressPrefix: to.StringPtr(destinationAddressPrefix),
+			DestinationPortRange:     to.StringPtr(n.requiredDestinationPortRange),
+			Access:                   network.SecurityRuleAccessAllow,
+			Direction:                network.SecurityRuleDirectionInbound,
+			Priority:                 to.Int32Ptr(n.requiredPriority),
+		},
+	}
+}
+
+// createOrUpdate creates or updates the security rule with the required information present in the struct
+func (n *nsgRuleWrapper) createOrUpdate(ctx context.Context, nsgName string) error {
+	// This implies that the security rule was not present and needs to be created
+	if n.Name == nil || n.SourceAddressPrefixes == nil {
+		n.populateSecurityRule()
+	} else {
+		// Check if the sourceAddress is present
+		for _, sourceAddress := range *n.SourceAddressPrefixes {
+			// sourceAddress is already present in rule, so there is no need to update
+			if sourceAddress == *n.requiredSourceAddress {
+				return nil
+			}
+		}
+		*n.SourceAddressPrefixes = append(*n.SourceAddressPrefixes, *n.requiredSourceAddress)
+	}
+
+	future, err := n.client.CreateOrUpdate(ctx, n.rgName, nsgName, n.requiredName, n.SecurityRule)
+	if err != nil {
+		return err
+	}
+	err = future.WaitForCompletionRef(ctx, n.client.Client)
+	if err != nil {
+		return err
+	}
+	_, err = future.Result(n.client)
+	return err
+}
+
+// delete deletes the rule from the given NSG
+func (n *nsgRuleWrapper) delete(ctx context.Context, nsgName string) error {
+	future, err := n.client.Delete(ctx, n.rgName, nsgName, n.requiredName)
+	if err != nil {
+		return err
+	}
+	err = future.WaitForCompletionRef(ctx, n.client.Client)
+	if err != nil {
+		return err
+	}
+	_, err = future.Result(n.client)
+	return err
 }
