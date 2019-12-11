@@ -551,3 +551,21 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 		assert.Contains(t, err.Error(), "nil kubelet cmd passed")
 	})
 }
+
+// TestPodManifestDirCreation tests if the pod manifest directory was created
+func TestPodManifestDirCreation(t *testing.T) {
+	// Create a temp directory with wmcb prefix
+	dir, err := ioutil.TempDir("", "wmcb")
+	require.NoError(t, err, "error creating temp directory")
+	// Ignore the return error as there is not much we can do if the temporary directory is not deleted
+	defer os.RemoveAll(dir)
+	// podManifestDirectory which has to be created by wmcb.
+	podManifestDirectory := filepath.Join(dir, "etc", "kubernetes", "manifests")
+	wnb := winNodeBootstrapper{
+		installDir:  dir,
+		kubeletArgs: make(map[string]string),
+	}
+	err = wnb.initializeKubeletFiles()
+	assert.NoError(t, err, "error initializing kubelet files")
+	assert.DirExists(t, podManifestDirectory, "pod manifest directory was not created")
+}
