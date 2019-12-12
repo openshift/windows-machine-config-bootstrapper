@@ -18,7 +18,6 @@ import (
 	"k8s.io/api/certificates/v1beta1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
 
 var (
@@ -35,8 +34,6 @@ var (
 	// This value should be updated when we change the kubelet version in WSU
 	expectedKubeTarSha = "a88e7a1c6f72ea6073dbb4ddfe2e7c8bd37c9a56d94a33823f531e303a9915e7a844ac5880097724e44dfa7f4" +
 		"a9659d14b79cc46e2067f6b13e6df3f3f1b0f64"
-	// k8sclientset is the kubernetes clientset we will use to query the cluster's status
-	k8sclientset *kubernetes.Clientset
 	// workerLabel is the worker label that needs to be applied to the Windows node
 	workerLabel = "node-role.kubernetes.io/worker"
 	// windowsLabel represents the node label that need to be applied to the Windows node created
@@ -91,7 +88,6 @@ func TestWSU(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, string(out))
 
-	k8sclientset = framework.K8sclientset
 	// Ansible will copy files to a temporary directory with a path such as:
 	// C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible.z5wa1pc5.vhn\\
 	initialSplit := strings.Split(string(out), "C:\\\\Users\\\\Administrator\\\\AppData\\\\Local\\\\Temp\\\\ansible.")
@@ -143,7 +139,7 @@ func testFilesCopied(t *testing.T) {
 // testNodeReady tests that the bootstrapped node was added to the cluster and is in the ready state
 func testNodeReady(t *testing.T) {
 	var createdNode *v1.Node
-	nodes, err := k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{})
+	nodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{})
 	require.NoError(t, err, "Could not get list of nodes")
 	require.NotZero(t, len(nodes.Items), "No nodes found")
 
@@ -177,7 +173,7 @@ func testNodeReady(t *testing.T) {
 
 // testNoPendingCSRs tests that there are no pending CSRs on the cluster
 func testNoPendingCSRs(t *testing.T) {
-	csrs, err := k8sclientset.CertificatesV1beta1().CertificateSigningRequests().List(metav1.ListOptions{})
+	csrs, err := framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().List(metav1.ListOptions{})
 	assert.NoError(t, err, "could not get CSR list")
 	for _, csr := range csrs.Items {
 		// CSR's with an empty condition list are pending
@@ -192,7 +188,7 @@ func testNoPendingCSRs(t *testing.T) {
 // testWorkerLabelsArePresent tests if the worker labels are present on the Windows Node.
 func testWorkerLabelsArePresent(t *testing.T) {
 	// Check if the Windows node has the required label needed.
-	windowsNodes, err := k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
 	assert.Equalf(t, len(windowsNodes.Items), 1, "expected 1 windows nodes to be present but found %v",
 		len(windowsNodes.Items))
@@ -202,7 +198,7 @@ func testWorkerLabelsArePresent(t *testing.T) {
 
 // testHybridOverlayAnnotations tests that the correct annotations have been added to the bootstrapped node
 func testHybridOverlayAnnotations(t *testing.T) {
-	windowsNodes, err := k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
 	require.NoError(t, err, "Could not get list of Windows nodes")
 	assert.Equalf(t, len(windowsNodes.Items), 1, "expected one windows node to be present but found %v",
 		len(windowsNodes.Items))
@@ -279,7 +275,7 @@ func waitUntilJobSucceeds(name string) error {
 	var job *batchv1.Job
 	var err error
 	for i := 0; i < retryCount; i++ {
-		job, err = k8sclientset.BatchV1().Jobs(v1.NamespaceDefault).Get(name, metav1.GetOptions{})
+		job, err = framework.K8sclientset.BatchV1().Jobs(v1.NamespaceDefault).Get(name, metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -299,7 +295,8 @@ func waitUntilDeploymentScaled(name string) error {
 	var deployment *appsv1.Deployment
 	var err error
 	for i := 0; i < retryCount; i++ {
-		deployment, err = k8sclientset.AppsV1().Deployments(v1.NamespaceDefault).Get(name, metav1.GetOptions{})
+		deployment, err = framework.K8sclientset.AppsV1().Deployments(v1.NamespaceDefault).Get(name,
+			metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -315,7 +312,8 @@ func waitUntilDeploymentScaled(name string) error {
 // selector, the function will return an error
 func getPodIP(selector metav1.LabelSelector) (string, error) {
 	selectorString := labels.Set(selector.MatchLabels).String()
-	podList, err := k8sclientset.CoreV1().Pods(v1.NamespaceDefault).List(metav1.ListOptions{LabelSelector: selectorString})
+	podList, err := framework.K8sclientset.CoreV1().Pods(v1.NamespaceDefault).List(metav1.ListOptions{
+		LabelSelector: selectorString})
 	if err != nil {
 		return "", err
 	}
@@ -339,8 +337,9 @@ func createLinuxJob(name string, command []string) (*batchv1.Job, error) {
 	return createJob(name, ubi8Image, command, linuxNodeSelector, []v1.Toleration{})
 }
 
-func createJob(name, image string, command []string, selector map[string]string, tolerations []v1.Toleration) (*batchv1.Job, error) {
-	jobsClient := k8sclientset.BatchV1().Jobs(v1.NamespaceDefault)
+func createJob(name, image string, command []string, selector map[string]string,
+	tolerations []v1.Toleration) (*batchv1.Job, error) {
+	jobsClient := framework.K8sclientset.BatchV1().Jobs(v1.NamespaceDefault)
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name + "-job",
@@ -374,13 +373,13 @@ func createJob(name, image string, command []string, selector map[string]string,
 
 // deleteJob deletes the job with the given name
 func deleteJob(name string) error {
-	jobsClient := k8sclientset.BatchV1().Jobs(v1.NamespaceDefault)
+	jobsClient := framework.K8sclientset.BatchV1().Jobs(v1.NamespaceDefault)
 	return jobsClient.Delete(name, &metav1.DeleteOptions{})
 }
 
 // createWindowsServerDeployment creates a deployment with a Windows Server 2019 container
 func createWindowsServerDeployment(name string, command []string) (*appsv1.Deployment, error) {
-	deploymentsClient := k8sclientset.AppsV1().Deployments(v1.NamespaceDefault)
+	deploymentsClient := framework.K8sclientset.AppsV1().Deployments(v1.NamespaceDefault)
 	replicaCount := int32(1)
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -432,7 +431,7 @@ func createWindowsServerDeployment(name string, command []string) (*appsv1.Deplo
 
 // deleteDeployment deletes the deployment with the given name
 func deleteDeployment(name string) error {
-	deploymentsClient := k8sclientset.AppsV1().Deployments(v1.NamespaceDefault)
+	deploymentsClient := framework.K8sclientset.AppsV1().Deployments(v1.NamespaceDefault)
 	return deploymentsClient.Delete(name, &metav1.DeleteOptions{})
 }
 
