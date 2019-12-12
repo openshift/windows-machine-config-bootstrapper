@@ -11,7 +11,6 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -47,7 +46,7 @@ const (
 	// serviceWaitTime is an arbitrary amount of time to wait for the Windows service API to complete requests
 	serviceWaitTime = time.Second * 10
 	// certDirectory is where the kubelet will look for certificates
-	certDirectory = "c:/var/lib/kubelet/pki/"
+	certDirectory = "c:\\var\\lib\\kubelet\\pki\\"
 	// cloudConfigOption is kubelet CLI option for cloud configuration
 	cloudConfigOption = "cloud-config"
 	// windowsTaints defines the taints that need to be applied on the Windows nodes.
@@ -310,7 +309,7 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 			}
 
 			// Set the --cloud-config option value
-			wmcb.kubeletArgs[cloudConfigOption] = path.Join(wmcb.installDir, cloudConfFilename)
+			wmcb.kubeletArgs[cloudConfigOption] = filepath.Join(wmcb.installDir, cloudConfFilename)
 		}
 
 		results = verbosityRegex.FindStringSubmatch(unit.Contents)
