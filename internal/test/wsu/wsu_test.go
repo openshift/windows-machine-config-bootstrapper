@@ -1,4 +1,4 @@
-package e2e
+package wsu
 
 import (
 	"bytes"
@@ -9,25 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/masterzen/winrm"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/api/certificates/v1beta1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 var (
-	// Get kubeconfig, AWS credentials, and artifact dir from environment variable set by the OpenShift CI operator.
-	kubeconfig     = os.Getenv("KUBECONFIG")
-	awsCredentials = os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
-	dir            = os.Getenv("ARTIFACT_DIR")
-	privateKeyPath = os.Getenv("KUBE_SSH_KEY_PATH")
-
 	// Path of the WSU playbook
 	playbookPath = os.Getenv("WSU_PATH")
 	// clusterAddress is the address of the OpenShift cluster e.g. "foo.fah.com".
@@ -42,10 +32,6 @@ var (
 	instanceType = "m5a.large"
 	sshKey       = "libra"
 
-	// Cloud provider factory that we will use in these tests
-	cloud cloudprovider.Cloud
-	// Credentials for a spun up instance
-	createdInstanceCreds *types.Credentials
 	// Temp directory ansible created on the windows host
 	ansibleTempDir = ""
 	// kubernetes-node-windows-amd64.tar.gz SHA512
@@ -55,8 +41,6 @@ var (
 		"a9659d14b79cc46e2067f6b13e6df3f3f1b0f64"
 	// k8sclientset is the kubernetes clientset we will use to query the cluster's status
 	k8sclientset *kubernetes.Clientset
-	// winRMClient is the WinRM client we can use to remotely run commands on the Windows node
-	winRMClient *winrm.Client
 	// workerLabel is the worker label that needs to be applied to the Windows node
 	workerLabel = "node-role.kubernetes.io/worker"
 	// windowsLabel represents the node label that need to be applied to the Windows node created
@@ -66,22 +50,6 @@ var (
 	// hybridOverlayMac is an annotation applied by the hybrid overlay
 	hybridOverlayMac = "k8s.ovn.org/hybrid-overlay-distributed-router-gateway-mac"
 )
-
-// createAWSWindowsInstance creates a windows instance and populates the "cloud" and "createdInstanceCreds" global
-// variables
-func createAWSWindowsInstance() error {
-	var err error
-	cloud, err = cloudprovider.CloudProviderFactory(kubeconfig, awsCredentials, "default", dir,
-		imageID, instanceType, sshKey, privateKeyPath)
-	if err != nil {
-		return fmt.Errorf("could not setup cloud provider: %s", err)
-	}
-	createdInstanceCreds, err = cloud.CreateWindowsVM()
-	if err != nil {
-		return fmt.Errorf("could not create windows VM: %s", err)
-	}
-	return nil
-}
 
 // createhostFile creates an ansible host file and returns the path of it
 func createHostFile(ip, password string) (string, error) {
@@ -93,7 +61,6 @@ func createHostFile(ip, password string) (string, error) {
 
 	_, err = hostFile.WriteString(fmt.Sprintf(`[win]
 %s ansible_password='%s'
-
 [win:vars]
 ansible_user=Administrator
 cluster_address=%s
@@ -103,68 +70,24 @@ ansible_winrm_server_cert_validation=ignore`, ip, password, clusterAddress))
 	return hostFile.Name(), err
 }
 
-// getKubeClient returns a pointer to a kubernetes clientset given the path to a cluster's kubeconfig
-func getKubeClient(kubeconfig string) (*kubernetes.Clientset, error) {
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		return nil, fmt.Errorf("could not build config from flags: %v", err)
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("could not create k8s clientset: %v", err)
-	}
-	return clientset, nil
-}
-
 // TestWSU creates a Windows instance, runs the WSU, and then runs a series of tests to ensure all expected
 // behavior was achieved. The following environment variables must be set for this test to run: KUBECONFIG,
 // AWS_SHARED_CREDENTIALS_FILE, ARTIFACT_DIR, KUBE_SSH_KEY_PATH, WSU_PATH, CLUSTER_ADDR
 func TestWSU(t *testing.T) {
-	require.NotEmptyf(t, kubeconfig, "KUBECONFIG environment variable not set")
-	require.NotEmptyf(t, awsCredentials, "AWS_SHARED_CREDENTIALS_FILE environment variable not set")
-	require.NotEmptyf(t, dir, "ARTIFACT_DIR environment variable not set")
-	require.NotEmptyf(t, privateKeyPath, "KUBE_SSH_KEY_PATH environment variable not set")
-	require.NotEmptyf(t, playbookPath, "WSU_PATH environment variable not set")
-	require.NotEmptyf(t, clusterAddress, "CLUSTER_ADDR environment variable not set")
-
-	var err error
-	k8sclientset, err = getKubeClient(kubeconfig)
-	require.NoError(t, err)
-	existingWindowsNodes, err := k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
-	require.NoError(t, err)
-	// The test should fail, if there are existing Windows nodes in the cluster as we're just relying on the
-	// windowsLabel to be present on the node
-	// TODO: Label or annotate the windows node to have more determinism when running test suite.
-	require.Equalf(t, len(existingWindowsNodes.Items), 0, "expected 0 windows nodes to be present but found %v",
-		len(existingWindowsNodes.Items))
-
-	// TODO: Check if other cloud provider credentials are available
-	if awsCredentials == "" {
-		t.Fatal("No cloud provider credentials available")
-	}
-	err = createAWSWindowsInstance()
-	require.NoErrorf(t, err, "Error spinning up Windows VM: %s", err)
-	require.NotNil(t, createdInstanceCreds, "Instance credentials are not set")
-	defer cloud.DestroyWindowsVMs()
 	// In order to run the ansible playbook we create an inventory file:
 	// https://docs.ansible.com/ansible/latest/user_guide/intro_inventory.html
-	hostFilePath, err := createHostFile(createdInstanceCreds.GetIPAddress(), createdInstanceCreds.GetPassword())
+	hostFilePath, err := createHostFile(framework.Credentials.GetIPAddress(), framework.Credentials.GetPassword())
 	require.NoErrorf(t, err, "Could not write to host file: %s", err)
 	cmd := exec.Command("ansible-playbook", "-vvv", "-i", hostFilePath, playbookPath)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, string(out))
 
+	k8sclientset = framework.K8sclientset
 	// Ansible will copy files to a temporary directory with a path such as:
 	// C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible.z5wa1pc5.vhn\\
 	initialSplit := strings.Split(string(out), "C:\\\\Users\\\\Administrator\\\\AppData\\\\Local\\\\Temp\\\\ansible.")
 	require.True(t, len(initialSplit) > 1, "Could not find Windows temp dir: %s", out)
 	ansibleTempDir = "C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible." + strings.Split(initialSplit[1], "\"")[0]
-
-	// Connect to the bootstrapped host
-	endpoint := winrm.NewEndpoint(createdInstanceCreds.GetIPAddress(), 5986, true, true,
-		nil, nil, nil, 0)
-	winRMClient, err = winrm.NewClient(endpoint, "Administrator", createdInstanceCreds.GetPassword())
-	require.NoErrorf(t, err, "Could not create winrm client: %s", err)
 
 	t.Run("Files copied to Windows node", testFilesCopied)
 	t.Run("Pending CSRs were approved", testNoPendingCSRs)
@@ -185,7 +108,7 @@ func testFilesCopied(t *testing.T) {
 		// This command will write to stdout, only if the file we are looking for does not exist
 		command := fmt.Sprintf("if not exist %s echo fail", fullPath)
 		stdout := new(bytes.Buffer)
-		_, err := winRMClient.Run(command, stdout, os.Stderr)
+		_, err := framework.WinrmClient.Run(command, stdout, os.Stderr)
 		assert.NoError(t, err, "Error looking for %s: %s", fullPath, err)
 		assert.Emptyf(t, stdout.String(), "Missing file: %s", fullPath)
 	}
@@ -196,7 +119,7 @@ func testFilesCopied(t *testing.T) {
 	command := fmt.Sprintf("certutil -hashfile %s SHA512", kubeTarPath)
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
-	_, err := winRMClient.Run(command, stdout, stderr)
+	_, err := framework.WinrmClient.Run(command, stdout, stderr)
 	require.NoError(t, err, "Error generating SHA512 for %s", kubeTarPath)
 	require.Equalf(t, stderr.Len(), 0, "Error generating SHA512 for %s", kubeTarPath)
 	// CertUtil output example:
@@ -217,7 +140,7 @@ func testNodeReady(t *testing.T) {
 	// Find the node that we spun up
 	for _, node := range nodes.Items {
 		for _, address := range node.Status.Addresses {
-			if address.Type == "ExternalIP" && address.Address == createdInstanceCreds.GetIPAddress() {
+			if address.Type == "ExternalIP" && address.Address == framework.Credentials.GetIPAddress() {
 				createdNode = &node
 				break
 			}
@@ -280,7 +203,7 @@ func testHybridOverlayAnnotations(t *testing.T) {
 // testHNSNetworksCreated tests that the required HNS Networks have been created on the bootstrapped node
 func testHNSNetworksCreated(t *testing.T) {
 	stdout := new(bytes.Buffer)
-	_, err := winRMClient.Run("powershell Get-HnsNetwork", stdout, os.Stderr)
+	_, err := framework.WinrmClient.Run("powershell Get-HnsNetwork", stdout, os.Stderr)
 	require.NoError(t, err, "Could not run Get-HnsNetwork command")
 	stdoutString := stdout.String()
 	assert.Contains(t, stdoutString, "Name                   : BaseOpenShiftNetwork",

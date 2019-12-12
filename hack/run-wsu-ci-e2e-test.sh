@@ -4,7 +4,7 @@ set -o nounset
 set -o pipefail
 
 WMCO_ROOT=$(pwd)
-TEST_DIR=$WMCO_ROOT/tools/ansible/tasks/wsu/test/e2e
+TEST_DIR=$WMCO_ROOT/internal/test/wsu
 
 # Make gopath if doesnt exist
 mkdir -p $GOPATH
