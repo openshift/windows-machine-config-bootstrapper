@@ -1,6 +1,7 @@
 package framework
 
 import (
+	"bytes"
 	"fmt"
 	"k8s.io/client-go/tools/clientcmd"
 	"log"
@@ -148,35 +149,37 @@ func (f *TestFramework) setupWinRMClient() error {
 // configureOpenSSHServer configures the OpenSSH server using WinRM client installed on the Windows VM.
 // The OpenSSH server is installed as part of WNI tool's CreateVM method.
 func (f *TestFramework) configureOpenSSHServer() error {
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
 	// This dependency is needed for the subsequent module installation we're doing. This version of NuGet
 	// needed for OpenSSH server 0.0.1
 	installDependentPackages := "Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force"
 	if _, err := f.WinrmClient.Run(remotePowerShellCmdPrefix+installDependentPackages,
-		os.Stdout, os.Stderr); err != nil {
+		stdout, stderr); err != nil {
 		return fmt.Errorf("failed to install dependent packages for OpenSSH server with error %v", err)
 	}
 	// Configure OpenSSH for all users.
 	// TODO: Limit this to Administrator.
 	if _, err := f.WinrmClient.Run(remotePowerShellCmdPrefix+"Install-Module -Force OpenSSHUtils -Scope AllUsers",
-		os.Stdout, os.Stderr); err != nil {
+		stdout, stderr); err != nil {
 		return fmt.Errorf("failed to configure OpenSSHUtils for all users: %v", err)
 	}
 	// Setup ssh-agent Windows Service.
 	if _, err := f.WinrmClient.Run(remotePowerShellCmdPrefix+"Set-Service -Name ssh-agent -StartupType ‘Automatic’",
-		os.Stdout, os.Stderr); err != nil {
+		stdout, stderr); err != nil {
 		return fmt.Errorf("failed to set up ssh-agent Windows Service: %v", err)
 	}
 	// Setup sshd Windows service
 	if _, err := f.WinrmClient.Run(remotePowerShellCmdPrefix+"Set-Service -Name sshd -StartupType ‘Automatic’",
-		os.Stdout, os.Stderr); err != nil {
+		stdout, stderr); err != nil {
 		return fmt.Errorf("failed to set up sshd Windows Service: %v", err)
 	}
 	if _, err := f.WinrmClient.Run(remotePowerShellCmdPrefix+"Start-Service ssh-agent",
-		os.Stdout, os.Stderr); err != nil {
+		stdout, stderr); err != nil {
 		return fmt.Errorf("start ssh-agent failed: %v", err)
 	}
 	if _, err := f.WinrmClient.Run(remotePowerShellCmdPrefix+"Start-Service sshd",
-		os.Stdout, os.Stderr); err != nil {
+		stdout, stderr); err != nil {
 		return fmt.Errorf("failed to start sshd: %v", err)
 	}
 	return nil
@@ -184,9 +187,11 @@ func (f *TestFramework) configureOpenSSHServer() error {
 
 // createRemoteDir creates a directory on the Windows VM to which file can be transferred
 func (f *TestFramework) createRemoteDir() error {
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
 	// Create a directory on the Windows node where the file has to be transferred
 	if _, err := f.WinrmClient.Run(remotePowerShellCmdPrefix+"mkdir"+" "+f.RemoteDir,
-		os.Stdout, os.Stderr); err != nil {
+		stdout, stderr); err != nil {
 		return fmt.Errorf("failed to created a temporary dir on the remote Windows node with %v", err)
 	}
 	return nil
