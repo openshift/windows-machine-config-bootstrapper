@@ -38,35 +38,37 @@ var (
 // TestWMCBUnit runs the unit tests for WMCB
 func TestWMCBUnit(t *testing.T) {
 	// Transfer the binary to the windows using scp
-	defer framework.SSHClient.Close()
-	sftp, err := sftp.NewClient(framework.SSHClient)
-	require.NoError(t, err, "sftp client initialization failed")
-	defer sftp.Close()
-	f, err := os.Open(*binaryToBeTransferred)
-	require.NoError(t, err, "error opening binary file to be transferred")
-	dstFile, err := sftp.Create(framework.RemoteDir + "\\" + "wmcb_unit_test.exe")
-	require.NoError(t, err, "error opening binary file to be transferred")
-	_, err = io.Copy(dstFile, f)
-	require.NoError(t, err, "error copying binary to the Windows VM")
+	for _, vm := range framework.WinVMs {
+		defer vm.SSHClient.Close()
+		sftp, err := sftp.NewClient(vm.SSHClient)
+		require.NoError(t, err, "sftp client initialization failed")
+		defer sftp.Close()
+		f, err := os.Open(*binaryToBeTransferred)
+		require.NoError(t, err, "error opening binary file to be transferred")
+		dstFile, err := sftp.Create(vm.RemoteDir + "\\" + "wmcb_unit_test.exe")
+		require.NoError(t, err, "error opening binary file to be transferred")
+		_, err = io.Copy(dstFile, f)
+		require.NoError(t, err, "error copying binary to the Windows VM")
 
-	// Forcefully close it so that we can execute the binary later
-	dstFile.Close()
+		// Forcefully close it so that we can execute the binary later
+		dstFile.Close()
 
-	stdout := os.Stdout
-	r, w, err := os.Pipe()
-	assert.NoError(t, err, "error opening pipe to read stdout")
-	os.Stdout = w
+		stdout := os.Stdout
+		r, w, err := os.Pipe()
+		assert.NoError(t, err, "error opening pipe to read stdout")
+		os.Stdout = w
 
-	// Remotely execute the test binary.
-	_, err = framework.WinrmClient.Run(remotePowerShellCmdPrefix+framework.RemoteDir+"\\"+
-		"wmcb_unit_test.exe --test.v",
-		os.Stdout, os.Stderr)
-	assert.NoError(t, err, "error while executing the test binary remotely")
-	w.Close()
-	out, err := ioutil.ReadAll(r)
-	assert.NoError(t, err, "error reading stdout from the remote Windows VM")
-	os.Stdout = stdout
-	assert.NotContains(t, string(out), "FAIL")
+		// Remotely execute the test binary.
+		_, err = vm.WinrmClient.Run(remotePowerShellCmdPrefix+vm.RemoteDir+"\\"+
+			"wmcb_unit_test.exe --test.v",
+			os.Stdout, os.Stderr)
+		assert.NoError(t, err, "error while executing the test binary remotely")
+		w.Close()
+		out, err := ioutil.ReadAll(r)
+		assert.NoError(t, err, "error reading stdout from the remote Windows VM")
+		os.Stdout = stdout
+		assert.NotContains(t, string(out), "FAIL")
+	}
 }
 
 // hasWindowsTaint returns true if the given Windows node has the Windows taint
