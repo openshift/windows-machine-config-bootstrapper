@@ -89,14 +89,30 @@ func (f *TestFramework) getKubeClient() error {
 // createWindowsVM spins up the Windows VM in the given cloud provider and gives us the credentials to access the
 // windows VM created
 func (f *TestFramework) createWindowsVM() error {
-	// TODO: Add validation for the environment variables to see if they're properly populated or not
 	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" {
+		return fmt.Errorf("KUBECONFIG environment variable not set")
+	}
 	awsCredentials := os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
+	if awsCredentials == "" {
+		return fmt.Errorf("AWS_SHARED_CREDENTIALS_FILE environment variable not set")
+	}
 	artifactDir := os.Getenv("ARTIFACT_DIR")
+	if awsCredentials == "" {
+		return fmt.Errorf("ARTIFACT_DIR environment variable not set")
+	}
 	privateKeyPath := os.Getenv("KUBE_SSH_KEY_PATH")
+	if privateKeyPath == "" {
+		return fmt.Errorf("KUBE_SSH_KEY_PATH environment variable not set")
+	}
+
 	// Use Windows 2019 server image with containers in us-east1 zone for CI testing.
 	// TODO: Move to environment variable that can be fetched from the cloud provider
+	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0b8d82dea356226d3 for
+	// Microsoft Windows Server 2019 Base with Containers.
 	imageID := "ami-0b8d82dea356226d3"
+	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
+	// the Intel 82599 network driver
 	instanceType := "m5a.large"
 	sshKey := "libra"
 	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, awsCredentials, "default", artifactDir,

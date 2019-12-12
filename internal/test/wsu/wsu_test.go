@@ -28,14 +28,6 @@ var (
 	// This should not include "https://api-" or a port
 	clusterAddress = os.Getenv("CLUSTER_ADDR")
 
-	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0b8d82dea356226d3 for
-	// Microsoft Windows Server 2019 Base with Containers.
-	imageID = "ami-0b8d82dea356226d3"
-	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
-	// the Intel 82599 network driver
-	instanceType = "m5a.large"
-	sshKey       = "libra"
-
 	// Temp directory ansible created on the windows host
 	ansibleTempDir = ""
 	// kubernetes-node-windows-amd64.tar.gz SHA512
@@ -88,6 +80,9 @@ ansible_winrm_server_cert_validation=ignore`, ip, password, clusterAddress))
 // behavior was achieved. The following environment variables must be set for this test to run: KUBECONFIG,
 // AWS_SHARED_CREDENTIALS_FILE, ARTIFACT_DIR, KUBE_SSH_KEY_PATH, WSU_PATH, CLUSTER_ADDR
 func TestWSU(t *testing.T) {
+	require.NotEmptyf(t, playbookPath, "WSU_PATH environment variable not set")
+	require.NotEmptyf(t, clusterAddress, "CLUSTER_ADDR environment variable not set")
+
 	// In order to run the ansible playbook we create an inventory file:
 	// https://docs.ansible.com/ansible/latest/user_guide/intro_inventory.html
 	hostFilePath, err := createHostFile(framework.Credentials.GetIPAddress(), framework.Credentials.GetPassword())
