@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,9 @@ var (
 	retryCount = 20
 	// retryInterval is the interval of time until we retry after a failure
 	retryInterval = 5 * time.Second
+	// remotePowerShellCmdPrefix holds the powershell prefix that needs to be prefixed to every command run on the
+	// remote powershell session opened
+	remotePowerShellCmdPrefix = "powershell.exe -NonInteractive -ExecutionPolicy Bypass "
 )
 
 // createhostFile creates an ansible host file and returns the path of it
@@ -111,6 +115,35 @@ func TestWSU(t *testing.T) {
 	t.Run("Network annotations were applied to node", testHybridOverlayAnnotations)
 	t.Run("HNS Networks were created", testHNSNetworksCreated)
 	t.Run("East-west networking", testEastWestNetworking)
+	t.Run("Check cni config generated on the Windows host", testCNIConfig)
+}
+
+// testCNIConfig tests if the CNI config has required hostsubnet and servicenetwork CIDR
+// TODO: split this into multiple tests when this grows
+func testCNIConfig(t *testing.T) {
+	// Check if the host subnet matches
+	windowsNodes, err := k8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	require.NoError(t, err, "Could not get list of Windows nodes")
+	assert.Equalf(t, len(windowsNodes.Items), 1, "expected one windows node to be present but found %v",
+		len(windowsNodes.Items))
+	// By the time, we reach here the annotation should be present, so need to validate again
+	hostSubnet := windowsNodes.Items[0].Annotations[hybridOverlaySubnet]
+	cniConfigFilePath := filepath.Join(ansibleTempDir, "cni", "config", "cni.conf")
+	hostSubnetExists, err := doesFileContainMatchingString(cniConfigFilePath, hostSubnet)
+	require.NoError(t, err)
+	assert.Equal(t, hostSubnetExists, true)
+
+	// check if the service CIDR matches
+	networkCR, err := framework.OSConfigClient.ConfigV1().Networks().Get("cluster", metav1.GetOptions{})
+	assert.NoError(t, err, "error querying network object")
+	serviceNetworks := networkCR.Spec.ServiceNetwork
+	// The serviceNetwork should be a singleton slice as of now, let's try accessing the first element in it.
+	require.Equalf(t, len(serviceNetworks), 1, "expected service network to be a singleton but got %v",
+		len(serviceNetworks))
+	requiredServiceNetwork := serviceNetworks[0]
+	requiredServiceNetworkExists, err := doesFileContainMatchingString(cniConfigFilePath, requiredServiceNetwork)
+	require.NoError(t, err)
+	assert.Equal(t, requiredServiceNetworkExists, true)
 }
 
 // testFilesCopied tests that the files we attempted to copy to the Windows host, exist on the Windows host
@@ -203,6 +236,27 @@ func testWorkerLabelsArePresent(t *testing.T) {
 		len(windowsNodes.Items))
 	assert.Contains(t, windowsNodes.Items[0].Labels, workerLabel,
 		"expected worker label to be present on the Windows node but did not find any")
+}
+
+// doesFileContain checks if the given file on the remote Windows virtual machine contains given string
+func doesFileContainMatchingString(fileName, matchString string) (bool, error) {
+	// Read the file from remote host and check if the hostSubnet is present
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		return false, fmt.Errorf("error opening pipe to read stdout: %v", err)
+	}
+	os.Stdout = w
+	if _, err = framework.WinrmClient.Run(remotePowerShellCmdPrefix+"cat "+fileName, os.Stdout, os.Stderr); err != nil {
+		return false, fmt.Errorf("error while printing output of cni.conf file to stdout: %v", err)
+	}
+	w.Close()
+	out, err := ioutil.ReadAll(r)
+	if err != nil {
+		return false, fmt.Errorf("error reading stdout from the remote Windows VM: %v", err)
+	}
+	os.Stdout = stdout
+	return strings.Contains(string(out), matchString), nil
 }
 
 // testHybridOverlayAnnotations tests that the correct annotations have been added to the bootstrapped node

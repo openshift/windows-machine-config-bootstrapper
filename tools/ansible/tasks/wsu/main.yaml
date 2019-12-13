@@ -163,19 +163,30 @@
       retries: 12
       delay: 5
 
-    - name: Get hybrid overlay subnet
-      delegate_to: localhost
-      shell: oc get nodes "{{ node_name.stdout }}" -o=jsonpath='{.metadata.annotations.k8s\.ovn\.org/hybrid-overlay-hostsubnet}'
-      register: hybrid_subnet
-
     - name: Create cni config directory
       win_file:
         path: "{{ win_temp_dir.path }}\\cni\\config"
         state: directory
 
-    - name: Create cni config
-      win_copy:
-        content: "{\"cniVersion\":\"0.2.0\",\"name\":\"OpenShiftNetwork\",\"type\":\"win-overlay\",\"capabilities\":{\"dns\":true},\"ipam\":{\"type\":\"host-local\",\"subnet\":\"{{ hybrid_subnet.stdout }}\"},\"policies\":[{\"name\":\"EndpointPolicy\",\"value\":{\"Type\":\"OutBoundNAT\",\"ExceptionList\":[\"10.132.0.0/16\"]}},{\"name\":\"EndpointPolicy\",\"value\":{\"Type\":\"ROUTE\",\"DestinationPrefix\":\"10.132.0.0/16\",\"NeedEncap\":true}}]}"
+    # Get the subnet associated with host. We assume the network operator object has been modified to
+    # include hybrid overlay config
+    - name: Get the subnet associated with host
+      delegate_to: localhost
+      shell: "oc get nodes {{ node_name.stdout}} -o=jsonpath='{.metadata.annotations.k8s\\.ovn\\.org\\/hybrid-overlay-hostsubnet}'"
+      register: ovn_host_subnet
+
+    # Get the service CIDR associated with the OpenShift network operator object. We assume that network always object
+    # has atleast one entry as per defaulting at
+    # https://github.com/openshift/installer/blob/master/pkg/types/defaults/installconfig.go#L18
+    - name: Get the service CIDR associated with network object
+      delegate_to: localhost
+      shell: "oc get network.operator.openshift.io/cluster -o=jsonpath='{.spec.serviceNetwork[0]}'"
+      register: service_network_cidr
+
+    # Generate the cni.conf file to be transferred to the Windows host
+    - name: Generate the cni config file
+      win_template:
+        src: templates/cni.j2
         dest: "{{ win_temp_dir.path }}\\cni\\config\\cni.conf"
 
     - name: Configure CNI
@@ -186,3 +197,4 @@
       fail:
         msg: "CNI Configuration error"
       when: '"CNI configuration completed successfully" not in bootstrap_out.stderr'
+

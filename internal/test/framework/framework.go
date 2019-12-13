@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/masterzen/winrm"
+	configv1client "github.com/openshift/client-go/config/clientset/versioned"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"golang.org/x/crypto/ssh"
@@ -40,6 +41,8 @@ type TestFramework struct {
 	cloudProvider cloudprovider.Cloud
 	// k8sclientset is the kubernetes clientset we will use to query the cluster's status
 	K8sclientset *kubernetes.Clientset
+	// OSConfigClient is the OpenShift config client, we will use to query the OpenShift api object status
+	OSConfigClient *configv1client.Clientset
 }
 
 // Setup sets up the Windows node so that it can join the existing OpenShift cluster
@@ -69,6 +72,9 @@ func (f *TestFramework) Setup() {
 	if err := f.getKubeClient(); err != nil {
 		log.Fatalf("failed to get kube client with error: %v", err)
 	}
+	if err := f.getOpenShiftConfigClient(); err != nil {
+		log.Fatalf("failed to get kube client with error: %v", err)
+	}
 }
 
 // getKubeClient setups the kubeclient that can be used across all the test suites.
@@ -83,6 +89,22 @@ func (f *TestFramework) getKubeClient() error {
 		return fmt.Errorf("could not create k8s clientset: %v", err)
 	}
 	f.K8sclientset = clientset
+	return nil
+}
+
+// getOpenShiftConfigClient gets the new OpenShift config v1 client
+func (f *TestFramework) getOpenShiftConfigClient() error {
+	kubeconfig := os.Getenv("KUBECONFIG")
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		return fmt.Errorf("could not build config from flags: %v", err)
+	}
+	// Get openshift api config client.
+	configClient, err := configv1client.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("could not create config clientset: %v", err)
+	}
+	f.OSConfigClient = configClient
 	return nil
 }
 
