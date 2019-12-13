@@ -10,6 +10,7 @@ replace (
 
 require (
 	github.com/masterzen/winrm v0.0.0-20190308153735-1d17eaf15943
+	github.com/openshift/client-go v0.0.0-20190813201236-5a5508328169
 	github.com/openshift/windows-machine-config-operator/tools/windows-node-installer v0.0.0-20191123092711-1eb1f9837741
 	github.com/pkg/sftp v1.10.1
 	github.com/stretchr/testify v1.4.0
