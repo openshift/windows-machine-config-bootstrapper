@@ -27,7 +27,7 @@
             url: "{{ kubelet_location }}"
             dest: "{{ tmp_dir.path }}/kube.tar.gz"
 
-        - name: Extract kubelet
+        - name: Extract kubernetes node binaries
           unarchive:
             src: "{{ tmp_dir.path }}/kube.tar.gz"
             dest: "{{ tmp_dir.path }}"
@@ -36,6 +36,11 @@
           copy:
             src: "{{ tmp_dir.path }}/kubernetes/node/bin/kubelet.exe"
             dest: "{{ tmp_dir.path }}/kubelet.exe"
+
+        - name: Grab kube-proxy from extracted directories
+          copy:
+            src: "{{ tmp_dir.path }}/kubernetes/node/bin/kube-proxy.exe"
+            dest: "{{ tmp_dir.path }}/kube-proxy.exe"
 
         - name: Create temporary cni directory
           file:
@@ -199,3 +204,27 @@
       fail:
         msg: "CNI Configuration error"
       when: '"CNI configuration completed successfully" not in bootstrap_out.stderr'
+
+    - name: Copy kube-proxy to C:\k
+      win_copy:
+        src: "{{ win_temp_dir.path }}\\kube-proxy.exe"
+        dest: "C:\\k\\kube-proxy.exe"
+        remote_src: yes
+
+    - name: Copy required powershell script to the temporary directory
+      win_copy:
+        src: "powershell/hns.psm1"
+        dest: "{{ win_temp_dir.path }}\\hns.psm1"
+
+    - name: Get source-vip
+      win_shell: 'Import-Module {{ win_temp_dir.path }}\\hns.psm1; $net = (Get-HnsNetwork | where { $_.Name -eq "OpenShiftNetwork" }); $endpoint = New-HnsEndpoint -NetworkId $net.ID -Name VIPEndpoint; Attach-HNSHostEndpoint -EndpointID $endpoint.ID -CompartmentID 1; (Get-NetIPConfiguration -AllCompartments -All -Detailed | where { $_.NetAdapter.LinkLayerAddress -eq $endpoint.MacAddress }).IPV4Address.IPAddress.Trim()'
+      register: source_vip
+
+    - name: Create kube-proxy Windows Service
+      win_service:
+        name: "kube-proxy"
+        path: "C:\\k\\kube-proxy.exe --windows-service --v=4 --proxy-mode=kernelspace --feature-gates=WinOverlay=true --hostname-override={{ node_name.stdout }} --kubeconfig=c:\\k\\kubeconfig --cluster-cidr={{ ovn_host_subnet.stdout }} --log-dir=c:\\k --logtostderr=false --network-name=OpenShiftNetwork --source-vip={{ source_vip.stdout | trim }} --enable-dsr=false"
+        state: started
+        start_mode: auto
+        display_name: "kube-proxy"
+        description: "OpenShift kube-proxy"

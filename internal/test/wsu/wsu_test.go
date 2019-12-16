@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
-	"k8s.io/apimachinery/pkg/labels"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +19,7 @@ import (
 	"k8s.io/api/certificates/v1beta1"
 	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 )
 
 var (
@@ -107,6 +108,7 @@ func TestWSU(t *testing.T) {
 	t.Run("HNS Networks were created", testHNSNetworksCreated)
 	t.Run("Check cni config generated on the Windows host", testCNIConfig)
 	t.Run("East-west networking", testEastWestNetworking)
+	t.Run("North-south networking", testNorthSouthNetworking)
 }
 
 // testCNIConfig tests if the CNI config has required hostsubnet and servicenetwork CIDR
@@ -272,26 +274,10 @@ func testHNSNetworksCreated(t *testing.T) {
 
 // testEastWestNetworking deploys Windows and Linux pods, and tests that the pods can communicate
 func testEastWestNetworking(t *testing.T) {
-	// Preload the image that will be used on the Windows node, to prevent download timeouts
-	// and separate possible failure conditions into multiple operations
-	err := pullDockerImage(windowsServerImage)
-	require.NoError(t, err, "Could not pull Windows Server image")
-
-	// This will run a Server on the container, which can be reached with a GET request
-	winServerCommand := []string{"powershell.exe", "-command",
-		"$listener = New-Object System.Net.HttpListener; $listener.Prefixes.Add('http://*:80/'); $listener.Start(); " +
-			"Write-Host('Listening at http://*:80/'); while ($listener.IsListening) { " +
-			"$context = $listener.GetContext(); $response = $context.Response; " +
-			"$content='<html><body><H1>Windows Container Web Server</H1></body></html>'; " +
-			"$buffer = [System.Text.Encoding]::UTF8.GetBytes($content); $response.ContentLength64 = $buffer.Length; " +
-			"$response.OutputStream.Write($buffer, 0, $buffer.Length); $response.Close(); };"}
-	winServerDeployment, err := createWindowsServerDeployment("win-server", winServerCommand)
-	require.NoError(t, err, "Could not create Windows deployment")
+	// Deploy a webserver pod on the new node
+	winServerDeployment, err := deployWindowsWebServer()
+	require.NoError(t, err, "Could not create Windows Server deployment")
 	defer deleteDeployment(winServerDeployment.Name)
-
-	// Wait until the server is ready to be queried
-	err = waitUntilDeploymentScaled(winServerDeployment.Name)
-	require.NoError(t, err, "Deployment was unable to scale")
 
 	// Get the pod so we can use its IP
 	winServerIP, err := getPodIP(*winServerDeployment.Spec.Selector)
@@ -320,6 +306,35 @@ func testEastWestNetworking(t *testing.T) {
 	assert.NoError(t, err, "Could not curl the Windows webserver pod from a separate Windows container")
 
 	// TODO: test Windows <-> Windows on different node
+}
+
+// deployWindowsWebServer creates a deployment with a single Windows Server pod, listening on port 80
+func deployWindowsWebServer() (*appsv1.Deployment, error) {
+	// Preload the image that will be used on the Windows node, to prevent download timeouts
+	// and separate possible failure conditions into multiple operations
+	err := pullDockerImage(windowsServerImage)
+	if err != nil {
+		return nil, fmt.Errorf("could not pull Windows Server image: %s", err)
+	}
+	// This will run a Server on the container, which can be reached with a GET request
+	winServerCommand := []string{"powershell.exe", "-command",
+		"$listener = New-Object System.Net.HttpListener; $listener.Prefixes.Add('http://*:80/'); $listener.Start(); " +
+			"Write-Host('Listening at http://*:80/'); while ($listener.IsListening) { " +
+			"$context = $listener.GetContext(); $response = $context.Response; " +
+			"$content='<html><body><H1>Windows Container Web Server</H1></body></html>'; " +
+			"$buffer = [System.Text.Encoding]::UTF8.GetBytes($content); $response.ContentLength64 = $buffer.Length; " +
+			"$response.OutputStream.Write($buffer, 0, $buffer.Length); $response.Close(); };"}
+	winServerDeployment, err := createWindowsServerDeployment("win-server", winServerCommand)
+	if err != nil {
+		return nil, fmt.Errorf("could not create Windows deployment: %s", err)
+	}
+	// Wait until the server is ready to be queried
+	err = waitUntilDeploymentScaled(winServerDeployment.Name)
+	if err != nil {
+		deleteDeployment(winServerDeployment.Name)
+		return nil, fmt.Errorf("deployment was unable to scale: %s", err)
+	}
+	return winServerDeployment, nil
 }
 
 // waitUntilJobSucceeds will return an error if the job fails or reaches a timeout
@@ -465,6 +480,12 @@ func createWindowsServerDeployment(name string, command []string) (*appsv1.Deplo
 							Image:           windowsServerImage,
 							ImagePullPolicy: v1.PullIfNotPresent,
 							Command:         command,
+							Ports: []v1.ContainerPort{
+								{
+									Protocol:      v1.ProtocolTCP,
+									ContainerPort: 80,
+								},
+							},
 						},
 					},
 					NodeSelector: map[string]string{"beta.kubernetes.io/os": "windows"},
@@ -502,4 +523,83 @@ func pullDockerImage(name string) error {
 		return fmt.Errorf("return code %d, stderr: %s", errorCode, stderrString)
 	}
 	return nil
+}
+
+// testNorthSouthNetworking deploys a Windows Server pod, and tests that we can network with it from outside the cluster
+func testNorthSouthNetworking(t *testing.T) {
+	// Deploy a webserver pod on the new node
+	winServerDeployment, err := deployWindowsWebServer()
+	require.NoError(t, err, "Could not create Windows Server deployment")
+	defer deleteDeployment(winServerDeployment.Name)
+
+	// Create a load balancer svc to expose the webserver
+	loadBalancer, err := createLoadBalancer("win-server", *winServerDeployment.Spec.Selector)
+	require.NoError(t, err, "Could not create load balancer for Windows Server")
+	defer deleteService(loadBalancer.Name)
+	loadBalancer, err = waitForLoadBalancerIngress(loadBalancer.Name)
+	require.NoError(t, err, "Error waiting for load balancer ingress")
+
+	// Try and read from the webserver through the load balancer. The load balancer takes a fair amount of time, ~3 min,
+	// to start properly routing connections.
+	resp, err := retryGET("http://"+loadBalancer.Status.LoadBalancer.Ingress[0].Hostname, retryInterval*3)
+	require.NoError(t, err, "Could not GET from load balancer: %v", loadBalancer)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode, "Non 200 response from webserver")
+}
+
+// retryGET will repeatedly try to GET from the provided URL
+func retryGET(url string, retryInterval time.Duration) (*http.Response, error) {
+	var resp *http.Response
+	var err error
+	for i := 0; i < retryCount; i++ {
+		resp, err = http.Get(url)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+		time.Sleep(retryInterval)
+	}
+	return resp, fmt.Errorf("timed out trying to GET %s: %s", url, err)
+}
+
+// createLoadBalancer creates a new load balancer for pods matching the label selector
+func createLoadBalancer(name string, selector metav1.LabelSelector) (*v1.Service, error) {
+	svcSpec := &v1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: v1.ServiceSpec{
+			Type: v1.ServiceTypeLoadBalancer,
+			Ports: []v1.ServicePort{
+				{
+					Protocol: v1.ProtocolTCP,
+					Port:     80,
+				},
+			},
+			Selector: selector.MatchLabels,
+		}}
+	return framework.K8sclientset.CoreV1().Services(v1.NamespaceDefault).Create(svcSpec)
+}
+
+// waitForLoadBalancerIngress waits until the load balancer has an external hostname ready
+func waitForLoadBalancerIngress(name string) (*v1.Service, error) {
+	var svc *v1.Service
+	var err error
+	for i := 0; i < retryCount; i++ {
+		svc, err = framework.K8sclientset.CoreV1().Services(v1.NamespaceDefault).Get(name,
+			metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		if len(svc.Status.LoadBalancer.Ingress) == 1 {
+			return svc, nil
+		}
+		time.Sleep(retryInterval)
+	}
+	return nil, fmt.Errorf("timed out waiting for single ingress: %v", svc)
+}
+
+// deleteService deletes the service with the given name
+func deleteService(name string) error {
+	svcClient := framework.K8sclientset.CoreV1().Services(v1.NamespaceDefault)
+	return svcClient.Delete(name, &metav1.DeleteOptions{})
 }
