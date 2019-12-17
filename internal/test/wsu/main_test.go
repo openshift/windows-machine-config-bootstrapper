@@ -2,16 +2,25 @@ package wsu
 
 import (
 	e2ef "github.com/openshift/windows-machine-config-operator/internal/test/framework"
+	"log"
 	"os"
 	"testing"
 )
 
 // framework holds the instantiation of test suite being executed. As of now, temp dir is hardcoded.
-// TODO: Create a temporary remote directory on the Windows node
-var framework = &e2ef.TestFramework{RemoteDir: "C:\\Temp"}
+var (
+	framework = &e2ef.TestFramework{}
+	// TODO: expose this to the end user as a command line flag
+	// vmCount is the number of VMs the test suite requires
+	vmCount = 1
+)
 
 func TestMain(m *testing.M) {
-	framework.Setup()
+	err := framework.Setup(vmCount)
+	if err != nil {
+		framework.TearDown()
+		log.Fatal(err)
+	}
 	testStatus := m.Run()
 	// TODO: Add one more check to remove lingering cloud resources
 	framework.TearDown()

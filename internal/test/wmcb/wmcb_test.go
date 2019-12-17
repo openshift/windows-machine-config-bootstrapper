@@ -2,13 +2,11 @@ package wmcb
 
 import (
 	"flag"
-	"io"
-	"io/ioutil"
 	"log"
-	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/pkg/sftp"
+	e2ef "github.com/openshift/windows-machine-config-operator/internal/test/framework"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
@@ -16,9 +14,6 @@ import (
 )
 
 const (
-	// remotePowerShellCmdPrefix holds the powershell prefix that needs to be prefixed to every command run on the
-	// remote powershell session opened
-	remotePowerShellCmdPrefix = "powershell.exe -NonInteractive -ExecutionPolicy Bypass "
 	// nodeLabels represents the node label that need to be applied to the Windows node created
 	nodeLabel = "node.openshift.io/os_id=Windows"
 )
@@ -38,39 +33,23 @@ var (
 
 // TestWMCBUnit runs the unit tests for WMCB
 func TestWMCBUnit(t *testing.T) {
-	// Transfer the binary to the windows using scp
-	defer framework.SSHClient.Close()
-	sftp, err := sftp.NewClient(framework.SSHClient)
-	require.NoError(t, err, "sftp client initialization failed")
-	defer sftp.Close()
-	f, err := os.Open(*binaryToBeTransferred)
-	require.NoError(t, err, "error opening binary file to be transferred")
-	dstFile, err := sftp.Create(framework.RemoteDir + "\\" + "wmcb_unit_test.exe")
-	require.NoError(t, err, "error opening binary file to be transferred")
-	_, err = io.Copy(dstFile, f)
+	for _, vm := range framework.WinVMs {
+		runWMCBUnitTestSuite(t, vm)
+	}
+}
+
+// runWMCBUnitTestSuite runs the unit test suite on the VM
+func runWMCBUnitTestSuite(t *testing.T, vm e2ef.WindowsVM) {
+	remoteDir := "C:\\Temp"
+	err := vm.CopyFile(*binaryToBeTransferred, remoteDir)
 	require.NoError(t, err, "error copying binary to the Windows VM")
 
-	// Forcefully close it so that we can execute the binary later
-	dstFile.Close()
-
-	stdout := os.Stdout
-	r, w, err := os.Pipe()
-	assert.NoError(t, err, "error opening pipe to read stdout")
-	os.Stdout = w
-
-	// Remotely execute the test binary.
-	exitCode, err := framework.WinrmClient.Run(remotePowerShellCmdPrefix+framework.RemoteDir+"\\"+
-		"wmcb_unit_test.exe --test.v",
-		os.Stdout, os.Stderr)
-	assert.NoError(t, err, "error while executing the test binary remotely")
-	assert.Equal(t, 0, exitCode, "remote binary returned non-zero exit code")
-	w.Close()
-	out, err := ioutil.ReadAll(r)
-	assert.NoError(t, err, "error reading stdout from the remote Windows VM")
-	os.Stdout = stdout
-	log.Printf("%s", out)
-	assert.NotContains(t, string(out), "FAIL")
-	assert.NotContains(t, string(out), "panic")
+	stdout, stderr, err := vm.Run(remoteDir+"\\"+filepath.Base(*binaryToBeTransferred)+" --test.v", true)
+	assert.NoError(t, err, "error running WMCB unit test suite")
+	log.Printf("\n%s\n", stdout)
+	assert.Equal(t, "", stderr, "WMCB unit test returned error output")
+	assert.NotContains(t, stdout, "FAIL", "WMCB unit test failed")
+	assert.NotContains(t, stdout, "panic", "WMCB unit test panic")
 }
 
 // hasWindowsTaint returns true if the given Windows node has the Windows taint
