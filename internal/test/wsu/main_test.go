@@ -11,7 +11,7 @@ import (
 var framework = &e2ef.TestFramework{RemoteDir: "C:\\Temp"}
 
 func TestMain(m *testing.M) {
-	framework.Setup()
+	framework.Setup(2)
 	testStatus := m.Run()
 	// TODO: Add one more check to remove lingering cloud resources
 	framework.TearDown()
