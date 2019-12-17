@@ -4,6 +4,7 @@ import (
 	"flag"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"testing"
 
@@ -58,15 +59,18 @@ func TestWMCBUnit(t *testing.T) {
 	os.Stdout = w
 
 	// Remotely execute the test binary.
-	_, err = framework.WinrmClient.Run(remotePowerShellCmdPrefix+framework.RemoteDir+"\\"+
+	exitCode, err := framework.WinrmClient.Run(remotePowerShellCmdPrefix+framework.RemoteDir+"\\"+
 		"wmcb_unit_test.exe --test.v",
 		os.Stdout, os.Stderr)
 	assert.NoError(t, err, "error while executing the test binary remotely")
+	assert.Equal(t, 0, exitCode, "remote binary returned non-zero exit code")
 	w.Close()
 	out, err := ioutil.ReadAll(r)
 	assert.NoError(t, err, "error reading stdout from the remote Windows VM")
 	os.Stdout = stdout
+	log.Printf("%s", out)
 	assert.NotContains(t, string(out), "FAIL")
+	assert.NotContains(t, string(out), "panic")
 }
 
 // hasWindowsTaint returns true if the given Windows node has the Windows taint
