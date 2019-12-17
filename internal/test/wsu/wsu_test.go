@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,9 @@ var (
 	retryCount = 20
 	// retryInterval is the interval of time until we retry after a failure
 	retryInterval = 5 * time.Second
+	// remotePowerShellCmdPrefix holds the powershell prefix that needs to be prefixed to every command run on the
+	// remote powershell session opened
+	remotePowerShellCmdPrefix = "powershell.exe -NonInteractive -ExecutionPolicy Bypass "
 )
 
 // createhostFile creates an ansible host file and returns the path of it
@@ -82,7 +86,7 @@ func TestWSU(t *testing.T) {
 	require.NotEmptyf(t, playbookPath, "WSU_PATH environment variable not set")
 	require.NotEmptyf(t, clusterAddress, "CLUSTER_ADDR environment variable not set")
 
-	for _, vm := range framework.WinVMs {
+for _, vm := range framework.WinVMs {
 
 		// In order to run the ansible playbook we create an inventory file:
 		// https://docs.ansible.com/ansible/latest/user_guide/intro_inventory.html
@@ -116,6 +120,36 @@ func TestWSU(t *testing.T) {
 			testEastWestNetworking(t, vm.WinrmClient)
 		})
 	}
+}
+
+// testCNIConfig tests if the CNI config has required hostsubnet and servicenetwork CIDR
+// NOTE: split this into multiple tests when this grows
+func testCNIConfig(t *testing.T) {
+	// Read the CNI config present on the Windows host
+	cniConfigFilePath := filepath.Join(ansibleTempDir, "cni", "config", "cni.conf")
+	cniConfigFileContents, err := readRemoteFile(cniConfigFilePath)
+	require.NoError(t, err, "Could not get CNI config contents")
+
+	// Get the Windows node object
+	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	require.NoError(t, err, "Could not get a list of Windows nodes")
+	require.Equalf(t, len(windowsNodes.Items), 1, "Expected one Windows node to be present but found %v",
+		len(windowsNodes.Items))
+
+	// By the time, we reach here the annotation should be present, so need to validate again
+	hostSubnet := windowsNodes.Items[0].Annotations[hybridOverlaySubnet]
+	// Check if the host subnet matches our expected value
+	assert.Contains(t, cniConfigFileContents, hostSubnet, "CNI config does not contain host subnet")
+
+	// Check if the service CIDR matches our expected value
+	networkCR, err := framework.OSConfigClient.ConfigV1().Networks().Get("cluster", metav1.GetOptions{})
+	require.NoError(t, err, "Error querying network object")
+	serviceNetworks := networkCR.Spec.ServiceNetwork
+	// The serviceNetwork should be a singleton slice as of now, let's try accessing the first element in it.
+	require.Equalf(t, len(serviceNetworks), 1, "Expected service network to be a singleton but got %v",
+		len(serviceNetworks))
+	requiredServiceNetwork := serviceNetworks[0]
+	assert.Contains(t, cniConfigFileContents, requiredServiceNetwork, "CNI config does not contain service network")
 }
 
 // testFilesCopied tests that the files we attempted to copy to the Windows host, exist on the Windows host
@@ -208,6 +242,23 @@ func testWorkerLabelsArePresent(t *testing.T) {
 		len(windowsNodes.Items))
 	assert.Contains(t, windowsNodes.Items[0].Labels, workerLabel,
 		"expected worker label to be present on the Windows node but did not find any")
+}
+
+// readRemoteFile returns the contents of a remote file. Returns an error on winRM failure, or if it does not exist.
+func readRemoteFile(fileName string) (string, error) {
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	// Read the file from remote host and check if the hostSubnet is present
+	command := remotePowerShellCmdPrefix + "cat " + fileName
+	errorCode, err := framework.WinrmClient.Run(command, stdout, stderr)
+	if err != nil {
+		return "", fmt.Errorf("WinRM failure trying to run cat: %s", err)
+	}
+	stderrString := stderr.String()
+	if errorCode != 0 {
+		return "", fmt.Errorf("remote cat return code %d, stderr: %s", errorCode, stderrString)
+	}
+	return stdout.String(), nil
 }
 
 // testHybridOverlayAnnotations tests that the correct annotations have been added to the bootstrapped node

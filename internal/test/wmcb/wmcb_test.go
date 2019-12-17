@@ -4,6 +4,7 @@ import (
 	"flag"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"testing"
 
@@ -58,16 +59,19 @@ func TestWMCBUnit(t *testing.T) {
 		assert.NoError(t, err, "error opening pipe to read stdout")
 		os.Stdout = w
 
-		// Remotely execute the test binary.
-		_, err = vm.WinrmClient.Run(remotePowerShellCmdPrefix+vm.RemoteDir+"\\"+
+			// Remotely execute the test binary.
+		exitCode, err := vm.WinrmClient.Run(remotePowerShellCmdPrefix+vm.RemoteDir+"\\"+
 			"wmcb_unit_test.exe --test.v",
 			os.Stdout, os.Stderr)
 		assert.NoError(t, err, "error while executing the test binary remotely")
+		assert.Equal(t, 0, exitCode, "remote binary returned non-zero exit code")
 		w.Close()
 		out, err := ioutil.ReadAll(r)
 		assert.NoError(t, err, "error reading stdout from the remote Windows VM")
 		os.Stdout = stdout
+		log.Printf("%s", out)
 		assert.NotContains(t, string(out), "FAIL")
+		assert.NotContains(t, string(out), "panic")
 	}
 }
 
