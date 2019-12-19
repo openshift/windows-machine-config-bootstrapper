@@ -25,16 +25,22 @@ const (
 	// remotePowerShellCmdPrefix holds the powershell prefix that needs to be prefixed to every command run on the
 	// remote powershell session opened
 	remotePowerShellCmdPrefix = "powershell.exe -NonInteractive -ExecutionPolicy Bypass "
+	// sshKey is the key that will be used to access created Windows VMs
+	sshKey = "libra"
 )
 
 var (
-	kubeconfig     string
+	// kubeconfig is the location of the kubeconfig for the cluster the test suite will run on
+	kubeconfig string
+	// awsCredentials is the credentials file for the aws account the cluster will be created with
 	awsCredentials string
-	artifactDir    string
+	// artifactDir is the directory CI will read from once the test suite has finished execution
+	artifactDir string
+	// privateKeyPath is the path to the key that will be used to retrieve the password of each Windows VM
 	privateKeyPath string
 )
 
-type windowsVM struct {
+type WindowsVM struct {
 	// Credentials to access the Windows VM created
 	Credentials *types.Credentials
 	// WinrmClient to access the Windows VM created
@@ -48,16 +54,18 @@ type windowsVM struct {
 }
 
 // TestFramework holds the info to run the test suite.
-// This is not clean
 type TestFramework struct {
+	// RemoteDir is the directory that the WMCB test suite will copy files to on each Windows VM
 	RemoteDir string
-	WinVMs    []windowsVM
+	// WinVms contains the Windows VMs that are created to execute the test suite
+	WinVMs []*WindowsVM
 	// k8sclientset is the kubernetes clientset we will use to query the cluster's status
 	K8sclientset *kubernetes.Clientset
 	// OSConfigClient is the OpenShift config client, we will use to query the OpenShift api object status
 	OSConfigClient *configclient.Clientset
 }
 
+// initCIvars gathers the values of the environment variables which configure the test suite
 func initCIvars() error {
 	kubeconfig = os.Getenv("KUBECONFIG")
 	if kubeconfig == "" {
@@ -78,27 +86,39 @@ func initCIvars() error {
 	return nil
 }
 
-// Setup sets up the Windows node so that it can join the existing OpenShift cluster
-// TODO: move this to return error and do assertions there
-func (f *TestFramework) Setup(nrVMs int) {
+// Setup creates and initializes a variable amount of Windows VMs
+func (f *TestFramework) Setup(vmCount int) error {
+	// Use Windows 2019 server image with containers in us-east1 zone for CI testing.
+	// TODO: Move to environment variable that can be fetched from the cloud provider
+	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0b8d82dea356226d3 for
+	// Microsoft Windows Server 2019 Base with Containers.
+	imageID := "ami-0b8d82dea356226d3"
+	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
+	// the Intel 82599 network driver
+	instanceType := "m5a.large"
 	if err := initCIvars(); err != nil {
-		log.Fatalf("failed to initialize CI variables with error: %v", err)
+		return fmt.Errorf("failed to initialize CI variables with error: %v", err)
 	}
-
-	f.WinVMs = make([]windowsVM, nrVMs)
-	// TODO: make them run in parallel
-	for _, vm := range f.WinVMs {
-		if err := vm.setup(); err != nil {
-			log.Fatalf("failed to create Windows VM with error: %v", err)
+	f.WinVMs = make([]*WindowsVM, vmCount)
+	// TODO: make them run in parallel: https://issues.redhat.com/browse/WINC-178
+	for i, _ := range f.WinVMs {
+		newVM, err := newWindowsVM(imageID, instanceType)
+		if err != nil {
+			return fmt.Errorf("failed to create Windows VM with error: %v", err)
 		}
-		vm.RemoteDir = f.RemoteDir
+		f.WinVMs[i] = newVM
+		if err := newVM.setup(); err != nil {
+			return fmt.Errorf("failed to setup Windows VM with error: %v", err)
+		}
+		newVM.RemoteDir = f.RemoteDir
 	}
 	if err := f.getKubeClient(); err != nil {
-		log.Fatalf("failed to get kube client with error: %v", err)
+		return fmt.Errorf("failed to get kube client with error: %v", err)
 	}
 	if err := f.getOpenShiftConfigClient(); err != nil {
-		log.Fatalf("failed to get kube client with error: %v", err)
+		return fmt.Errorf("failed to get kube client with error: %v", err)
 	}
+	return nil
 }
 
 // getKubeClient setups the kubeclient that can be used across all the test suites.
@@ -131,10 +151,8 @@ func (f *TestFramework) getOpenShiftConfigClient() error {
 	return nil
 }
 
-func (w *windowsVM) setup() error {
-	if err := w.create(); err != nil {
-		return fmt.Errorf("failed to create Windows VM: %v", err)
-	}
+// setup prepares a VM for use by the test suite
+func (w *WindowsVM) setup() error {
 	// TODO: Add some options to skip certain parts of the test
 	if err := w.setupWinRMClient(); err != nil {
 		return fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
@@ -157,36 +175,24 @@ func (w *windowsVM) setup() error {
 	return nil
 }
 
-// create spins up the Windows VM in the given cloud provider and gives us the credentials to access the
-// windows VM created
-func (w *windowsVM) create() error {
-	// NOTE: if we ever need to create VMs of different types, then imageID and instanceType should move to the
-	// windowsVM struct
-	// Use Windows 2019 server image with containers in us-east1 zone for CI testing.
-	// TODO: Move to environment variable that can be fetched from the cloud provider
-	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0b8d82dea356226d3 for
-	// Microsoft Windows Server 2019 Base with Containers.
-	imageID := "ami-0b8d82dea356226d3"
-	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
-	// the Intel 82599 network driver
-	instanceType := "m5a.large"
-	sshKey := "libra"
-	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, awsCredentials, "default", artifactDir,
+// newWindowsVM creates a Windows VM in the set cloud provider
+func newWindowsVM(imageID, instanceType string) (*WindowsVM, error) {
+	var err error
+	w := &WindowsVM{}
+	w.cloudProvider, err = cloudprovider.CloudProviderFactory(kubeconfig, awsCredentials, "default", artifactDir,
 		imageID, instanceType, sshKey, privateKeyPath)
 	if err != nil {
-		return fmt.Errorf("error instantiating cloud provider %v", err)
+		return nil, fmt.Errorf("error instantiating cloud provider %v", err)
 	}
-	w.cloudProvider = cloud
-	credentials, err := cloud.CreateWindowsVM()
+	w.Credentials, err = w.cloudProvider.CreateWindowsVM()
 	if err != nil {
-		return fmt.Errorf("error creating Windows VM: %v", err)
+		return nil, fmt.Errorf("error creating Windows VM: %v", err)
 	}
-	w.Credentials = credentials
-	return nil
+	return w, nil
 }
 
 // setupWinRMClient sets up the winrm client to be used while accessing Windows node
-func (w *windowsVM) setupWinRMClient() error {
+func (w *WindowsVM) setupWinRMClient() error {
 	host := w.Credentials.GetIPAddress()
 	password := w.Credentials.GetPassword()
 
@@ -203,7 +209,7 @@ func (w *windowsVM) setupWinRMClient() error {
 
 // configureOpenSSHServer configures the OpenSSH server using WinRM client installed on the Windows VM.
 // The OpenSSH server is installed as part of WNI tool's CreateVM method.
-func (w *windowsVM) configureOpenSSHServer() error {
+func (w *WindowsVM) configureOpenSSHServer() error {
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	// This dependency is needed for the subsequent module installation we're doing. This version of NuGet
@@ -241,7 +247,7 @@ func (w *windowsVM) configureOpenSSHServer() error {
 }
 
 // createRemoteDir creates a directory on the Windows VM to which file can be transferred
-func (w *windowsVM) createRemoteDir() error {
+func (w *WindowsVM) createRemoteDir() error {
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	// Create a directory on the Windows node where the file has to be transferred
@@ -253,7 +259,7 @@ func (w *windowsVM) createRemoteDir() error {
 }
 
 // getSSHClient gets the ssh client associated with Windows VM created
-func (w *windowsVM) getSSHClient() error {
+func (w *WindowsVM) getSSHClient() error {
 	config := &ssh.ClientConfig{
 		User:            "Administrator",
 		Auth:            []ssh.AuthMethod{ssh.Password(w.Credentials.GetPassword())},
@@ -268,11 +274,14 @@ func (w *windowsVM) getSSHClient() error {
 	return nil
 }
 
-// TearDown tears down the set up done for test suite
+// TearDown destroys the resources created by the Setup function
 func (f *TestFramework) TearDown() {
 	for _, vm := range f.WinVMs {
+		if vm == nil {
+			continue
+		}
 		if err := vm.cloudProvider.DestroyWindowsVMs(); err != nil {
-			log.Fatalf("failed tearing down the Windows VM with error: %v", err)
+			log.Printf("failed tearing down the Windows VM %v with error: %v", vm, err)
 		}
 	}
 }

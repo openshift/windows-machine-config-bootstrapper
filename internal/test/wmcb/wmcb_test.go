@@ -1,12 +1,13 @@
 package wmcb
 
 import (
-	"flag"
 	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"testing"
 
+	e2ef "github.com/openshift/windows-machine-config-operator/internal/test/framework"
 	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,46 +30,49 @@ var (
 		Value:  "Windows",
 		Effect: v1.TaintEffectNoSchedule,
 	}
-	// binaryToBeTransferred holds the binary that needs to be transferred to the Windows VM
-	// TODO: Make this an array later with a comma separated values for more binaries to be transferred
-	binaryToBeTransferred = flag.String("binaryToBeTransferred", "",
-		"Absolute path of the binary to be transferred")
 )
 
 // TestWMCBUnit runs the unit tests for WMCB
 func TestWMCBUnit(t *testing.T) {
-	// Transfer the binary to the windows using scp
 	for _, vm := range framework.WinVMs {
-		defer vm.SSHClient.Close()
-		sftp, err := sftp.NewClient(vm.SSHClient)
-		require.NoError(t, err, "sftp client initialization failed")
-		defer sftp.Close()
-		f, err := os.Open(*binaryToBeTransferred)
-		require.NoError(t, err, "error opening binary file to be transferred")
-		dstFile, err := sftp.Create(vm.RemoteDir + "\\" + "wmcb_unit_test.exe")
-		require.NoError(t, err, "error opening binary file to be transferred")
-		_, err = io.Copy(dstFile, f)
-		require.NoError(t, err, "error copying binary to the Windows VM")
-
-		// Forcefully close it so that we can execute the binary later
-		dstFile.Close()
-
-		stdout := os.Stdout
-		r, w, err := os.Pipe()
-		assert.NoError(t, err, "error opening pipe to read stdout")
-		os.Stdout = w
-
-		// Remotely execute the test binary.
-		_, err = vm.WinrmClient.Run(remotePowerShellCmdPrefix+vm.RemoteDir+"\\"+
-			"wmcb_unit_test.exe --test.v",
-			os.Stdout, os.Stderr)
-		assert.NoError(t, err, "error while executing the test binary remotely")
-		w.Close()
-		out, err := ioutil.ReadAll(r)
-		assert.NoError(t, err, "error reading stdout from the remote Windows VM")
-		os.Stdout = stdout
-		assert.NotContains(t, string(out), "FAIL")
+		runWMCBUnitTestSuiteOnVM(t, vm)
 	}
+}
+
+func runWMCBUnitTestSuiteOnVM(t *testing.T, vm *e2ef.WindowsVM) {
+	// Transfer the binary to the windows using scp
+	defer vm.SSHClient.Close()
+	sftp, err := sftp.NewClient(vm.SSHClient)
+	require.NoError(t, err, "sftp client initialization failed")
+	defer sftp.Close()
+	f, err := os.Open(*binaryToBeTransferred)
+	require.NoErrorf(t, err, "error opening binary file to be transferred: %s", *binaryToBeTransferred)
+	dstFile, err := sftp.Create(vm.RemoteDir + "\\" + "wmcb_unit_test.exe")
+	require.NoError(t, err, "error opening binary file to be transferred")
+	_, err = io.Copy(dstFile, f)
+	require.NoError(t, err, "error copying binary to the Windows VM")
+
+	// Forcefully close it so that we can execute the binary later
+	dstFile.Close()
+
+	stdout := os.Stdout
+	r, w, err := os.Pipe()
+	assert.NoError(t, err, "error opening pipe to read stdout")
+	os.Stdout = w
+
+	// Remotely execute the test binary.
+	exitCode, err := vm.WinrmClient.Run(remotePowerShellCmdPrefix+vm.RemoteDir+"\\"+
+		"wmcb_unit_test.exe --test.v",
+		os.Stdout, os.Stderr)
+	assert.NoError(t, err, "error while executing the test binary remotely")
+	assert.Equal(t, 0, exitCode, "remote binary returned non-zero exit code")
+	w.Close()
+	out, err := ioutil.ReadAll(r)
+	assert.NoError(t, err, "error reading stdout from the remote Windows VM")
+	os.Stdout = stdout
+	log.Printf("%s", out)
+	assert.NotContains(t, string(out), "FAIL")
+	assert.NotContains(t, string(out), "panic")
 }
 
 // hasWindowsTaint returns true if the given Windows node has the Windows taint

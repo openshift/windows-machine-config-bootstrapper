@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	e2ef "github.com/openshift/windows-machine-config-operator/internal/test/framework"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -88,45 +89,48 @@ func TestWSU(t *testing.T) {
 	require.NotEmptyf(t, clusterAddress, "CLUSTER_ADDR environment variable not set")
 
 	for _, vm := range framework.WinVMs {
-
-		// In order to run the ansible playbook we create an inventory file:
-		// https://docs.ansible.com/ansible/latest/user_guide/intro_inventory.html
-		hostFilePath, err := createHostFile(vm.Credentials.GetIPAddress(),
-			vm.Credentials.GetPassword())
-		require.NoErrorf(t, err, "Could not write to host file: %s", err)
-		cmd := exec.Command("ansible-playbook", "-vvv", "-i", hostFilePath, playbookPath)
-		out, err := cmd.CombinedOutput()
-		require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, string(out))
-
-		// Ansible will copy files to a temporary directory with a path such as:
-		// C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible.z5wa1pc5.vhn\\
-		initialSplit := strings.Split(string(out), "C:\\\\Users\\\\Administrator\\\\AppData\\\\Local\\\\Temp\\\\ansible.")
-		require.True(t, len(initialSplit) > 1, "Could not find Windows temp dir: %s", out)
-		ansibleTempDir = "C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible." + strings.Split(initialSplit[1], "\"")[0]
-
-		t.Run("Files copied to Windows node", func(t *testing.T) {
-			testFilesCopied(t, vm.WinrmClient)
-		})
-		t.Run("Pending CSRs were approved", testNoPendingCSRs)
-		t.Run("Node is in ready state", func(t *testing.T) {
-			testNodeReady(t, vm.Credentials)
-		})
-		// test if the Windows node has proper worker label.
-		t.Run("Check if worker label has been applied to the Windows node", testWorkerLabelsArePresent)
-		t.Run("Network annotations were applied to node", testHybridOverlayAnnotations)
-		t.Run("HNS Networks were created", func(t *testing.T) {
-			testHNSNetworksCreated(t, vm.WinrmClient)
-		})
-		t.Run("Check cni config generated on the Windows host", func(t *testing.T) {
-			testCNIConfig(t, vm.WinrmClient)
-		})
-		t.Run("East-west networking", func(t *testing.T) {
-			testEastWestNetworking(t, vm.WinrmClient)
-		})
-		t.Run("North-south networking", func(t *testing.T) {
-			 testNorthSouthNetworking(t, vm.WinrmClient)
-		})
+		runTestWSUAgainstVM(t, vm)
 	}
+}
+
+func runTestWSUAgainstVM(t *testing.T, vm *e2ef.WindowsVM) {
+	// In order to run the ansible playbook we create an inventory file:
+	// https://docs.ansible.com/ansible/latest/user_guide/intro_inventory.html
+	hostFilePath, err := createHostFile(vm.Credentials.GetIPAddress(),
+		vm.Credentials.GetPassword())
+	require.NoErrorf(t, err, "Could not write to host file: %s", err)
+	cmd := exec.Command("ansible-playbook", "-vvv", "-i", hostFilePath, playbookPath)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, string(out))
+
+	// Ansible will copy files to a temporary directory with a path such as:
+	// C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible.z5wa1pc5.vhn\\
+	initialSplit := strings.Split(string(out), "C:\\\\Users\\\\Administrator\\\\AppData\\\\Local\\\\Temp\\\\ansible.")
+	require.True(t, len(initialSplit) > 1, "Could not find Windows temp dir: %s", out)
+	ansibleTempDir = "C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible." + strings.Split(initialSplit[1], "\"")[0]
+
+	t.Run("Files copied to Windows node", func(t *testing.T) {
+		testFilesCopied(t, vm.WinrmClient)
+	})
+	t.Run("Pending CSRs were approved", testNoPendingCSRs)
+	t.Run("Node is in ready state", func(t *testing.T) {
+		testNodeReady(t, vm.Credentials)
+	})
+	// test if the Windows node has proper worker label.
+	t.Run("Check if worker label has been applied to the Windows node", testWorkerLabelsArePresent)
+	t.Run("Network annotations were applied to node", testHybridOverlayAnnotations)
+	t.Run("HNS Networks were created", func(t *testing.T) {
+		testHNSNetworksCreated(t, vm.WinrmClient)
+	})
+	t.Run("Check cni config generated on the Windows host", func(t *testing.T) {
+		testCNIConfig(t, vm.WinrmClient)
+	})
+	t.Run("East-west networking", func(t *testing.T) {
+		testEastWestNetworking(t, vm.WinrmClient)
+	})
+	t.Run("North-south networking", func(t *testing.T) {
+		testNorthSouthNetworking(t, vm.WinrmClient)
+	})
 }
 
 // testCNIConfig tests if the CNI config has required hostsubnet and servicenetwork CIDR
@@ -140,8 +144,8 @@ func testCNIConfig(t *testing.T, vmWinrmClient *winrm.Client) {
 	// Get the Windows node object
 	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
 	require.NoError(t, err, "Could not get a list of Windows nodes")
-	require.Equalf(t, len(windowsNodes.Items), 1, "Expected one Windows node to be present but found %v",
-		len(windowsNodes.Items))
+	require.Equalf(t, len(windowsNodes.Items), vmCount, "Expected %d Windows node(s) to be present but found %v",
+		vmCount, len(windowsNodes.Items))
 
 	// By the time, we reach here the annotation should be present, so need to validate again
 	hostSubnet := windowsNodes.Items[0].Annotations[hybridOverlaySubnet]
@@ -245,8 +249,8 @@ func testWorkerLabelsArePresent(t *testing.T) {
 	// Check if the Windows node has the required label needed.
 	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
-	assert.Equalf(t, len(windowsNodes.Items), 1, "expected 1 windows nodes to be present but found %v",
-		len(windowsNodes.Items))
+	assert.Equalf(t, len(windowsNodes.Items), vmCount, "expected %d Windows node(s) to be present but found %v",
+		vmCount, len(windowsNodes.Items))
 	assert.Contains(t, windowsNodes.Items[0].Labels, workerLabel,
 		"expected worker label to be present on the Windows node but did not find any")
 }
@@ -272,8 +276,8 @@ func readRemoteFile(fileName string, vmWinrmClient *winrm.Client) (string, error
 func testHybridOverlayAnnotations(t *testing.T) {
 	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
 	require.NoError(t, err, "Could not get list of Windows nodes")
-	assert.Equalf(t, len(windowsNodes.Items), 1, "expected one windows node to be present but found %v",
-		len(windowsNodes.Items))
+	assert.Equalf(t, len(windowsNodes.Items), vmCount, "expected %d Windows node(s) to be present but found %v",
+		vmCount, len(windowsNodes.Items))
 	assert.Contains(t, windowsNodes.Items[0].Annotations, hybridOverlaySubnet)
 	assert.Contains(t, windowsNodes.Items[0].Annotations, hybridOverlayMac)
 }
