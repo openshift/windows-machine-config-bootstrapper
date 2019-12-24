@@ -13,11 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const (
-	// nodeLabels represents the node label that need to be applied to the Windows node created
-	nodeLabel = "node.openshift.io/os_id=Windows"
-)
-
 var (
 	// windowsTaint is the taint that needs to be applied to the Windows node
 	windowsTaint = v1.Taint{
@@ -76,7 +71,7 @@ func TestWMCBCluster(t *testing.T) {
 	winNodes, err := client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: "kubernetes.io/os=windows"})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
 	assert.Equal(t, hasWindowsTaint(winNodes.Items), true, "expected Windows Taint to be present on the Windows Node")
-	winNodes, err = client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: nodeLabel})
+	winNodes, err = client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
 	assert.Lenf(t, winNodes.Items, 1, "expected one node to have node label but found: %v", len(winNodes.Items))
 }

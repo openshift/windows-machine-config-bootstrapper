@@ -29,6 +29,8 @@ WMCB_TEST_DIR=$WMCO_ROOT/internal/test/wmcb
 cd "${WMCO_ROOT}"
 make build-wmcb-unit-test
 
+# The WMCB e2e tests requires the cluster address, we parse that here using oc
+CLUSTER_ADDR=$(oc cluster-info | head -n1 | sed 's/.*\/\/api.//g'| sed 's/:.*//g')
+
 # Transfer the binary and run the unit tests
-cd "${WMCB_TEST_DIR}"
-CGO_ENABLED=0 GO111MODULE=on go test -v -run=TestWMCBUnit -binaryToBeTransferred=../../../wmcb_unit_test.exe -vmCreds="$VM_CREDS" $SKIP_VM_SETUP -timeout=30m .
+CGO_ENABLED=0 GO111MODULE=on CLUSTER_ADDR=$CLUSTER_ADDR go test -v -run=TestWMCBUnit -binaryToBeTransferred=../../../wmcb_unit_test.exe -vmCreds="$VM_CREDS" $SKIP_VM_SETUP -timeout=30m .
