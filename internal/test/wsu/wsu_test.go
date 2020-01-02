@@ -7,13 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/openshift/windows-machine-config-operator/internal/test"
 	e2ef "github.com/openshift/windows-machine-config-operator/internal/test/framework"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -28,8 +28,6 @@ var (
 	// Path of the WSU playbook
 	playbookPath = os.Getenv("WSU_PATH")
 
-	// Temp directory ansible created on the windows host
-	ansibleTempDir = ""
 	// kubernetes-node-windows-amd64.tar.gz SHA512
 	// Value from https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.16.md#node-binaries-1
 	// This value should be updated when we change the kubelet version in WSU
@@ -43,27 +41,32 @@ var (
 	windowsServerImage = "mcr.microsoft.com/windows/servercore:ltsc2019"
 	// ubi8Image is the name/location of the linux image we will use for testing
 	ubi8Image = "registry.access.redhat.com/ubi8/ubi:latest"
-	// remotePowerShellCmdPrefix holds the powershell prefix that needs to be prefixed to every command run on the
-	// remote powershell session opened
-	remotePowerShellCmdPrefix = "powershell.exe -NonInteractive -ExecutionPolicy Bypass "
 )
 
-// createhostFile creates an ansible host file and returns the path of it
-func createHostFile(ip, password string) (string, error) {
+// createhostFile creates an ansible host file for the VMs we have spun up
+func createHostFile(vmList []e2ef.WindowsVM) (string, error) {
 	hostFile, err := ioutil.TempFile("", "testWSU")
 	if err != nil {
 		return "", fmt.Errorf("coud not make temporary file: %s", err)
 	}
 	defer hostFile.Close()
 
-	_, err = hostFile.WriteString(fmt.Sprintf(`[win]
-%s ansible_password='%s'
-[win:vars]
+	// Add each host to the host file
+	hostFileContents := "[win]\n"
+	for i := 0; i < len(vmList); i++ {
+		creds := vmList[i].GetCredentials()
+		hostFileContents += creds.GetIPAddress() + " " + "ansible_password='" + creds.GetPassword() + "'" + "\n"
+	}
+
+	// Add the common variables
+	hostFileContents += fmt.Sprintf(`[win:vars]
 ansible_user=Administrator
 cluster_address=%s
 ansible_port=5986
 ansible_connection=winrm
-ansible_winrm_server_cert_validation=ignore`, ip, password, e2ef.ClusterAddress))
+ansible_winrm_server_cert_validation=ignore
+`, e2ef.ClusterAddress)
+	_, err = hostFile.WriteString(hostFileContents)
 	return hostFile.Name(), err
 }
 
@@ -73,73 +76,127 @@ ansible_winrm_server_cert_validation=ignore`, ip, password, e2ef.ClusterAddress)
 func TestWSU(t *testing.T) {
 	require.NotEmptyf(t, playbookPath, "WSU_PATH environment variable not set")
 
-	for _, vm := range framework.WinVMs {
-		// Run the test suite twice, to ensure that the WSU can be run multiple times against the same VM
-		runWSUTestSuite(t, vm)
-		t.Run("Run the WSU against the same VM again", func(t *testing.T) {
-			runWSUTestSuite(t, vm)
-		})
-	}
+	t.Run("VM specific tests", func(t *testing.T) {
+		testAllVMs(t)
+	})
+
+	// Run cluster wide tests
+	t.Run("Pending CSRs were approved", testNoPendingCSRs)
 }
 
-// runWSUTestSuite runs the WSU test suite against the VM
-func runWSUTestSuite(t *testing.T, vm e2ef.WindowsVM) {
+// testAllVMs runs all VM specific tests
+func testAllVMs(t *testing.T) {
+	for i := range framework.WinVMs {
+		t.Run("VM "+strconv.Itoa(i), func(t *testing.T) {
+			setupAndTest(t, i)
+		})
+	}
+
+}
+
+// setupAndTest runs the WSU and runs tests against the setup node
+func setupAndTest(t *testing.T, vmNum int) {
+	// Indicate that we can run the test suite on each node in parallel
+	t.Parallel()
+
+	// Run the WSU against the VM
+	wsuOut, err := runWSU(framework.WinVMs[vmNum])
+	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, wsuOut)
+
+	// Run our VM test suite
+	runTest(t, framework.WinVMs[vmNum], wsuOut)
+}
+
+// runWSU runs the WSU playbook against a VM. Returns WSU stdout
+func runWSU(vm e2ef.WindowsVM) (string, error) {
+	var ansibleCmd *exec.Cmd
+
 	// In order to run the ansible playbook we create an inventory file:
 	// https://docs.ansible.com/ansible/latest/user_guide/intro_inventory.html
-	require.NotNil(t, vm.GetCredentials())
-	hostFilePath, err := createHostFile(vm.GetCredentials().GetIPAddress(),
-		vm.GetCredentials().GetPassword())
-	require.NoErrorf(t, err, "Could not write to host file: %s", err)
-	cmd := exec.Command("ansible-playbook", "-vvv", "-i", hostFilePath, playbookPath)
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, string(out))
+	hostFilePath, err := createHostFile([]e2ef.WindowsVM{vm})
+	if err != nil {
+		return "", err
+	}
 
-	// Ansible will copy files to a temporary directory with a path such as:
-	// C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible.z5wa1pc5.vhn\\
-	initialSplit := strings.Split(string(out), "C:\\\\Users\\\\Administrator\\\\AppData\\\\Local\\\\Temp\\\\ansible.")
-	require.True(t, len(initialSplit) > 1, "Could not find Windows temp dir: %s", out)
-	ansibleTempDir = "C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible." + strings.Split(initialSplit[1], "\"")[0]
+	// Run the WSU against the VM
+	ansibleCmd = exec.Command("ansible-playbook", "-v", "-i", hostFilePath, playbookPath)
+
+	// Run the playbook
+	wsuOut, err := ansibleCmd.CombinedOutput()
+	return string(wsuOut), err
+}
+
+// testVM runs the WSU against the given VM and runs the e2e test suite against that VM as well
+func runTest(t *testing.T, vm e2ef.WindowsVM, wsuOut string) {
+	// Run the test suite
+	runE2ETestSuite(t, vm, wsuOut)
+
+	//Run the test suite again, to ensure that the WSU can be run multiple times against the same VM
+	t.Run("Run the WSU against the same VM again", func(t *testing.T) {
+		runE2ETestSuite(t, vm, wsuOut)
+	})
+}
+
+// getAnsibleTempDirPath returns the path of the ansible temp directory on the remote VM
+func getAnsibleTempDirPath(ansibleOutput string) (string, error) {
+	// Debug line looks like:
+	// "msg": "Windows temporary directory: C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible.to4wamvh.yzk"
+	debugStatementSplit := strings.Split(ansibleOutput, "Windows temporary directory: ")
+	if len(debugStatementSplit) != 2 {
+		return "", fmt.Errorf("expected one temporary directory debug statement, but found multiple: %s", ansibleOutput)
+	}
+	tempDirSplit := strings.Split(debugStatementSplit[1], "\"")
+	if len(tempDirSplit) < 2 {
+		return "", fmt.Errorf("unexpected split format %s", ansibleOutput)
+	}
+
+	return tempDirSplit[0], nil
+}
+
+// runE2ETestSuite runs the WSU test suite against a VM
+func runE2ETestSuite(t *testing.T, vm e2ef.WindowsVM, ansibleOutput string) {
+	tempDirPath, err := getAnsibleTempDirPath(ansibleOutput)
+	require.NoError(t, err, "Could not get path of Ansible temp directory")
+
+	node, err := framework.GetNode(vm.GetCredentials().GetIPAddress())
+	require.NoError(t, err, "Could not get Windows node object")
 
 	t.Run("Files copied to Windows node", func(t *testing.T) {
-		testFilesCopied(t, vm)
+		testFilesCopied(t, vm, tempDirPath)
 	})
-	t.Run("Pending CSRs were approved", testNoPendingCSRs)
 	t.Run("Node is in ready state", func(t *testing.T) {
-		testNodeReady(t, vm.GetCredentials())
+		testNodeReady(t, node)
 	})
-	// test if the Windows node has proper worker label.
-	t.Run("Check if worker label has been applied to the Windows node", testWorkerLabelsArePresent)
-	t.Run("Network annotations were applied to node", testHybridOverlayAnnotations)
+	t.Run("Check if worker label has been applied to the Windows node", func(t *testing.T) {
+		testWorkerLabelsArePresent(t, node)
+	})
+	t.Run("Network annotations were applied to node", func(t *testing.T) {
+		testHybridOverlayAnnotations(t, node)
+	})
 	t.Run("HNS Networks were created", func(t *testing.T) {
 		testHNSNetworksCreated(t, vm)
 	})
 	t.Run("Check cni config generated on the Windows host", func(t *testing.T) {
-		testCNIConfig(t, vm)
+		testCNIConfig(t, node, vm, tempDirPath)
 	})
 	t.Run("East-west networking", func(t *testing.T) {
-		testEastWestNetworking(t, vm)
+		testEastWestNetworking(t, node, vm)
 	})
 	t.Run("North-south networking", func(t *testing.T) {
-		testNorthSouthNetworking(t, vm)
+		testNorthSouthNetworking(t, node, vm)
 	})
 }
 
 // testCNIConfig tests if the CNI config has required hostsubnet and servicenetwork CIDR
 // NOTE: split this into multiple tests when this grows
-func testCNIConfig(t *testing.T, vm e2ef.WindowsVM) {
+func testCNIConfig(t *testing.T, node *v1.Node, vm e2ef.WindowsVM, ansibleTempDir string) {
 	// Read the CNI config present on the Windows host
 	cniConfigFilePath := filepath.Join(ansibleTempDir, "cni", "config", "cni.conf")
 	cniConfigFileContents, err := readRemoteFile(cniConfigFilePath, vm)
 	require.NoError(t, err, "Could not get CNI config contents")
 
-	// Get the Windows node object
-	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
-	require.NoError(t, err, "Could not get a list of Windows nodes")
-	require.Equalf(t, len(windowsNodes.Items), vmCount, "Expected %d Windows node(s) to be present but found %v",
-		vmCount, len(windowsNodes.Items))
-
 	// By the time, we reach here the annotation should be present, so need to validate again
-	hostSubnet := windowsNodes.Items[0].Annotations[test.HybridOverlaySubnet]
+	hostSubnet := node.Annotations[test.HybridOverlaySubnet]
 	// Check if the host subnet matches our expected value
 	assert.Contains(t, cniConfigFileContents, hostSubnet, "CNI config does not contain host subnet")
 
@@ -155,7 +212,7 @@ func testCNIConfig(t *testing.T, vm e2ef.WindowsVM) {
 }
 
 // testFilesCopied tests that the files we attempted to copy to the Windows host, exist on the Windows host
-func testFilesCopied(t *testing.T, vm e2ef.WindowsVM) {
+func testFilesCopied(t *testing.T, vm e2ef.WindowsVM, ansibleTempDir string) {
 	expectedFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe", "hybrid-overlay.exe", "kube.tar.gz"}
 
 	// Check if each of the files we expect on the Windows host are there
@@ -184,26 +241,7 @@ func testFilesCopied(t *testing.T, vm e2ef.WindowsVM) {
 }
 
 // testNodeReady tests that the bootstrapped node was added to the cluster and is in the ready state
-func testNodeReady(t *testing.T, vmCredentials *types.Credentials) {
-	var createdNode *v1.Node
-	nodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{})
-	require.NoError(t, err, "Could not get list of nodes")
-	require.NotZero(t, len(nodes.Items), "No nodes found")
-
-	// Find the node that we spun up
-	for _, node := range nodes.Items {
-		for _, address := range node.Status.Addresses {
-			if address.Type == "ExternalIP" && address.Address == vmCredentials.GetIPAddress() {
-				createdNode = &node
-				break
-			}
-		}
-		if createdNode != nil {
-			break
-		}
-	}
-	require.NotNil(t, createdNode, "Created node not found through Kubernetes API")
-
+func testNodeReady(t *testing.T, createdNode *v1.Node) {
 	// Make sure the node is in a ready state
 	foundReady := false
 	for _, condition := range createdNode.Status.Conditions {
@@ -233,13 +271,8 @@ func testNoPendingCSRs(t *testing.T) {
 }
 
 // testWorkerLabelsArePresent tests if the worker labels are present on the Windows Node.
-func testWorkerLabelsArePresent(t *testing.T) {
-	// Check if the Windows node has the required label needed.
-	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
-	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
-	assert.Equalf(t, len(windowsNodes.Items), vmCount, "expected %d Windows node(s) to be present but found %v",
-		vmCount, len(windowsNodes.Items))
-	assert.Contains(t, windowsNodes.Items[0].Labels, workerLabel,
+func testWorkerLabelsArePresent(t *testing.T, node *v1.Node) {
+	assert.Contains(t, node.Labels, workerLabel,
 		"expected worker label to be present on the Windows node but did not find any")
 }
 
@@ -253,13 +286,9 @@ func readRemoteFile(fileName string, vm e2ef.WindowsVM) (string, error) {
 }
 
 // testHybridOverlayAnnotations tests that the correct annotations have been added to the bootstrapped node
-func testHybridOverlayAnnotations(t *testing.T) {
-	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
-	require.NoError(t, err, "Could not get list of Windows nodes")
-	assert.Equalf(t, len(windowsNodes.Items), vmCount, "expected %d Windows node(s) to be present but found %v",
-		vmCount, len(windowsNodes.Items))
-	assert.Contains(t, windowsNodes.Items[0].Annotations, test.HybridOverlaySubnet)
-	assert.Contains(t, windowsNodes.Items[0].Annotations, hybridOverlayMac)
+func testHybridOverlayAnnotations(t *testing.T, node *v1.Node) {
+	assert.Contains(t, node.Annotations, test.HybridOverlaySubnet)
+	assert.Contains(t, node.Annotations, hybridOverlayMac)
 }
 
 // testHNSNetworksCreated tests that the required HNS Networks have been created on the bootstrapped node
@@ -272,10 +301,51 @@ func testHNSNetworksCreated(t *testing.T, vm e2ef.WindowsVM) {
 		"Could not find OpenShiftNetwork in list of HNS Networks")
 }
 
+// getAffinityForNode returns an affinity which matches the associated node's name
+func getAffinityForNode(node *v1.Node) (*v1.Affinity, error) {
+	return &v1.Affinity{
+		NodeAffinity: &v1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
+				NodeSelectorTerms: []v1.NodeSelectorTerm{
+					{
+						MatchFields: []v1.NodeSelectorRequirement{
+							{
+								Key:      "metadata.name",
+								Operator: v1.NodeSelectorOpIn,
+								Values:   []string{node.Name},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+// getPodEvents gets all events for any pod with the input in its name. Used for debugging purposes
+func getPodEvents(name string) ([]v1.Event, error) {
+	eventList, err := framework.K8sclientset.CoreV1().Events(v1.NamespaceDefault).List(metav1.ListOptions{
+		FieldSelector: "involvedObject.kind=Pod"})
+	if err != nil {
+		return []v1.Event{}, err
+	}
+	podEvents := []v1.Event{}
+	for _, event := range eventList.Items {
+		if strings.Contains(event.InvolvedObject.Name, name) {
+			podEvents = append(podEvents, event)
+		}
+	}
+	return podEvents, nil
+
+}
+
 // testEastWestNetworking deploys Windows and Linux pods, and tests that the pods can communicate
-func testEastWestNetworking(t *testing.T, vm e2ef.WindowsVM) {
+func testEastWestNetworking(t *testing.T, node *v1.Node, vm e2ef.WindowsVM) {
+	affinity, err := getAffinityForNode(node)
+	require.NoError(t, err, "Could not get affinity for node")
+
 	// Deploy a webserver pod on the new node
-	winServerDeployment, err := deployWindowsWebServer(vm)
+	winServerDeployment, err := deployWindowsWebServer("win-webserver-"+vm.GetCredentials().GetInstanceId(), vm, affinity)
 	require.NoError(t, err, "Could not create Windows Server deployment")
 	defer deleteDeployment(winServerDeployment.Name)
 
@@ -286,7 +356,7 @@ func testEastWestNetworking(t *testing.T, vm e2ef.WindowsVM) {
 	// test Windows <-> Linux
 	// This will install curl and then curl the windows server.
 	linuxCurlerCommand := []string{"bash", "-c", "yum update; yum install curl -y; curl " + winServerIP}
-	linuxCurlerJob, err := createLinuxJob("linux-curler", linuxCurlerCommand)
+	linuxCurlerJob, err := createLinuxJob("linux-curler-"+vm.GetCredentials().GetInstanceId(), linuxCurlerCommand)
 	require.NoError(t, err, "Could not create Linux job")
 	defer deleteJob(linuxCurlerJob.Name)
 	err = waitUntilJobSucceeds(linuxCurlerJob.Name)
@@ -299,7 +369,7 @@ func testEastWestNetworking(t *testing.T, vm e2ef.WindowsVM) {
 		"$response = Invoke-Webrequest -UseBasicParsing -Uri " + winServerIP +
 		"; $code = $response.StatusCode; echo \"GET returned code $code\";" +
 		"If ($code -eq 200) {exit 0}; Start-Sleep -s 10;}; exit 1" + winServerIP}
-	winCurlerJob, err := createWindowsServerJob("win-curler", winCurlerCommand)
+	winCurlerJob, err := createWindowsServerJob("win-curler-"+vm.GetCredentials().GetInstanceId(), winCurlerCommand)
 	require.NoError(t, err, "Could not create Windows job")
 	defer deleteJob(winCurlerJob.Name)
 	err = waitUntilJobSucceeds(winCurlerJob.Name)
@@ -309,7 +379,7 @@ func testEastWestNetworking(t *testing.T, vm e2ef.WindowsVM) {
 }
 
 // deployWindowsWebServer creates a deployment with a single Windows Server pod, listening on port 80
-func deployWindowsWebServer(vm e2ef.WindowsVM) (*appsv1.Deployment, error) {
+func deployWindowsWebServer(name string, vm e2ef.WindowsVM, affinity *v1.Affinity) (*appsv1.Deployment, error) {
 	// Preload the image that will be used on the Windows node, to prevent download timeouts
 	// and separate possible failure conditions into multiple operations
 	err := pullDockerImage(windowsServerImage, vm)
@@ -324,7 +394,7 @@ func deployWindowsWebServer(vm e2ef.WindowsVM) (*appsv1.Deployment, error) {
 			"$content='<html><body><H1>Windows Container Web Server</H1></body></html>'; " +
 			"$buffer = [System.Text.Encoding]::UTF8.GetBytes($content); $response.ContentLength64 = $buffer.Length; " +
 			"$response.OutputStream.Write($buffer, 0, $buffer.Length); $response.Close(); };"}
-	winServerDeployment, err := createWindowsServerDeployment("win-server", winServerCommand)
+	winServerDeployment, err := createWindowsServerDeployment(name, winServerCommand, affinity)
 	if err != nil {
 		return nil, fmt.Errorf("could not create Windows deployment: %s", err)
 	}
@@ -350,11 +420,13 @@ func waitUntilJobSucceeds(name string) error {
 			return nil
 		}
 		if job.Status.Failed > 0 {
-			return fmt.Errorf("job %v failed", job)
+			events, _ := getPodEvents(name)
+			return fmt.Errorf("job %v failed: %v", job, events)
 		}
 		time.Sleep(e2ef.RetryInterval)
 	}
-	return fmt.Errorf("job %v timed out", job)
+	events, _ := getPodEvents(name)
+	return fmt.Errorf("job %v timed out: %v", job, events)
 }
 
 // waitUntilDeploymentScaled will return nil if the deployment reaches the amount of replicas specified in its spec
@@ -372,7 +444,8 @@ func waitUntilDeploymentScaled(name string) error {
 		}
 		time.Sleep(e2ef.RetryInterval)
 	}
-	return fmt.Errorf("timed out waiting for deployment %v to scale", deployment)
+	events, _ := getPodEvents(name)
+	return fmt.Errorf("timed out waiting for deployment %v to scale: %v", deployment, events)
 }
 
 // getPodIP returns the IP of the pod that matches the label selector. If more than one pod match the
@@ -445,7 +518,7 @@ func deleteJob(name string) error {
 }
 
 // createWindowsServerDeployment creates a deployment with a Windows Server 2019 container
-func createWindowsServerDeployment(name string, command []string) (*appsv1.Deployment, error) {
+func createWindowsServerDeployment(name string, command []string, affinity *v1.Affinity) (*appsv1.Deployment, error) {
 	deploymentsClient := framework.K8sclientset.AppsV1().Deployments(v1.NamespaceDefault)
 	replicaCount := int32(1)
 	deployment := &appsv1.Deployment{
@@ -466,6 +539,7 @@ func createWindowsServerDeployment(name string, command []string) (*appsv1.Deplo
 					},
 				},
 				Spec: v1.PodSpec{
+					Affinity: affinity,
 					Tolerations: []v1.Toleration{
 						{
 							Key:    "os",
@@ -519,14 +593,17 @@ func pullDockerImage(name string, vm e2ef.WindowsVM) error {
 }
 
 // testNorthSouthNetworking deploys a Windows Server pod, and tests that we can network with it from outside the cluster
-func testNorthSouthNetworking(t *testing.T, vm e2ef.WindowsVM) {
+func testNorthSouthNetworking(t *testing.T, node *v1.Node, vm e2ef.WindowsVM) {
+	affinity, err := getAffinityForNode(node)
+	require.NoError(t, err, "Could not get affinity for node")
+
 	// Deploy a webserver pod on the new node
-	winServerDeployment, err := deployWindowsWebServer(vm)
+	winServerDeployment, err := deployWindowsWebServer("win-webserver-"+vm.GetCredentials().GetInstanceId(), vm, affinity)
 	require.NoError(t, err, "Could not create Windows Server deployment")
 	defer deleteDeployment(winServerDeployment.Name)
 
 	// Create a load balancer svc to expose the webserver
-	loadBalancer, err := createLoadBalancer("win-server", *winServerDeployment.Spec.Selector)
+	loadBalancer, err := createLoadBalancer("win-webserver-"+vm.GetCredentials().GetInstanceId(), *winServerDeployment.Spec.Selector)
 	require.NoError(t, err, "Could not create load balancer for Windows Server")
 	defer deleteService(loadBalancer.Name)
 	loadBalancer, err = waitForLoadBalancerIngress(loadBalancer.Name)
