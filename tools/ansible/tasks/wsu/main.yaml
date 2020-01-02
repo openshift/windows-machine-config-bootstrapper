@@ -6,14 +6,14 @@
     wmcb_exe: "wmcb.exe"
 
   tasks:
-    - name: Gather required files
+    - name: Create directory to store files to be used later
+      tempfile:
+        state: directory
+      register: tmp_dir
+
+    - name: Build WMCB
+      when: wmcb_url is undefined
       block:
-
-        - name: Create directory to store files to be used later
-          tempfile:
-            state: directory
-          register: tmp_dir
-
         - name: Build WMCB
           make:
             target: build
@@ -21,6 +21,14 @@
 
         - name: Move WMCB to temporary directory
           command: mv "{{ project_root }}/{{ wmcb_exe }}" "{{ tmp_dir.path }}/{{ wmcb_exe }}"
+
+    - name: Gather required files
+      block:
+        - name: Download WMCB
+          when: wmcb_url is defined
+          get_url:
+            url: "{{ wmcb_url }}"
+            dest: "{{ tmp_dir.path }}/wmcb.exe"
 
         - name: Download Windows node kubelet
           get_url:
@@ -64,6 +72,10 @@
       win_tempfile:
         state: directory
       register: win_temp_dir
+
+    - name: Display Windows temporary directory
+      debug:
+        msg: "Windows temporary directory: {{ win_temp_dir.path }}"
 
     - name: Copy required files to Windows host
       win_copy:
