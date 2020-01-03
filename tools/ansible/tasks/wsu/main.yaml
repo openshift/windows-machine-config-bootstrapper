@@ -75,14 +75,14 @@
 
     - name: Get hybrid overlay exe
       win_get_url:
-        url: "https://github.com/openshift/windows-machine-config-operator/releases/download/0.1/hybrid-overlay.exe"
+        url: "https://github.com/openshift/windows-machine-config-operator/releases/download/v0.3-alpha/hybrid-overlay.exe"
         dest: "{{ win_temp_dir.path }}\\hybrid-overlay.exe"
         follow_redirects: all
 
     - name: Check hybrid overlay SHA256
       win_shell: "certutil -hashfile {{ win_temp_dir.path }}\\hybrid-overlay.exe sha256"
       register: hybrid_sha256
-      failed_when: "hybrid_sha256.stdout_lines[1] != 'fa0ecdc4abd3e3cf6b88541a32eba59e947be08b783be9a39951126182f30f65'"
+      failed_when: "hybrid_sha256.stdout_lines[1] != 'c399a53722eccae06af49c9e8091b664ba42aa22be397bbbd86517cf2c40a16d'"
 
     - name: Run bootstrapper
       win_shell: "{{ win_temp_dir.path }}\\wmcb.exe initialize-kubelet --ignition-file {{ win_temp_dir.path }}\\worker.ign --kubelet-path {{ win_temp_dir.path }}\\kubelet.exe"
@@ -177,7 +177,7 @@
     # include hybrid overlay config
     - name: Get the subnet associated with host
       delegate_to: localhost
-      shell: "oc get nodes {{ node_name.stdout}} -o=jsonpath='{.metadata.annotations.k8s\\.ovn\\.org\\/hybrid-overlay-hostsubnet}'"
+      shell: "oc get nodes {{ node_name.stdout}} -o=jsonpath='{.metadata.annotations.k8s\\.ovn\\.org\\/hybrid-overlay-node-subnet}'"
       register: ovn_host_subnet
 
     # Get the service CIDR associated with the OpenShift network operator object. We assume that network always object
