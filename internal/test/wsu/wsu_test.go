@@ -41,7 +41,7 @@ var (
 	// windowsLabel represents the node label that need to be applied to the Windows node created
 	windowsLabel = "node.openshift.io/os_id=Windows"
 	// hybridOverlaySubnet is an annotation applied by the cluster network operator which is used by the hybrid overlay
-	hybridOverlaySubnet = "k8s.ovn.org/hybrid-overlay-hostsubnet"
+	hybridOverlaySubnet = "k8s.ovn.org/hybrid-overlay-node-subnet"
 	// hybridOverlayMac is an annotation applied by the hybrid overlay
 	hybridOverlayMac = "k8s.ovn.org/hybrid-overlay-distributed-router-gateway-mac"
 
