@@ -48,3 +48,32 @@ Run the WSU playbook:
 ```
 $ ansible-playbook -i hosts tasks/wsu/main.yaml -v
 ```
+
+### End to end testing
+The following environment variables need to be set for running the end to end tests of the playbook:
+- ARTIFACT_DIR
+  - This can be set to any directory
+- AWS_SHARED_CREDENTIALS_FILE
+  - Set this to point to your AWS credentials file
+- KUBE_SSH_KEY_PATH
+  - The ssh key used to bring up the VM
+- KUBECONFIG
+  - The kubeconfig of the OpenShift cluster
+
+Once the above variables are set, you can run the end to end tests for the playbook by executing:
+```shell script
+$ hack/run-wsu-ci-e2e-test.sh
+```
+
+The hack script can be given the following options:
+- `-v` option takes a list of VM credentials in the order of `instance-id,ip-address,password`. The username defaults
+   to `Administrator`. This allows you to run the tests against existing set of VMs.
+   ```shell script
+   $ hack/run-wsu-ci-e2e-test.sh -v"aws-instance-id-1,3.135.234.23,password,aws-instance-id-2,3.135.234.23,password"
+   ```
+
+- `-s` option allows you to skip the framework setup. The assumption here is that the framework setup has already been
+  run on the VM.
+  ```shell script
+  $ hack/run-wsu-ci-e2e-test.sh -v"aws-instance-id,1.2.34.23,password" -s
+  ```

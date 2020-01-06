@@ -56,9 +56,10 @@ type WindowsVM interface {
 }
 
 // newWindowsVM creates and sets up a Windows VM in the cloud and returns the WindowsVM interface that can be used to
-// interact with the VM. If no error is returned then it is guaranteed that the VM was created and can be  interacted
-// with.
-func newWindowsVM(imageID, instanceType string) (WindowsVM, error) {
+// interact with the VM. If credentials are passed then it is assumed that VM already exists in the cloud and those
+// credentials will be used to interact with the VM. If no error is returned then it is guaranteed that the VM was
+// created and can be interacted with. If skipSetup is true, then configuration steps are skipped.
+func newWindowsVM(imageID, instanceType string, credentials *types.Credentials, skipSetup bool) (WindowsVM, error) {
 	w := &windowsVM{}
 	var err error
 
@@ -68,12 +69,18 @@ func newWindowsVM(imageID, instanceType string) (WindowsVM, error) {
 		return nil, fmt.Errorf("error instantiating cloud provider %v", err)
 	}
 
-	w.credentials, err = w.cloudProvider.CreateWindowsVM()
-	if err != nil {
-		return nil, fmt.Errorf("error creating Windows VM: %v", err)
+	if credentials == nil {
+		w.credentials, err = w.cloudProvider.CreateWindowsVM()
+		if err != nil {
+			return nil, fmt.Errorf("error creating Windows VM: %v", err)
+		}
+	} else {
+		if credentials.GetIPAddress() == "" || credentials.GetPassword() == "" {
+			return nil, fmt.Errorf("password or IP address not specified in credentials")
+		}
+		w.credentials = credentials
 	}
 
-	// TODO: Add some options to skip certain parts of the test
 	if err := w.setupWinRMClient(); err != nil {
 		return w, fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
 	}
@@ -81,9 +88,11 @@ func newWindowsVM(imageID, instanceType string) (WindowsVM, error) {
 	// in the list of services
 	// TODO: Parse the output of the `Get-Service sshd, ssh-agent` on the Windows node to check if the windows nodes
 	// has those services present
-	time.Sleep(time.Minute)
-	if err := w.configureOpenSSHServer(); err != nil {
-		return w, fmt.Errorf("failed to configure OpenSSHServer on the Windows VM: %v", err)
+	if !skipSetup {
+		time.Sleep(time.Minute)
+		if err := w.configureOpenSSHServer(); err != nil {
+			return w, fmt.Errorf("failed to configure OpenSSHServer on the Windows VM: %v", err)
+		}
 	}
 	if err := w.getSSHClient(); err != nil {
 		return w, fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)

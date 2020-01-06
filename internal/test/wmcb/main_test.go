@@ -1,6 +1,7 @@
 package wmcb
 
 import (
+	"flag"
 	"log"
 	"os"
 	"testing"
@@ -17,7 +18,14 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	err := framework.Setup(vmCount)
+	var vmCreds e2ef.Creds
+	var skipVMSetup bool
+
+	flag.Var(&vmCreds, "vmCreds", "List of VM credentials")
+	flag.BoolVar(&skipVMSetup, "skipVMSetup", false, "Option to disable setup in the VMs")
+	flag.Parse()
+
+	err := framework.Setup(vmCount, vmCreds, skipVMSetup)
 	if err != nil {
 		framework.TearDown()
 		log.Fatal(err)
