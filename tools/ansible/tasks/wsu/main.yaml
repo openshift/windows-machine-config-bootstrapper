@@ -93,39 +93,46 @@
         msg: "Bootstrapper error"
       when: '"Bootstrapping completed successfully" not in bootstrap_out.stderr'
 
-    - name: Initial wait for bootstrap CSR
-      pause:
-        seconds: 60
+    # Making a best effort to approve CSRs. Not failing until the actual `get node` call, in case the CSRs were approved elsewhere
+    - name: Approve CSRs
+      block:
+        - name: Initial wait for bootstrap CSR
+          pause:
+            seconds: 30
 
-    - name: Check for bootstrap CSR
-      delegate_to: localhost
-      shell: "oc get csr | awk '/system:serviceaccount:openshift-machine-config-operator:node-bootstrapper/ && /Pending/ {print $1}'"
-      register: bootstrap_csrs
-      until: bootstrap_csrs.stdout != ""
-      retries: 2
-      delay: 60
+        - name: Check for bootstrap CSR
+          delegate_to: localhost
+          shell: "oc get csr | awk '/system:serviceaccount:openshift-machine-config-operator:node-bootstrapper/ && /Pending/ {print $1}'"
+          register: bootstrap_csrs
+          until: bootstrap_csrs.stdout != ""
+          retries: 2
+          delay: 60
+          ignore_errors: yes
 
-    - name: Approve pending bootstrap CSRs
-      delegate_to: localhost
-      shell: "oc adm certificate approve {{ item }}"
-      with_items: "{{ bootstrap_csrs.stdout_lines }}"
+        - name: Approve pending bootstrap CSRs
+          delegate_to: localhost
+          shell: "oc adm certificate approve {{ item }}"
+          with_items: "{{ bootstrap_csrs.stdout_lines }}"
+          ignore_errors: yes
 
-    - name: Initial wait for node CSR
-      pause:
-        seconds: 60
+        - name: Initial wait for node CSR
+          pause:
+            seconds: 30
 
-    - name: Wait for node CSR
-      delegate_to: localhost
-      shell: "oc get csr | awk '/system:node:/ && /Pending/ {print $1}'"
-      register: node_csrs
-      until: node_csrs.stdout != ""
-      retries: 2
-      delay: 60
+        - name: Wait for node CSR
+          delegate_to: localhost
+          shell: "oc get csr | awk '/system:node:/ && /Pending/ {print $1}'"
+          register: node_csrs
+          until: node_csrs.stdout != ""
+          retries: 2
+          delay: 60
+          ignore_errors: yes
 
-    - name: Approve pending node CSRs
-      delegate_to: localhost
-      shell: "oc adm certificate approve {{ item }}"
-      with_items: "{{ node_csrs.stdout_lines }}"
+        - name: Approve pending node CSRs
+          delegate_to: localhost
+          shell: "oc adm certificate approve {{ item }}"
+          with_items: "{{ node_csrs.stdout_lines }}"
+          ignore_errors: yes
 
     # Get the bootstrapped windows node name. We're using the IP address of the Windows VM created
     # in the inventory file and if the node has multiple internal IP's or external IP's it may not work well.
@@ -153,6 +160,17 @@
       delegate_to: localhost
       shell: "oc label node {{ node_name.stdout_lines[0] }} node-role.kubernetes.io/worker="
       when: node_name.stdout_lines | length == 1 and checklabels.rc == 1
+
+    - name: Check if the hybrid overlay is running
+      win_shell: "Get-Process -Name \"hybrid-overlay\""
+      register: get_process
+      failed_when:
+        - 'get_process.stderr != ""'
+        - '"Cannot find a process with the name" not in get_process.stderr'
+
+    - name: Stop the hybrid overlay if it is running
+      win_shell: "Stop-Process -Name \"hybrid-overlay\""
+      when: 'get_process.stderr == ""'
 
     - name: Start the hybrid overlay
       win_shell: "Start-Process -NoNewWindow -FilePath \"{{  win_temp_dir.path }}\\hybrid-overlay.exe\" -ArgumentList \"--node  {{ node_name.stdout }} --k8s-kubeconfig c:\\k\\kubeconfig\""
@@ -220,7 +238,12 @@
       win_shell: 'Import-Module {{ win_temp_dir.path }}\\hns.psm1; $net = (Get-HnsNetwork | where { $_.Name -eq "OpenShiftNetwork" }); $endpoint = New-HnsEndpoint -NetworkId $net.ID -Name VIPEndpoint; Attach-HNSHostEndpoint -EndpointID $endpoint.ID -CompartmentID 1; (Get-NetIPConfiguration -AllCompartments -All -Detailed | where { $_.NetAdapter.LinkLayerAddress -eq $endpoint.MacAddress }).IPV4Address.IPAddress.Trim()'
       register: source_vip
 
-    - name: Create kube-proxy Windows Service
+    - name: Ensure kube-proxy Windows Service is not running
+      win_service:
+        name: "kube-proxy"
+        state: absent
+
+    - name: Start kube-proxy Windows Service
       win_service:
         name: "kube-proxy"
         path: "C:\\k\\kube-proxy.exe --windows-service --v=4 --proxy-mode=kernelspace --feature-gates=WinOverlay=true --hostname-override={{ node_name.stdout }} --kubeconfig=c:\\k\\kubeconfig --cluster-cidr={{ ovn_host_subnet.stdout }} --log-dir=c:\\k --logtostderr=false --network-name=OpenShiftNetwork --source-vip={{ source_vip.stdout | trim }} --enable-dsr=false"
