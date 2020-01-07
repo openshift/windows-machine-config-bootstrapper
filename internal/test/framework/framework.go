@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
+	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
@@ -29,6 +31,36 @@ type TestFramework struct {
 	K8sclientset *kubernetes.Clientset
 	// OSConfigClient is the OpenShift config client, we will use to query the OpenShift api object status
 	OSConfigClient *configclient.Clientset
+	// noTeardown is an indicator that the user supplied the VMs and they should not be destroyed
+	noTeardown bool
+}
+
+// Creds is used for parsing the vmCreds command line argument
+type Creds []*types.Credentials
+
+// Set populates the list of credentials from the vmCreds command line argument
+func (c *Creds) Set(value string) error {
+	if value == "" {
+		return nil
+	}
+
+	splitValue := strings.Split(value, ",")
+	// Credentials consists of three elements, so this has to be
+	if len(splitValue)%3 != 0 {
+		return fmt.Errorf("incomplete VM credentials provided")
+	}
+
+	// TODO: Add input validation if we want to use this in production
+	for i := 0; i < len(splitValue); i += 3 {
+		cred := types.NewCredentials(splitValue[i], splitValue[i+1], splitValue[i+2])
+		*c = append(*c, cred)
+	}
+	return nil
+}
+
+// String returns the string representation of Creds. This is required for Creds to be used with flags.
+func (c *Creds) String() string {
+	return fmt.Sprintf("%v", *c)
 }
 
 // initCIvars gathers the values of the environment variables which configure the test suite
@@ -52,8 +84,16 @@ func initCIvars() error {
 	return nil
 }
 
-// Setup creates and initializes a variable amount of Windows VMs
-func (f *TestFramework) Setup(vmCount int) error {
+// Setup creates and initializes a variable amount of Windows VMs. If the array of credentials are passed then it will
+// be used in lieu of creating new VMs. If skipVMsetup is true then it will result in the VM setup not being run. These
+// two options are mainly used during test development.
+func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, skipVMsetup bool) error {
+	if credentials != nil {
+		if len(credentials) != vmCount {
+			return fmt.Errorf("vmCount %d does not match length %d of credentials", vmCount, len(credentials))
+		}
+		f.noTeardown = true
+	}
 	// Use Windows 2019 server image with containers in us-east1 zone for CI testing.
 	// TODO: Move to environment variable that can be fetched from the cloud provider
 	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0b8d82dea356226d3 for
@@ -69,7 +109,11 @@ func (f *TestFramework) Setup(vmCount int) error {
 	// TODO: make them run in parallel: https://issues.redhat.com/browse/WINC-178
 	for i := 0; i < vmCount; i++ {
 		var err error
-		f.WinVMs[i], err = newWindowsVM(imageID, instanceType)
+		var creds *types.Credentials
+		if credentials != nil {
+			creds = credentials[i]
+		}
+		f.WinVMs[i], err = newWindowsVM(imageID, instanceType, creds, skipVMsetup)
 		if err != nil {
 			return fmt.Errorf("unable to instantiate Windows VM: %v", err)
 		}
@@ -115,7 +159,7 @@ func (f *TestFramework) getOpenShiftConfigClient() error {
 
 // TearDown destroys the resources created by the Setup function
 func (f *TestFramework) TearDown() {
-	if f.WinVMs == nil {
+	if f.noTeardown || f.WinVMs == nil {
 		return
 	}
 

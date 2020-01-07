@@ -3,6 +3,25 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
+# TODO: Add input validation
+SKIP_VM_SETUP=""
+VM_CREDS=""
+
+while getopts ":v:s" opt; do
+  case ${opt} in
+    v ) # process option for providing existing VM credentials
+      VM_CREDS=$OPTARG
+      ;;
+    s ) # process option for skipping setup in VMs
+      SKIP_VM_SETUP="-skipSetup"
+      ;;
+    \? )
+      echo "Usage: $0 [-v] [-s]"
+      exit 0
+      ;;
+  esac
+done
+
 WMCO_ROOT=$(pwd)
 TEST_DIR=$WMCO_ROOT/internal/test/wsu
 
@@ -28,6 +47,6 @@ oc patch network.operator cluster --type=merge -p '{"spec":{"defaultNetwork":{"o
 
 # Run the test suite
 cd $TEST_DIR
-GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on CLUSTER_ADDR=$CLUSTER_ADDR WSU_PATH=$WMCO_ROOT/tools/ansible/tasks/wsu/main.yaml go test -v -timeout 30m .
+GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on CLUSTER_ADDR=$CLUSTER_ADDR WSU_PATH=$WMCO_ROOT/tools/ansible/tasks/wsu/main.yaml go test -v -vmCreds="$VM_CREDS" $SKIP_VM_SETUP -timeout 30m .
 
 exit 0
