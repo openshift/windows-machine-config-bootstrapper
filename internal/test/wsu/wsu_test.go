@@ -87,7 +87,11 @@ func TestWSU(t *testing.T) {
 	require.NotEmptyf(t, clusterAddress, "CLUSTER_ADDR environment variable not set")
 
 	for _, vm := range framework.WinVMs {
+		// Run the test suite twice, to ensure that the WSU can be run multiple times against the same VM
 		runWSUTestSuite(t, vm)
+		t.Run("Run the WSU against the same VM again", func(t *testing.T) {
+			runWSUTestSuite(t, vm)
+		})
 	}
 }
 
