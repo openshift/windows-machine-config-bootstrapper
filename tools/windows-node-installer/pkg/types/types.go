@@ -4,6 +4,13 @@ package types
 // sub-package
 // TODO: Move every cloud provider types here
 
+const (
+	// ContainerLogsPort number will be opened on the windows node via firewall
+	ContainerLogsPort = "10250"
+	// FirewallRuleName is the firewall rule name to open the Container Logs Port
+	FirewallRuleName = "ContainerLogsPort"
+)
+
 // Credentials holds the information to access the Windows instance created.
 type Credentials struct {
 	// instanceID uniquely identifies the instanceID
@@ -16,7 +23,7 @@ type Credentials struct {
 	user string
 }
 
-// NewCredentials takes the instanceID, ip address and password of the Windows instance created and returns the
+// NewCredentials takes the instanceID, ip address, password and user of the Windows instance created and returns the
 // Credentials structure
 func NewCredentials(instanceID, ipAddress, password, user string) *Credentials {
 	return &Credentials{instanceID: instanceID, ipAddress: ipAddress, password: password, user: user}

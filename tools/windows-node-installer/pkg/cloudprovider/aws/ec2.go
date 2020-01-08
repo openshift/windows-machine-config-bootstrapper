@@ -145,13 +145,16 @@ func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, rerr er
 		return nil, fmt.Errorf("failed to get cluster worker IAM, %v", err)
 	}
 
-	// PowerShell script to setup WinRM for Ansible and installing OpenSSH server on the Windows node created
+	// PowerShell script to setup WinRM for Ansible, installing OpenSSH server and open firewall
+	// port number 10250 on the Windows node created
 	userDataWinrm := `<powershell>
         $url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
         $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
         (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
-        powershell.exe -ExecutionPolicy ByPass -File $file
-        powershell -NonInteractive -ExecutionPolicy Bypass Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+        & $file
+        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+        New-NetFirewallRule -DisplayName "` + types.FirewallRuleName + `"
+        -Direction Inbound -Action Allow -Protocol TCP -LocalPort ` + types.ContainerLogsPort + ` -EdgeTraversalPolicy Allow
         </powershell>
         <persist>true</persist>`
 

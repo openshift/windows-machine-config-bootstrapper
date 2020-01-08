@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"strings"
 	"testing"
 
 	"github.com/Azure/go-autorest/autorest/to"
@@ -22,11 +21,10 @@ import (
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
 	wniAzure "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
+	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 )
 
 const (
-	// winRMPort is the secure WinRM port
-	winRMPort = "5986"
 	// winRMPortPriority is the priority for the WinRM rule
 	winRMPortPriority = 600
 	// winRMRuleName security group rule name for the WinRM rule
@@ -47,6 +45,8 @@ const (
 	ruleProtocol = "Tcp"
 	// ruleAction is the default actions for all rules
 	ruleAction = "Allow"
+	// azureUser used to access the windows instance
+	azureUser = "core"
 )
 
 type requiredRule struct {
@@ -81,6 +81,10 @@ var (
 	instanceIDs []string
 	// secGroupIDs that are obtained from the windows-node-installer.json
 	secGroupsIDs []string
+	// ipAddressPattern looks for the IP address from vm rdp command file.
+	ipAddressPattern = regexp.MustCompile(`\d+.\d+.\d+.\d+`)
+	// passwordPattern looks for the password from vm rdp command file.
+	passwordPattern = regexp.MustCompile(`/p:'.{12}'`)
 )
 
 // TestCreateVM is used to the test the following after a successful run of "wni azure create"
@@ -88,8 +92,11 @@ var (
 // 2. ansible ping check to confirm that windows node is correctly
 //    configured to execute the remote ansible commands.
 func TestCreateVM(t *testing.T) {
+	err := setup()
+	require.NoErrorf(t, err, "failed at the setup with error: %v", err)
 	t.Run("check if required security rules are present", testRequiredRules)
 	t.Run("check if ansible is able to ping on the WinRmHttps port", testAnsiblePing)
+	t.Run("check if container logs port is open in Windows firewall", testAzureInstancesFirewallRule)
 }
 
 // isNil is a helper functions which checks if the object is a nil pointer or not.
@@ -114,49 +121,103 @@ func constructRequiredRules() (map[string]*requiredRule,
 	return requiredRules, nil
 }
 
-// setup initializes the azureProvider to be used for running the tests.
-func setup() (err error) {
+// setup does these prerequisite tests before running the tests.
+// 1. populate fields into the azureInfo
+// 2. populate global variables instanceIDs and secGroupsIDs
+// 3. get credential object for the instance created.
+func setup() error {
+	err := populateAzureInfo()
+	if err != nil {
+		return fmt.Errorf("failed to populate Azure Info with error: %v", err)
+	}
+	err = populateInstAndSgIds()
+	if err != nil {
+		return fmt.Errorf("failed to populate the Instance and security group Id's: %v", err)
+	}
+	err = getCredentials()
+	if err != nil {
+		return fmt.Errorf("failed to get credential object with error: %v", err)
+	}
+	return nil
+}
+
+// populateAzureInfo populates the fields present in the azureInfo.
+func populateAzureInfo() error {
 	oc, err := client.GetOpenShift(kubeconfig)
 	if err != nil {
 		return fmt.Errorf("failed to initialize OpenShift client with error: %v", err)
 	}
+
 	provider, err := oc.GetCloudProvider()
 	if err != nil {
 		return fmt.Errorf("failed to get cloud provider information with error: %v", err)
 	}
+	azureInfo.resourceGroupName = provider.Azure.ResourceGroupName
+
+	// credentialFileData contains mapping of data present in the azure credential file.
+	credentialFileData, err := auth.GetSettingsFromFile()
+	if err != nil {
+		return fmt.Errorf("failed to get info from %s with error: %v", azureCredentials, err)
+	}
+
+	subscriptionId := credentialFileData.GetSubscriptionID()
+	if subscriptionId == "" {
+		return fmt.Errorf("failed to get the subscriptionId from AZURE_AUTH_LOCATION: %s", azureCredentials)
+	}
+
+	// instantiate network security group client.
+	azureInfo.nsgClient = network.NewSecurityGroupsClient(subscriptionId)
+
+	// set authorisation token for network security group client.
 	resourceAuthorizer, err := auth.NewAuthorizerFromFileWithResource(azure.PublicCloud.ResourceManagerEndpoint)
 	if err != nil {
 		return fmt.Errorf("failed to get azure authorization token with error: %v", err)
 	}
-	getFileSettings, err := auth.GetSettingsFromFile()
-	if err != nil {
-		return fmt.Errorf("failed to get info from %s with error: %v", azureCredentials, err)
-	}
-	subscriptionId := getFileSettings.GetSubscriptionID()
-	if subscriptionId == "" {
-		return fmt.Errorf("failed to get the subscriptionId from AZURE_AUTH_LOCATION: %s", azureCredentials)
-	}
-	nsgClient := network.NewSecurityGroupsClient(subscriptionId)
-	nsgClient.Authorizer = resourceAuthorizer
-	azureInfo.resourceGroupName = provider.Azure.ResourceGroupName
-	azureInfo.nsgClient = nsgClient
+	azureInfo.nsgClient.Authorizer = resourceAuthorizer
 
 	requiredRules, err := constructRequiredRules()
 	if err != nil {
-		return fmt.Errorf("unable to construct required rules: %v", err)
+		return fmt.Errorf("failed to construct required rules with error: %v", err)
 	}
 	azureInfo.requiredRules = requiredRules
+	return nil
+}
 
+// populateInstAndSgIds populates instanceIDs and secGroupsIDs for the instance created.
+func populateInstAndSgIds() error {
+	err := readInstallerInfo()
+	if err != nil {
+		return fmt.Errorf("failed to get info from windows-node-installer.json with error: %v", err)
+	}
+	return nil
+}
+
+// getCredentials gets the credential object for the created instance.
+func getCredentials() error {
+	// currently we are testing properties of a single instance, which is going to be
+	// zeroth entry in it.
+	instanceId := instanceIDs[0]
+	ipAddress, password, err := getIpPass(instanceId)
+	if err != nil {
+		return fmt.Errorf("failed to get the Ip address and password for the instance with error: %v", err)
+	}
+	if ipAddress == "" {
+		return fmt.Errorf("failed to capture Ip address")
+	}
+	if password == "" {
+		return fmt.Errorf("failed to capture the password")
+	}
+	credentials = types.NewCredentials(instanceId, ipAddress, password, azureUser)
 	return nil
 }
 
 // readInstallerInfo reads the instanceIDs and secGroupsIDs from the
-// windows-node-installer.json file specified in "dir".
+// windows-node-installer.json file specified in "artifactDir".
 func readInstallerInfo() (err error) {
-	wniFilePath := filepath.Join(dir, "/windows-node-installer.json")
+	wniFilePath := filepath.Join(artifactDir, "/windows-node-installer.json")
 	installerInfo, err := resource.ReadInstallerInfo(wniFilePath)
 	if err != nil {
-		return fmt.Errorf("failed to read installer info from %s with error: %v", dir, err)
+		return fmt.Errorf("failed to read installer info from %s with error: %v", artifactDir, err)
 	}
 	if len(installerInfo.SecurityGroupIDs) == 0 {
 		return fmt.Errorf("failed to obtain the sec group Ids")
@@ -215,13 +276,28 @@ func areRequiredRulesPresent(secGroupRules []network.SecurityRule) bool {
 	return true
 }
 
+// getIpPass extracts instance IPAddress and password from instance rdp file.
+func getIpPass(vmName string) (string, string, error) {
+	vmCredentialPath := filepath.Join(artifactDir, "/", vmName)
+	rdpCmd, err := ioutil.ReadFile(vmCredentialPath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read %s credentials with error: %v", vmName, err)
+	}
+
+	// this regex looks for the IP address pattern from vmCredentialPath.
+	// the sample vmCredentialPath looks like xfreerdp /u:xxxx /v:12.23.34.45 /h:1080 /w:1920 /p:'password1234'
+	// ipAddress will capture IPaddress 12.23.34.45
+	ipAddress := ipAddressPattern.FindString(string(rdpCmd))
+
+	// passwordPattern will extract /p:'password1234'. In that we require password1234
+	password := passwordPattern.FindString(string(rdpCmd))[4:16]
+
+	return ipAddress, password, nil
+}
+
 // testRequiredRules checks if all the required rules are present in all the NSGs in the win
 func testRequiredRules(t *testing.T) {
 	ctx := context.Background()
-	err := setup()
-	require.NoError(t, err, "failed to initialize azureProvider")
-	err = readInstallerInfo()
-	require.NoError(t, err, "failed to get info from wni file")
 	for _, nsgName := range secGroupsIDs {
 		secGroupProfile, err := azureInfo.nsgClient.Get(ctx, azureInfo.resourceGroupName, nsgName, "")
 		require.NoError(t, err, "failed to get the network security group profile")
@@ -258,27 +334,25 @@ ansible_winrm_server_cert_validation=ignore`, ip, password, winRMPort))
 
 // testAnsiblePing checks if ansible is able to ping on opened winRmHttps port
 func testAnsiblePing(t *testing.T) {
-	// this regex looks for the IP address pattern from vmCredentialPath.
-	// the sample vmCredentialPath looks like xfreerdp /u:xxxx /v:xx.xx.xx.xx /h:1080 /w:1920 /p:'password1234'
-	ipAddressPattern := regexp.MustCompile(`\d+.\d+.\d+.\d+`)
-	// the passwordPattern extracts the characters present after the '/p:', but we are extracting
-	// 13 characters even though the windows password length is of size 12 because we got a single quote
-	// character included in the password.
-	passwordPattern := regexp.MustCompile(`/p:.{13}`)
+	// TODO: Do not iterate on the instances but instead pass the credentials object
+	//  for test function
 	for _, vmName := range instanceIDs {
-		vmCredentialPath := filepath.Join(dir, "/", vmName)
-		rdpCmd, err := ioutil.ReadFile(vmCredentialPath)
+		ipAddress, password, err := getIpPass(vmName)
 		require.NoErrorf(t, err, "failed to read file %s", vmName)
-		ipAddress := ipAddressPattern.FindString(string(rdpCmd))
 		assert.NotEmpty(t, ipAddress, "the IP address can't be empty")
-		password := passwordPattern.FindString(string(rdpCmd))[3:]
 		assert.NotEmpty(t, password, "the password can't be empty")
-		// we are trimming out the unnecessary single quotes.
-		password = strings.Trim(password, `'`)
 		hostFileName, err := createHostFile(ipAddress, password)
 		require.NoError(t, err, "failed to create a temp file")
 		pingCmd := exec.Command("ansible", "win", "-i", hostFileName, "-m", "win_ping")
 		out, err := pingCmd.CombinedOutput()
 		assert.NoErrorf(t, err, "ansible ping check failed with error: %s", string(out))
 	}
+}
+
+// testAzureFirewallRule asserts if the created instance has firewall rule that opens container logs port.
+func testAzureInstancesFirewallRule(t *testing.T) {
+	ipAddress, password, err := getIpPass(credentials.GetInstanceId())
+	require.NoErrorf(t, err, "failed to obtain credentials for %s", credentials.GetInstanceId())
+	credentials = types.NewCredentials(credentials.GetInstanceId(), ipAddress, password, azureUser)
+	testInstanceFirewallRule(t)
 }
