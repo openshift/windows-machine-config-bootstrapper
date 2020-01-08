@@ -13,7 +13,7 @@ while getopts ":v:s" opt; do
       VM_CREDS=$OPTARG
       ;;
     s ) # process option for skipping setup in VMs
-      SKIP_VM_SETUP="-skipSetup"
+      SKIP_VM_SETUP="-skipVMSetup"
       ;;
     \? )
       echo "Usage: $0 [-v] [-s]"
