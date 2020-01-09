@@ -7,7 +7,7 @@ WORKDIR /go/src/github.com/openshift/windows-machine-config-operator/
 
 COPY . .
 
-RUN yum -y update && yum -y install git make python2 python2-pip gcc
+RUN yum -y update && yum -y install git make python2 python2-pip gcc jq
 
 # Download and install Go
 RUN curl -L -s https://dl.google.com/go/go1.12.13.linux-amd64.tar.gz > go1.12.13.linux-amd64.tar.gz \
