@@ -21,9 +21,9 @@ var (
 	dir            = os.Getenv("ARTIFACT_DIR")
 	privateKeyPath = os.Getenv("KUBE_SSH_KEY_PATH")
 
-	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0b8d82dea356226d3 for
+	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0105f663dc99752af for
 	// Microsoft Windows Server 2019 Base with Containers.
-	imageID      = "ami-0b8d82dea356226d3"
+	imageID      = "ami-0105f663dc99752af"
 	instanceType = "m4.large"
 	sshKey       = "libra"
 
