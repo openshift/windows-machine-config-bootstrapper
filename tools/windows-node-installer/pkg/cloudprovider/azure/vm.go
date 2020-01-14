@@ -48,6 +48,8 @@ const (
 	vnetRulePriority = 602
 	// vnetRuleName is the security group rule name for vnet traffic within the cluster
 	vnetRuleName = "vnet_traffic"
+	// winUser is the user used to login into the instance.
+	winUser = "core"
 )
 
 var log = logger.Log.WithName("azure-vm")
@@ -786,7 +788,7 @@ func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
 		log.Info(fmt.Sprintf("Please Check for file %s in %s directory on how to access the node",
 			instanceName, az.resourceTrackerDir))
 	}
-	credentials := types.NewCredentials(instanceName, *ipAddress, adminPassword)
+	credentials := types.NewCredentials(instanceName, *ipAddress, adminPassword, winUser)
 	return credentials, nil
 }
 
