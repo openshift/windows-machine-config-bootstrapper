@@ -96,9 +96,9 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 	}
 	// Use Windows 2019 server image with containers in us-east1 zone for CI testing.
 	// TODO: Move to environment variable that can be fetched from the cloud provider
-	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0b8d82dea356226d3 for
+	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0105f663dc99752af for
 	// Microsoft Windows Server 2019 Base with Containers.
-	imageID := "ami-0b8d82dea356226d3"
+	imageID := "ami-0105f663dc99752af"
 	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
 	// the Intel 82599 network driver
 	instanceType := "m5a.large"
