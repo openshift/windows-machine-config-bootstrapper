@@ -12,12 +12,14 @@ type Credentials struct {
 	ipAddress string
 	// password to access the instance created
 	password string
+	// user used for accessing the  instance created
+	user string
 }
 
 // NewCredentials takes the instanceID, ip address and password of the Windows instance created and returns the
 // Credentials structure
-func NewCredentials(instanceID, ipAddress, password string) *Credentials {
-	return &Credentials{instanceID: instanceID, ipAddress: ipAddress, password: password}
+func NewCredentials(instanceID, ipAddress, password, user string) *Credentials {
+	return &Credentials{instanceID: instanceID, ipAddress: ipAddress, password: password, user: user}
 }
 
 // GetIPAddress returns the ip address of the given node
@@ -33,4 +35,9 @@ func (cred *Credentials) GetPassword() string {
 // GetInstanceID returns the instanceId associated with the given node
 func (cred *Credentials) GetInstanceId() string {
 	return cred.instanceID
+}
+
+// GetUserName returns the user name associated with the given node
+func (cred *Credentials) GetUserName() string {
+	return cred.user
 }
