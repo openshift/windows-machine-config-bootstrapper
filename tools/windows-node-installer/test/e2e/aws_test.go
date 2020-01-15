@@ -43,7 +43,7 @@ var (
 // TestAwsE2eSerial runs all e2e tests for the AWS implementation serially. It creates the Windows instance,
 // checks all properties of the instance and destroy the instance and check that resource are deleted.
 func TestAwsE2eSerial(t *testing.T) {
-	setupAWSCloudProvider(t)
+	awsSetup(t)
 
 	t.Run("test create Windows Instance", testCreateWindowsInstance)
 
@@ -52,8 +52,6 @@ func TestAwsE2eSerial(t *testing.T) {
 
 // testCreateWindowsInstance tests the creation of a Windows instance and checks its properties and attached items.
 func testCreateWindowsInstance(t *testing.T) {
-	setupWindowsInstanceWithResources(t)
-
 	t.Run("test created instance properties", testInstanceProperties)
 	t.Run("test instance is attached a public subnet", testInstanceHasPublicSubnetAndIp)
 	t.Run("test instance has name tag", testInstanceIsAttachedWithName)
@@ -71,6 +69,14 @@ func testDestroyWindowsInstance(t *testing.T) {
 	t.Run("test installer json file is deleted", testInstallerJsonFileIsDeleted)
 }
 
+// awsSetup does the setup steps such as:
+// 1. Obtain the awsProvider object from the cloud factory implementation.
+// 2. Spin up the windows instance, to test properties on it.
+func awsSetup(t *testing.T) {
+	setupAWSCloudProvider(t)
+	setupWindowsInstanceWithResources(t)
+}
+
 // setupAWSCloudProvider creates provider ofr Cloud interface and asserts type into AWS provider.
 // This is the first step of the e2e test and fails the test upon error.
 func setupAWSCloudProvider(t *testing.T) {
@@ -78,11 +84,6 @@ func setupAWSCloudProvider(t *testing.T) {
 	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, awscredentials, "default", dir,
 		imageID, instanceType, sshKey, privateKeyPath)
 	require.NoError(t, err, "Error obtaining aws interface object")
-	credentials, err := cloud.CreateWindowsVM()
-	require.NoError(t, err, "Error spinning up Windows VM")
-	require.NotEmpty(t, credentials, "Credentials returned are empty")
-	require.NotEmpty(t, credentials.GetPassword(), "Expected some password but got empty string")
-	require.NotEmpty(t, credentials.GetInstanceId(), "Expected some instance id but got empty string")
 
 	// Type assert to AWS so that we can test other functionality
 	provider, ok := cloud.(*awscp.AwsProvider)
