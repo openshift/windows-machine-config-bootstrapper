@@ -2,8 +2,10 @@ package framework
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
@@ -174,4 +176,16 @@ func (f *TestFramework) TearDown() {
 			return
 		}
 	}
+}
+
+// WriteToArtifactDir will write contents to $ARTIFACT_DIR/subDirName/filename. If subDirName is empty, contents
+// will be written to $ARTIFACT_DIR/filename
+func (f *TestFramework) WriteToArtifactDir(contents []byte, subDirName, filename string) error {
+	path := filepath.Join(artifactDir, subDirName, filename)
+	dir, _ := filepath.Split(path)
+	err := os.MkdirAll(dir, os.ModePerm)
+	if err != nil {
+		return fmt.Errorf("could not create %s: %s", dir, err)
+	}
+	return ioutil.WriteFile(path, contents, os.ModePerm)
 }

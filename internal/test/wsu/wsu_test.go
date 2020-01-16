@@ -106,6 +106,10 @@ func runWSUTestSuite(t *testing.T, vm e2ef.WindowsVM) {
 	cmd := exec.Command("ansible-playbook", "-vvv", "-i", hostFilePath, playbookPath)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, string(out))
+	logFileName := t.Name() + ".wsu.log"
+	if err = framework.WriteToArtifactDir(out, vm.GetCredentials().GetInstanceId(), logFileName); err != nil {
+		fmt.Printf("could not write %s to artifact dir: %s", logFileName, err)
+	}
 
 	// Ansible will copy files to a temporary directory with a path such as:
 	// C:\\Users\\Administrator\\AppData\\Local\\Temp\\ansible.z5wa1pc5.vhn\\
