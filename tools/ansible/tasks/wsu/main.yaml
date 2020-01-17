@@ -56,12 +56,15 @@
 - hosts: win
   vars:
     tmp_path: "{{ playbook_dir }}/tmp"
+    hybrid_overlay_exe : "hybrid-overlay.exe"
+    ovn_annotation: "{{ 'hostsubnet' if  ( cluster_version.stdout  == '4.3' ) else  'node-subnet' }}"
 
   tasks:
     - name: Create temporary directory
       win_tempfile:
         state: directory
       register: win_temp_dir
+
     - name: Copy required files to Windows host
       win_copy:
         src: "{{ hostvars['localhost']['tmp_dir']['path'] }}/"
@@ -73,16 +76,75 @@
         dest: "{{ win_temp_dir.path }}\\worker.ign"
         validate_certs: no
 
+    - name: Get kubernetes version
+      delegate_to: localhost
+      shell: "oc version -o json | jq -r '.serverVersion.minor' | tr -d +"
+      register: kubernetes_version
+
+    # This translates a kubernetes version to an OpenShift version. This works under the assumption that each OpenShift
+    # release corresponds with a kubernetes release. This is being done this way, and not with oc get clusterversion,
+    # as OpenShift CI doesn't have the actual version attached to its clusters, instead replacing it with 0.0.1 and
+    # information about the release creation date
+    - name: Get cluster version
+      delegate_to: localhost
+      shell: |
+        MINORVERSION={{ kubernetes_version.stdout }}
+        BASEK8SVERSION=16
+        BASEOPENSHIFTVERSION=3
+        if [ \"$MINORVERSION\" -lt \"$BASEK8SVERSION\" ]; then
+        echo unsupported kubernetes version; exit 1
+        fi
+        VERSIONINCREMENTS=$((MINORVERSION - BASEK8SVERSION))
+        echo 4.$((BASEOPENSHIFTVERSION + VERSIONINCREMENTS))
+        exit 0
+      register: cluster_version
+
+    # curl -s https://api.github.com/repos/openshift/windows-machine-config-operator/releases gets the list of all
+    # releases, we use the cluster version from previous ansible task to select the release we need.
+    - name: Get release
+      delegate_to: localhost
+      shell: |
+        RELEASES="$(curl -s https://api.github.com/repos/openshift/windows-machine-config-operator/releases)"
+        TAGNAME="$(echo $RELEASES | jq '.[]' | jq '.tag_name' | grep -i {{ cluster_version.stdout }} | sort -r | awk 'NR==1')"
+        echo $RELEASES | \
+        jq '.[] | select (.tag_name == '$TAGNAME')'
+      register: release
+
+    # The wmcb release tags are supposed to conform to the following semver format:
+    # v<openshift-major-version>.<openshift-minor-version>.<wmcb_build_number>-<release_type>. For example, v4.4-1-alpha.
+    # For a <openshift-major-version>.<openshift-minor-version>, there can be many wmcb builds available, for
+    # example, OpenShift 4.4 can map to v4.4.1-alpha and v4.4.2-alpha, we will always pick up the latest build available
+    # which is v4.4.2-alpha,
+    # In future, when we cut beta and GA releases, the playbook should always go for GA version when available.
+    - name: Get hybrid overlay url
+      delegate_to: localhost
+      shell: |
+        echo '{{ release.stdout }}' | \
+        jq ' .assets[] | select (.name == "{{ hybrid_overlay_exe }}" )' | \
+        jq -r .browser_download_url
+      register: hybrid_overlay_download_url
+
     - name: Get hybrid overlay exe
       win_get_url:
-        url: "https://github.com/openshift/windows-machine-config-operator/releases/download/v0.3-alpha/hybrid-overlay.exe"
+        url: "{{ hybrid_overlay_download_url.stdout }}"
         dest: "{{ win_temp_dir.path }}\\hybrid-overlay.exe"
         follow_redirects: all
 
+    # We'll get the SHA associated with the hybrid_overlay.exe in the body of the release tag.
+    - name: Get the SHA for the given binary. We assume that body of WMCB release has the info.
+      delegate_to: localhost
+      shell: |
+        echo '{{ release.stdout }}' | \
+        jq -r .body | \
+        grep -i {{ hybrid_overlay_exe }}| \
+        awk '{print $1}'
+      register: hybrid_overlay_sha
+
+    # TODO: Remove this, win_get_url already has checksum, we can use it.
     - name: Check hybrid overlay SHA256
       win_shell: "certutil -hashfile {{ win_temp_dir.path }}\\hybrid-overlay.exe sha256"
       register: hybrid_sha256
-      failed_when: "hybrid_sha256.stdout_lines[1] != 'c399a53722eccae06af49c9e8091b664ba42aa22be397bbbd86517cf2c40a16d'"
+      failed_when: "hybrid_sha256.stdout_lines[1] != hybrid_overlay_sha.stdout "
 
     - name: Run bootstrapper
       win_shell: "{{ win_temp_dir.path }}\\wmcb.exe initialize-kubelet --ignition-file {{ win_temp_dir.path }}\\worker.ign --kubelet-path {{ win_temp_dir.path }}\\kubelet.exe"
@@ -195,8 +257,15 @@
     # include hybrid overlay config
     - name: Get the subnet associated with host
       delegate_to: localhost
-      shell: "oc get nodes {{ node_name.stdout}} -o=jsonpath='{.metadata.annotations.k8s\\.ovn\\.org\\/hybrid-overlay-node-subnet}'"
+      shell: |
+        oc get nodes {{ node_name.stdout}} \
+        -o=jsonpath='{.metadata.annotations.k8s\.ovn\.org\/hybrid-overlay-{{ ovn_annotation }} }'
       register: ovn_host_subnet
+
+    - name: Check that subnet associated with host is not empty
+      fail:
+        msg: Could not find node subnet
+      when: ovn_host_subnet.stdout == ""
 
     # Get the service CIDR associated with the OpenShift network operator object. We assume that network always object
     # has atleast one entry as per defaulting at
