@@ -1,0 +1,31 @@
+{
+    "cniVersion":"0.2.0",
+    "name":"OpenShiftNetwork",
+        "type":"win-overlay",
+ "capabilities": {
+        "dns": true
+    },
+    "ipam": {
+        "type": "host-local",
+        "subnet": "{{ .OvnHostSubnet }}"
+    },
+        "policies":[
+            {
+                "name":"EndpointPolicy",
+                "value":{
+                    "Type":"OutBoundNAT",
+                    "ExceptionList":[
+                        "{{ .ServiceNetworkCIDR }}"
+                    ]
+                }
+            },
+            {
+                "name":"EndpointPolicy",
+                "value":{
+                    "Type":"ROUTE",
+                    "DestinationPrefix":"{{ .ServiceNetworkCIDR }}",
+                    "NeedEncap":true
+                }
+            }
+        ]
+}
