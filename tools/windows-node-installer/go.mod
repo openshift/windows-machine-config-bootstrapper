@@ -22,6 +22,7 @@ require (
 	github.com/gogo/protobuf v1.2.1 // indirect
 	github.com/googleapis/gnostic v0.3.1 // indirect
 	github.com/imdario/mergo v0.3.7 // indirect
+	github.com/masterzen/winrm v0.0.0-20190308153735-1d17eaf15943
 	github.com/openshift/api v3.9.1-0.20190814194116-a94e914914f4+incompatible
 	github.com/openshift/client-go v0.0.0-20190813201236-5a5508328169
 	github.com/spf13/cobra v0.0.5

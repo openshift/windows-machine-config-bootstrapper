@@ -520,7 +520,7 @@ func (az *AzureProvider) getIPAddress(ctx context.Context) (ipAddress *string, e
 }
 
 // constructAdditionalContent constructs the commands needed to be executed on first login into the Windows node.
-func constructAdditionalContent(instanceName, adminUserName, adminPassword string) *[]compute.AdditionalUnattendContent {
+func constructAdditionalContent(instanceName, adminPassword string) *[]compute.AdditionalUnattendContent {
 	// On first time Logon it will copy the custom file injected to a temporary directory
 	// on windows node, and then it will execute the steps inside the custom script
 	// which will configure winRM Https & Http listeners running on port 5986 & 5985 respectively.
@@ -546,7 +546,7 @@ func constructAdditionalContent(instanceName, adminUserName, adminPassword strin
 			"</FirstLogonCommands>"
 
 	autoLogonData := fmt.Sprintf("<AutoLogon><Domain>%s</Domain><Username>%s</Username><Password><Value>%s</Value></Password>"+
-		"<LogonCount>1</LogonCount><Enabled>true</Enabled></AutoLogon>", instanceName, adminUserName, adminPassword)
+		"<LogonCount>1</LogonCount><Enabled>true</Enabled></AutoLogon>", instanceName, winUser, adminPassword)
 	additionalContent := &[]compute.AdditionalUnattendContent{
 		{
 			// OobeSystem is a configuration setting that is applied during the end-user first boot experience, also
@@ -577,15 +577,17 @@ func constructAdditionalContent(instanceName, adminUserName, adminPassword strin
 // such as configuring remote management listeners, instance access setup.
 func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *compute.OSProfile, vmName, password string) {
 	instanceName := windowsWorker + randomString(5)
-	adminUserName := "core"
 	adminPassword := randomPasswordString(12)
-	additionalContent := constructAdditionalContent(instanceName, adminUserName, adminPassword)
+	additionalContent := constructAdditionalContent(instanceName, adminPassword)
+
 	// the data runs the script from the url location, script sets up both HTTP & HTTPS WinRM listeners so that
-	// Ansible can connect to it and run remote scripts on the windows node.
+	// ansible can connect to it and run remote scripts on the windows node. Also open firewall port number 10250.
 	data := `$url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
-        $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
-        (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
-        powershell.exe -ExecutionPolicy ByPass -File $file`
+    $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
+    (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
+    & $file
+    New-NetFirewallRule -DisplayName "` + types.FirewallRuleName + `"
+    -Direction Inbound -Action Allow -Protocol TCP -LocalPort ` + types.ContainerLogsPort + ` - EdgeTraversalPolicy Allow`
 
 	var nodeLocation string
 	if !checkForNil(az.getvnetLocation(ctx)) {
@@ -594,7 +596,7 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
 	timeZoneMap := getTimeZoneMap()
 	osProfile = &compute.OSProfile{
 		ComputerName:  to.StringPtr(instanceName),
-		AdminUsername: to.StringPtr(adminUserName),
+		AdminUsername: to.StringPtr(winUser),
 		AdminPassword: to.StringPtr(adminPassword),
 		CustomData:    to.StringPtr(base64.StdEncoding.EncodeToString([]byte(data))),
 		WindowsConfiguration: &compute.WindowsConfiguration{

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
@@ -18,7 +19,7 @@ var (
 	// Get kubeconfig, AWS credentials, and artifact dir from environment variable set by the OpenShift CI operator.
 	kubeconfig     = os.Getenv("KUBECONFIG")
 	awscredentials = os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
-	dir            = os.Getenv("ARTIFACT_DIR")
+	artifactDir    = os.Getenv("ARTIFACT_DIR")
 	privateKeyPath = os.Getenv("KUBE_SSH_KEY_PATH")
 
 	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0105f663dc99752af for
@@ -52,6 +53,7 @@ func TestAwsE2eSerial(t *testing.T) {
 
 // testCreateWindowsInstance tests the creation of a Windows instance and checks its properties and attached items.
 func testCreateWindowsInstance(t *testing.T) {
+	t.Run("test if instance status is ok", testInstanceStatusOk)
 	t.Run("test created instance properties", testInstanceProperties)
 	t.Run("test instance is attached a public subnet", testInstanceHasPublicSubnetAndIp)
 	t.Run("test instance has name tag", testInstanceIsAttachedWithName)
@@ -59,6 +61,7 @@ func testCreateWindowsInstance(t *testing.T) {
 	t.Run("test instance is attached the cluster worker's security group", testInstanceHasClusterWorkerSg)
 	t.Run("test instance is attache a Windows security group", testInstanceIsAssociatedWithWindowsWorkerSg)
 	t.Run("test instance is associated with cluster worker's IAM", testInstanceIsAssociatedWithClusterWorkerIAM)
+	t.Run("test container logs port is open in Windows firewall", testInstanceFirewallRule)
 }
 
 // testDestroyWindowsInstance tests the deletion of a Windows instance and checks if the created instance and Windows
@@ -81,7 +84,7 @@ func awsSetup(t *testing.T) {
 // This is the first step of the e2e test and fails the test upon error.
 func setupAWSCloudProvider(t *testing.T) {
 	// The e2e test uses Microsoft Windows Server 2019 Base with Containers image, m4.large type, and libra ssh key.
-	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, awscredentials, "default", dir,
+	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, awscredentials, "default", artifactDir,
 		imageID, instanceType, sshKey, privateKeyPath)
 	require.NoError(t, err, "Error obtaining aws interface object")
 
@@ -95,10 +98,12 @@ func setupAWSCloudProvider(t *testing.T) {
 // createdInstanceID, and createdSgID. All information updates are required to be successful or instance will be
 // teared down.
 func setupWindowsInstanceWithResources(t *testing.T) {
-	credentials, err := awsProvider.CreateWindowsVM()
+	var err error
+	credentials, err = awsProvider.CreateWindowsVM()
 	if err != nil {
 		tearDownInstance(t, "error creating Windows instance", err)
 	}
+	require.NoError(t, err, "failed to create the windows instance")
 
 	infraID, err = awsProvider.GetInfraID()
 	if err != nil {
@@ -109,7 +114,7 @@ func setupWindowsInstanceWithResources(t *testing.T) {
 	require.NotEmpty(t, credentials.GetInstanceId(), "Expected instanceID to be present but got empty string")
 
 	// Check instance and security group information in windows-node-installer.json.
-	info, err := resource.ReadInstallerInfo(dir + "/" + "windows-node-installer.json")
+	info, err := resource.ReadInstallerInfo(artifactDir + "/" + "windows-node-installer.json")
 	if err != nil {
 		tearDownInstance(t, "error reading from windows-node-installer.json file", err)
 	}
@@ -125,6 +130,63 @@ func setupWindowsInstanceWithResources(t *testing.T) {
 	} else {
 		tearDownInstance(t, "instance ID information is empty", err)
 	}
+}
+
+// waitForStatusok waits for the instance to be okay.
+func waitForStatusOk(instanceId string) error {
+	for i := 0; i < retryCount; i++ {
+		instanceStatus, err := getInstanceStatus(instanceId)
+		if err != nil {
+			fmt.Errorf("failed to get the status of the instance: %v", err)
+		}
+		if instanceStatus == "ok" {
+			return nil
+		}
+		time.Sleep(retryInterval)
+	}
+	return fmt.Errorf("failed to obtain the ok status")
+}
+
+// getInstanceStatus returns the status of the instance.
+func getInstanceStatus(instanceId string) (string, error) {
+	ec2Svc := awsProvider.EC2
+	input := &ec2.DescribeInstanceStatusInput{
+		DryRun:              nil,
+		Filters:             nil,
+		IncludeAllInstances: nil,
+		InstanceIds: []*string{
+			&instanceId,
+		},
+		MaxResults: nil,
+		NextToken:  nil,
+	}
+	result, err := ec2Svc.DescribeInstanceStatus(input)
+	if err != nil {
+		return "", fmt.Errorf("failed to DescribeInstanceStatus with error: %v", err)
+	}
+	if result.InstanceStatuses == nil {
+		return "", fmt.Errorf("InstanceStatuses is nil")
+	}
+
+	// currently we are creating only a single instance which is going to be the
+	// zeroth entry in it.
+	if result.InstanceStatuses[0] == nil {
+		return "", fmt.Errorf("InstanceStatuses[0] is nil")
+	}
+	if result.InstanceStatuses[0].InstanceStatus == nil {
+		return "", fmt.Errorf("windows InstanceStatus is nil")
+	}
+	if result.InstanceStatuses[0].InstanceStatus.Status == nil {
+		return "", fmt.Errorf("windows InstanceStatus.Status field is nil")
+	}
+	instanceStatus := *result.InstanceStatuses[0].InstanceStatus.Status
+	return instanceStatus, nil
+}
+
+// testInstanceStatusOk tests if instance status is ok or not.
+func testInstanceStatusOk(t *testing.T) {
+	err := waitForStatusOk(credentials.GetInstanceId())
+	require.NoErrorf(t, err, "failed to get the instance status as ok")
 }
 
 // getInstance gets the instance information from AWS based on instance ID and returns errors if fails.
@@ -341,6 +403,6 @@ func testSgIsDeleted(t *testing.T) {
 // testInstallerJsonFileIsDeleted asserts that the windows-node-installer.json is deleted.
 func testInstallerJsonFileIsDeleted(t *testing.T) {
 	// the windows-node-installer.json should be removed after resource is deleted.
-	_, err := resource.ReadInstallerInfo(dir)
+	_, err := resource.ReadInstallerInfo(artifactDir)
 	assert.Error(t, err, "error deleting windows-node-installer.json file")
 }
