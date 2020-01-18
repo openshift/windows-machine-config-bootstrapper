@@ -725,16 +725,54 @@ func (a *AwsProvider) getPublicSubnetId(infraID string, vpc *ec2.Vpc) (string, e
 		return "", err
 	}
 
+	// Get the instance offerings that support Windows instances
+	scope := "Availability Zone"
+	productDescription := "Windows"
+	f := false
+	offerings, err := a.EC2.DescribeReservedInstancesOfferings(&ec2.DescribeReservedInstancesOfferingsInput{
+		Filters: []*ec2.Filter{
+			{
+				Name:   aws.String("scope"),
+				Values: []*string{&scope},
+			},
+		},
+		IncludeMarketplace: &f,
+		InstanceType:       &a.instanceType,
+		ProductDescription: &productDescription,
+	})
+	if err != nil {
+		return "", fmt.Errorf("error checking instance offerings of %s: %v", a.instanceType, err)
+	}
+	if offerings.ReservedInstancesOfferings == nil {
+		return "", fmt.Errorf("no instance offerings returned for %s", a.instanceType)
+	}
+
 	// Finding public subnet within the vpc.
+	foundPublicSubnet := false
 	for _, subnet := range subnets.Subnets {
 		for _, tag := range subnet.Tags {
 			// TODO: find public subnet by checking igw gateway in routing.
 			if *tag.Key == "Name" && strings.Contains(*tag.Value, infraID+"-public-") {
-				return *subnet.SubnetId, nil
+				foundPublicSubnet = true
+				// Ensure that the instance type we want is supported in the zone that the subnet is in
+				for _, instanceOffering := range offerings.ReservedInstancesOfferings {
+					if instanceOffering.AvailabilityZone == nil {
+						continue
+					}
+					if *instanceOffering.AvailabilityZone == *subnet.AvailabilityZone {
+						return *subnet.SubnetId, nil
+					}
+				}
 			}
 		}
 	}
-	return "", fmt.Errorf("could not find a public subnet in VPC: %v", *vpc.VpcId)
+
+	err = fmt.Errorf("could not find a public subnet in VPC: %v", *vpc.VpcId)
+	if !foundPublicSubnet {
+		err = fmt.Errorf("could not find a public subnet in a zone that supports %s instance type",
+			a.instanceType)
+	}
+	return "", err
 }
 
 // GetInstance gets instance ec2 instance object from the given instanceID. We're making this method public

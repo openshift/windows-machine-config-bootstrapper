@@ -41,9 +41,12 @@ Available Commands:
 
 ```bash
 ./wni aws create --kubeconfig <path to OpenShift cluster>/kubeconfig --credentials <path to aws>/credentials 
---credential-account default --image-id ami-06a4e829b8bbad61e --instance-type m4.large --ssh-key <name of the 
+--credential-account default --image-id ami-06a4e829b8bbad61e --instance-type m5a.large --ssh-key <name of the 
 existing ssh keypair in aws> --private-key <private key to decrypt the aws instance password.>
 ```
+
+*Note*: Due to a bug in the Intel 82599 network adapter used in most Intel based instances that causes issues with
+overlay networks, we suggest using AMD based instances like `m5a.large`
 
 The default properties of the created instance are:
  - Instance name <OpenShift cluster\'s infrastructure ID>-windows-worker-\<zone\>-<random 4 characters string>
