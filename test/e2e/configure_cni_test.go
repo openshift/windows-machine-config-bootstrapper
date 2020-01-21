@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -31,8 +32,17 @@ func testConfigureCNIWithoutKubeletSvc(t *testing.T) {
 		t.Skip("Skipping as kubelet service already exists")
 	}
 
+	// Create a temp directory and cni.conf for use here as cni-dir and cni-config needn't be created at this point as
+	// this test is called from TestBootstrapper
+	tempDir, err := ioutil.TempDir("", "wmcb")
+	require.NoError(t, err, "could not create temp directory")
+	cniConfig, err := ioutil.TempFile(tempDir, "cni.conf")
+	require.NoError(t, err, "could not create temp CNI config")
+	// Ignore the return error as there is not much we can do if the temporary directory is not deleted
+	defer os.RemoveAll(tempDir)
+
 	// Instantiate the bootstrapper
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, "", "", cniDir, cniConfig)
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(tempDir, "", "", tempDir, cniConfig.Name())
 	require.NoError(t, err, "could not instantiate wmcb")
 
 	err = wmcb.Configure()

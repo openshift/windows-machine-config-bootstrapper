@@ -28,7 +28,15 @@ WMCB_TEST_DIR=$WMCO_ROOT/internal/test/wmcb
 # Build the unit test binary
 cd "${WMCO_ROOT}"
 make build-wmcb-unit-test
+make build-wmcb-e2e-test
 
-# Transfer the binary and run the unit tests
+
+# Set up hybrid networking on the cluster, a requirement of OVNKubernetes on Windows
+oc patch network.operator cluster --type=merge -p '{"spec":{"defaultNetwork":{"ovnKubernetesConfig":{"hybridOverlayConfig":{"hybridClusterNetwork":[{"cidr":"10.132.0.0/14","hostPrefix":23}]}}}}}'
+
+# The WMCB E2E tests requires the cluster address, we parse that here using oc
+CLUSTER_ADDR=$(oc cluster-info | head -n1 | sed 's/.*\/\/api.//g'| sed 's/:.*//g')
+
 cd "${WMCB_TEST_DIR}"
-CGO_ENABLED=0 GO111MODULE=on go test -v -run=TestWMCBUnit -binaryToBeTransferred=../../../wmcb_unit_test.exe -vmCreds="$VM_CREDS" $SKIP_VM_SETUP -timeout=30m .
+# Transfer the files and run the unit and e2e tests
+CGO_ENABLED=0 GO111MODULE=on CLUSTER_ADDR=$CLUSTER_ADDR go test -v -run=TestWMCB -filesToBeTransferred="../../../wmcb_unit_test.exe,../../../wmcb_e2e_test.exe,powershell/wget-ignore-cert.ps1" -vmCreds="$VM_CREDS" $SKIP_VM_SETUP -timeout=30m .

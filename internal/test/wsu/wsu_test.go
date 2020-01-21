@@ -26,9 +26,6 @@ import (
 var (
 	// Path of the WSU playbook
 	playbookPath = os.Getenv("WSU_PATH")
-	// clusterAddress is the address of the OpenShift cluster e.g. "foo.fah.com".
-	// This should not include "https://api-" or a port
-	clusterAddress = os.Getenv("CLUSTER_ADDR")
 
 	// Temp directory ansible created on the windows host
 	ansibleTempDir = ""
@@ -39,8 +36,6 @@ var (
 		"a9659d14b79cc46e2067f6b13e6df3f3f1b0f64"
 	// workerLabel is the worker label that needs to be applied to the Windows node
 	workerLabel = "node-role.kubernetes.io/worker"
-	// windowsLabel represents the node label that need to be applied to the Windows node created
-	windowsLabel = "node.openshift.io/os_id=Windows"
 	// hybridOverlaySubnet is an annotation applied by the cluster network operator which is used by the hybrid overlay
 	hybridOverlaySubnet = "k8s.ovn.org/hybrid-overlay-node-subnet"
 	// hybridOverlayMac is an annotation applied by the hybrid overlay
@@ -50,11 +45,6 @@ var (
 	windowsServerImage = "mcr.microsoft.com/windows/servercore:ltsc2019"
 	// ubi8Image is the name/location of the linux image we will use for testing
 	ubi8Image = "registry.access.redhat.com/ubi8/ubi:latest"
-
-	// retryCount is the amount of times we will retry an api operation
-	retryCount = 20
-	// retryInterval is the interval of time until we retry after a failure
-	retryInterval = 5 * time.Second
 	// remotePowerShellCmdPrefix holds the powershell prefix that needs to be prefixed to every command run on the
 	// remote powershell session opened
 	remotePowerShellCmdPrefix = "powershell.exe -NonInteractive -ExecutionPolicy Bypass "
@@ -75,7 +65,7 @@ ansible_user=Administrator
 cluster_address=%s
 ansible_port=5986
 ansible_connection=winrm
-ansible_winrm_server_cert_validation=ignore`, ip, password, clusterAddress))
+ansible_winrm_server_cert_validation=ignore`, ip, password, e2ef.ClusterAddress))
 	return hostFile.Name(), err
 }
 
@@ -84,7 +74,6 @@ ansible_winrm_server_cert_validation=ignore`, ip, password, clusterAddress))
 // AWS_SHARED_CREDENTIALS_FILE, ARTIFACT_DIR, KUBE_SSH_KEY_PATH, WSU_PATH, CLUSTER_ADDR
 func TestWSU(t *testing.T) {
 	require.NotEmptyf(t, playbookPath, "WSU_PATH environment variable not set")
-	require.NotEmptyf(t, clusterAddress, "CLUSTER_ADDR environment variable not set")
 
 	for _, vm := range framework.WinVMs {
 		// Run the test suite twice, to ensure that the WSU can be run multiple times against the same VM
@@ -146,7 +135,7 @@ func testCNIConfig(t *testing.T, vm e2ef.WindowsVM) {
 	require.NoError(t, err, "Could not get CNI config contents")
 
 	// Get the Windows node object
-	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
 	require.NoError(t, err, "Could not get a list of Windows nodes")
 	require.Equalf(t, len(windowsNodes.Items), vmCount, "Expected %d Windows node(s) to be present but found %v",
 		vmCount, len(windowsNodes.Items))
@@ -248,7 +237,7 @@ func testNoPendingCSRs(t *testing.T) {
 // testWorkerLabelsArePresent tests if the worker labels are present on the Windows Node.
 func testWorkerLabelsArePresent(t *testing.T) {
 	// Check if the Windows node has the required label needed.
-	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
 	assert.Equalf(t, len(windowsNodes.Items), vmCount, "expected %d Windows node(s) to be present but found %v",
 		vmCount, len(windowsNodes.Items))
@@ -267,7 +256,7 @@ func readRemoteFile(fileName string, vm e2ef.WindowsVM) (string, error) {
 
 // testHybridOverlayAnnotations tests that the correct annotations have been added to the bootstrapped node
 func testHybridOverlayAnnotations(t *testing.T) {
-	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: windowsLabel})
+	windowsNodes, err := framework.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
 	require.NoError(t, err, "Could not get list of Windows nodes")
 	assert.Equalf(t, len(windowsNodes.Items), vmCount, "expected %d Windows node(s) to be present but found %v",
 		vmCount, len(windowsNodes.Items))
@@ -354,7 +343,7 @@ func deployWindowsWebServer(vm e2ef.WindowsVM) (*appsv1.Deployment, error) {
 func waitUntilJobSucceeds(name string) error {
 	var job *batchv1.Job
 	var err error
-	for i := 0; i < retryCount; i++ {
+	for i := 0; i < e2ef.RetryCount; i++ {
 		job, err = framework.K8sclientset.BatchV1().Jobs(v1.NamespaceDefault).Get(name, metav1.GetOptions{})
 		if err != nil {
 			return err
@@ -365,7 +354,7 @@ func waitUntilJobSucceeds(name string) error {
 		if job.Status.Failed > 0 {
 			return fmt.Errorf("job %v failed", job)
 		}
-		time.Sleep(retryInterval)
+		time.Sleep(e2ef.RetryInterval)
 	}
 	return fmt.Errorf("job %v timed out", job)
 }
@@ -374,7 +363,7 @@ func waitUntilJobSucceeds(name string) error {
 func waitUntilDeploymentScaled(name string) error {
 	var deployment *appsv1.Deployment
 	var err error
-	for i := 0; i < retryCount; i++ {
+	for i := 0; i < e2ef.RetryCount; i++ {
 		deployment, err = framework.K8sclientset.AppsV1().Deployments(v1.NamespaceDefault).Get(name,
 			metav1.GetOptions{})
 		if err != nil {
@@ -383,7 +372,7 @@ func waitUntilDeploymentScaled(name string) error {
 		if *deployment.Spec.Replicas == deployment.Status.AvailableReplicas {
 			return nil
 		}
-		time.Sleep(retryInterval)
+		time.Sleep(e2ef.RetryInterval)
 	}
 	return fmt.Errorf("timed out waiting for deployment %v to scale", deployment)
 }
@@ -547,7 +536,7 @@ func testNorthSouthNetworking(t *testing.T, vm e2ef.WindowsVM) {
 
 	// Try and read from the webserver through the load balancer. The load balancer takes a fair amount of time, ~3 min,
 	// to start properly routing connections.
-	resp, err := retryGET("http://"+loadBalancer.Status.LoadBalancer.Ingress[0].Hostname, retryInterval*3)
+	resp, err := retryGET("http://"+loadBalancer.Status.LoadBalancer.Ingress[0].Hostname, e2ef.RetryInterval*3)
 	require.NoError(t, err, "Could not GET from load balancer: %v", loadBalancer)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode, "Non 200 response from webserver")
@@ -557,7 +546,7 @@ func testNorthSouthNetworking(t *testing.T, vm e2ef.WindowsVM) {
 func retryGET(url string, retryInterval time.Duration) (*http.Response, error) {
 	var resp *http.Response
 	var err error
-	for i := 0; i < retryCount; i++ {
+	for i := 0; i < e2ef.RetryCount; i++ {
 		resp, err = http.Get(url)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			return resp, nil
@@ -590,7 +579,7 @@ func createLoadBalancer(name string, selector metav1.LabelSelector) (*v1.Service
 func waitForLoadBalancerIngress(name string) (*v1.Service, error) {
 	var svc *v1.Service
 	var err error
-	for i := 0; i < retryCount; i++ {
+	for i := 0; i < e2ef.RetryCount; i++ {
 		svc, err = framework.K8sclientset.CoreV1().Services(v1.NamespaceDefault).Get(name,
 			metav1.GetOptions{})
 		if err != nil {
@@ -599,7 +588,7 @@ func waitForLoadBalancerIngress(name string) (*v1.Service, error) {
 		if len(svc.Status.LoadBalancer.Ingress) == 1 {
 			return svc, nil
 		}
-		time.Sleep(retryInterval)
+		time.Sleep(e2ef.RetryInterval)
 	}
 	return nil, fmt.Errorf("timed out waiting for single ingress: %v", svc)
 }

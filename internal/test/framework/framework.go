@@ -5,11 +5,21 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+)
+
+const (
+	// RetryCount is the amount of times we will retry an api operation
+	RetryCount = 20
+	// RetryInterval is the interval of time until we retry after a failure
+	RetryInterval = 5 * time.Second
+	// WindowsLabel represents the node label that need to be applied to the Windows node created
+	WindowsLabel = "node.openshift.io/os_id=Windows"
 )
 
 var (
@@ -21,6 +31,9 @@ var (
 	artifactDir string
 	// privateKeyPath is the path to the key that will be used to retrieve the password of each Windows VM
 	privateKeyPath string
+	// clusterAddress is the address of the OpenShift cluster e.g. "foo.fah.com".
+	// This should not include "https://api-" or a port
+	ClusterAddress string
 )
 
 // TestFramework holds the info to run the test suite.
@@ -80,6 +93,10 @@ func initCIvars() error {
 	privateKeyPath = os.Getenv("KUBE_SSH_KEY_PATH")
 	if privateKeyPath == "" {
 		return fmt.Errorf("KUBE_SSH_KEY_PATH environment variable not set")
+	}
+	ClusterAddress = os.Getenv("CLUSTER_ADDR")
+	if ClusterAddress == "" {
+		return fmt.Errorf("CLUSTER_ADDR environment variable not set")
 	}
 	return nil
 }

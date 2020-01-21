@@ -71,23 +71,8 @@ func TestBootstrapper(t *testing.T) {
 			t.Skip("Skipping as kubelet was already running before the test")
 		}
 		// Wait for kubelet log to be populated
-		time.Sleep(5 * time.Second)
+		time.Sleep(30 * time.Second)
 		assert.True(t, isKubeletRunning(t, kubeletLogPath))
-	})
-
-	// Run it again, to ensure it maintains state if the bootstrapper is already started
-	time.Sleep(5 * time.Second)
-	wmcb, err = bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "")
-	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
-	err = wmcb.InitializeKubelet()
-	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)
-	err = wmcb.Disconnect()
-	assert.NoErrorf(t, err, "Could not disconnect from windows svc API: %s", err)
-
-	t.Run("Kubelet Windows service starts after bootstrapper is run a second time", func(t *testing.T) {
-		// Wait for the service to start
-		time.Sleep(2 * time.Second)
-		assert.Truef(t, svcRunning(t, bootstrapper.KubeletServiceName), "The kubelet service is not running")
 	})
 
 	// Kubelet arguments with paths that are set by bootstrapper
