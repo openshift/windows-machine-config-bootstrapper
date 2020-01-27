@@ -96,7 +96,7 @@ func createCmd() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&awsInfo.imageID, "image-id", "",
 		"ami ID of a base image for the instance (i.e."+
-			": ami-06a4e829b8bbad61e for Microsoft Windows Server 2019 Base image on AWS) (required)")
+			": ami-06a4e829b8bbad61e for Microsoft Windows Server 2019 Base image on AWS)")
 	cmd.PersistentFlags().StringVar(&awsInfo.instanceType, "instance-type", "",
 		"name of a type of instance (i.e.: m4.large for AWS, etc) (required)")
 	cmd.PersistentFlags().StringVar(&awsInfo.sshKey, "ssh-key", "",
@@ -108,11 +108,7 @@ func createCmd() *cobra.Command {
 
 // validateCreateFlags defines required flags for createCmd.
 func validateCreateFlags(createCmd *cobra.Command) error {
-	err := createCmd.MarkPersistentFlagRequired("image-id")
-	if err != nil {
-		return err
-	}
-	err = createCmd.MarkPersistentFlagRequired("instance-type")
+	err := createCmd.MarkPersistentFlagRequired("instance-type")
 	if err != nil {
 		return err
 	}

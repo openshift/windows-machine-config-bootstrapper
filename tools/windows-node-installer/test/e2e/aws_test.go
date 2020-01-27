@@ -22,9 +22,9 @@ var (
 	artifactDir    = os.Getenv("ARTIFACT_DIR")
 	privateKeyPath = os.Getenv("KUBE_SSH_KEY_PATH")
 
-	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0105f663dc99752af for
-	// Microsoft Windows Server 2019 Base with Containers.
-	imageID      = "ami-0105f663dc99752af"
+	// imageID is the image that will be fed to the WNI for the tests. This is being set to empty, as we wish for it
+	// to use the latest Windows image
+	imageID      = ""
 	instanceType = "m4.large"
 	sshKey       = "libra"
 
@@ -66,6 +66,7 @@ func TestAwsE2eSerial(t *testing.T) {
 
 // testCreateWindowsInstance tests the creation of a Windows instance and checks its properties and attached items.
 func testCreateWindowsInstance(t *testing.T) {
+	t.Run("test proper AMI was used", testImageUsed)
 	t.Run("test if instance status is ok", testInstanceStatusOk)
 	t.Run("test created instance properties", testInstanceProperties)
 	t.Run("test instance is attached a public subnet", testInstanceHasPublicSubnetAndIp)
@@ -273,13 +274,24 @@ func tearDownInstance() error {
 	return nil
 }
 
+// testImageUsed tests that the proper Windows AMI was used
+func testImageUsed(t *testing.T) {
+	describedImages, err := awsProvider.EC2.DescribeImages(&ec2.DescribeImagesInput{
+		ImageIds: []*string{createdInstance.ImageId},
+	})
+	require.NoErrorf(t, err, "Could not describe images with imageID: %s", createdInstance.ImageId)
+	require.Lenf(t, describedImages.Images, 1, "Found unexpected amount of AMIs with imageID %s",
+		createdInstance.ImageId)
+
+	foundImage := describedImages.Images[0]
+	require.Contains(t, *foundImage.Name, "Windows_Server-2019-English-Full-ContainersLatest")
+}
+
 // testInstanceProperties updates the createdInstance global object and asserts if an instance is in the running
 // state, has the right image id, instance type, and ssh key associated.
 func testInstanceProperties(t *testing.T) {
 	assert.Equal(t, ec2.InstanceStateNameRunning, *createdInstance.State.Name,
 		"created instance is not in running state")
-
-	assert.Equalf(t, imageID, *createdInstance.ImageId, "created instance image ID mismatch")
 
 	assert.Equalf(t, instanceType, *createdInstance.InstanceType, "created instance type mismatch")
 

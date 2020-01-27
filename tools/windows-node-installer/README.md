@@ -28,7 +28,7 @@ make build-tools
 
 The `wni` requires the kubeconfig of the OpenShift cluster, a provider specific credentials file to create and 
 destroy a Windows instance on the selected provider. To create an instance, `wni` also 
-requires extra information such as image id and instance type. Some optional flags include directory path to 
+requires extra information such as the instance type. Some optional flags include directory path to
 windows-node-installer.json file and log level display. For more information please 
 visit `--help` for any commands or sub-commands.
 Available Commands:
@@ -41,7 +41,7 @@ Available Commands:
 
 ```bash
 ./wni aws create --kubeconfig <path to OpenShift cluster>/kubeconfig --credentials <path to aws>/credentials 
---credential-account default --image-id ami-06a4e829b8bbad61e --instance-type m5a.large --ssh-key <name of the 
+--credential-account default --instance-type m5a.large --ssh-key <name of the
 existing ssh keypair in aws> --private-key <private key to decrypt the aws instance password.>
 ```
 
