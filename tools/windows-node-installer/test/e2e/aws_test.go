@@ -22,9 +22,9 @@ var (
 	artifactDir    = os.Getenv("ARTIFACT_DIR")
 	privateKeyPath = os.Getenv("KUBE_SSH_KEY_PATH")
 
-	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0105f663dc99752af for
-	// Microsoft Windows Server 2019 Base with Containers.
-	imageID      = "ami-0105f663dc99752af"
+	// imageID is the image that will be fed to the WNI for the tests. This is being set to empty, as we wish for it
+	// to use the latest Windows image
+	imageID      = ""
 	instanceType = "m4.large"
 	sshKey       = "libra"
 
@@ -44,15 +44,29 @@ var (
 // TestAwsE2eSerial runs all e2e tests for the AWS implementation serially. It creates the Windows instance,
 // checks all properties of the instance and destroy the instance and check that resource are deleted.
 func TestAwsE2eSerial(t *testing.T) {
-	awsSetup(t)
+	err := awsSetup()
+	if err != nil {
+		tdErr := tearDownInstance()
+		if tdErr != nil {
+			t.Logf("error with test teardown: %s", tdErr)
+		}
+		t.Fatal(err)
+	}
 
 	t.Run("test create Windows Instance", testCreateWindowsInstance)
 
 	t.Run("test destroy Windows instance", testDestroyWindowsInstance)
+
+	// Make sure the instance is torn down in case the destroy fails
+	err = tearDownInstance()
+	if err != nil {
+		t.Logf("error with test teardown: %s", err)
+	}
 }
 
 // testCreateWindowsInstance tests the creation of a Windows instance and checks its properties and attached items.
 func testCreateWindowsInstance(t *testing.T) {
+	t.Run("test proper AMI was used", testImageUsed)
 	t.Run("test if instance status is ok", testInstanceStatusOk)
 	t.Run("test created instance properties", testInstanceProperties)
 	t.Run("test instance is attached a public subnet", testInstanceHasPublicSubnetAndIp)
@@ -70,66 +84,100 @@ func testDestroyWindowsInstance(t *testing.T) {
 	t.Run("test instance is terminated", destroyingWindowsInstance)
 	t.Run("test Windows security group is deleted", testSgIsDeleted)
 	t.Run("test installer json file is deleted", testInstallerJsonFileIsDeleted)
+
 }
 
 // awsSetup does the setup steps such as:
 // 1. Obtain the awsProvider object from the cloud factory implementation.
 // 2. Spin up the windows instance, to test properties on it.
-func awsSetup(t *testing.T) {
-	setupAWSCloudProvider(t)
-	setupWindowsInstanceWithResources(t)
+func awsSetup() error {
+	err := setupAWSCloudProvider()
+	if err != nil {
+		return err
+	}
+	err = setupWindowsInstanceWithResources()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // setupAWSCloudProvider creates provider ofr Cloud interface and asserts type into AWS provider.
 // This is the first step of the e2e test and fails the test upon error.
-func setupAWSCloudProvider(t *testing.T) {
+func setupAWSCloudProvider() error {
 	// The e2e test uses Microsoft Windows Server 2019 Base with Containers image, m4.large type, and libra ssh key.
 	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, awscredentials, "default", artifactDir,
 		imageID, instanceType, sshKey, privateKeyPath)
-	require.NoError(t, err, "Error obtaining aws interface object")
+	if err != nil {
+		return fmt.Errorf("error obtaining aws interface object: %s", err)
+	}
 
 	// Type assert to AWS so that we can test other functionality
 	provider, ok := cloud.(*awscp.AwsProvider)
-	assert.True(t, ok, "Error asserting cloudprovider to awsProvider")
+	if !ok {
+		return fmt.Errorf("error asserting cloudprovider to awsProvider")
+	}
 	awsProvider = provider
+	return nil
 }
 
 // setupWindowsInstanceWithResources creates a Windows instance and updates global information for infraID,
 // createdInstanceID, and createdSgID. All information updates are required to be successful or instance will be
 // teared down.
-func setupWindowsInstanceWithResources(t *testing.T) {
+func setupWindowsInstanceWithResources() error {
 	var err error
+	// Create the instance
 	credentials, err = awsProvider.CreateWindowsVM()
 	if err != nil {
-		tearDownInstance(t, "error creating Windows instance", err)
+		return fmt.Errorf("error creating Windows instance: %s", err)
 	}
-	require.NoError(t, err, "failed to create the windows instance")
+
+	// Ensure we have the login info for the instance
+	if credentials == nil {
+		return fmt.Errorf("returned credentials empty")
+	}
+	if credentials.GetPassword() == "" {
+		return fmt.Errorf("returned password empty")
+	}
+	if credentials.GetInstanceId() == "" {
+		return fmt.Errorf("returned instance id empty")
+	}
 
 	infraID, err = awsProvider.GetInfraID()
 	if err != nil {
-		tearDownInstance(t, "error while getting infrastructure ID for the OpenShift cluster", err)
+		return fmt.Errorf("error while getting infrastructure ID for the OpenShift cluster: %s", err)
 	}
-	require.NotEmpty(t, credentials, "Credentials returned are empty")
-	require.NotEmpty(t, credentials.GetPassword(), "Expected some password but got empty string")
-	require.NotEmpty(t, credentials.GetInstanceId(), "Expected instanceID to be present but got empty string")
 
 	// Check instance and security group information in windows-node-installer.json.
 	info, err := resource.ReadInstallerInfo(artifactDir + "/" + "windows-node-installer.json")
 	if err != nil {
-		tearDownInstance(t, "error reading from windows-node-installer.json file", err)
+		return fmt.Errorf("error reading from windows-node-installer.json file: %s", err)
 	}
 
-	if len(info.SecurityGroupIDs) > 0 && info.SecurityGroupIDs[0] != "" {
-		createdSgID = info.SecurityGroupIDs[0]
-	} else {
-		tearDownInstance(t, "security group ID information is empty", err)
+	// Set security group value
+	if len(info.SecurityGroupIDs) != 1 {
+		return fmt.Errorf("expected one security group but found %d", len(info.SecurityGroupIDs))
 	}
+	if info.SecurityGroupIDs[0] == "" {
+		return fmt.Errorf("found empty security group")
+	}
+	createdSgID = info.SecurityGroupIDs[0]
 
-	if len(info.SecurityGroupIDs) > 0 && info.SecurityGroupIDs[0] != "" {
-		createdInstanceID = info.InstanceIDs[0]
-	} else {
-		tearDownInstance(t, "instance ID information is empty", err)
+	// Set instanceID value
+	if len(info.InstanceIDs) != 1 {
+		return fmt.Errorf("expected one instance but found %d", len(info.InstanceIDs))
 	}
+	if info.InstanceIDs[0] == "" {
+		return fmt.Errorf("found empty instance id value")
+	}
+	createdInstanceID = info.InstanceIDs[0]
+
+	instance, err := getInstance(createdInstanceID)
+	if err != nil {
+		return fmt.Errorf("could not resolve instance id %s to instance: %s", createdInstanceID, err)
+	}
+	createdInstance = instance
+	return nil
 }
 
 // waitForStatusok waits for the instance to be okay.
@@ -206,45 +254,51 @@ func getInstance(instanceID string) (*ec2.Instance, error) {
 
 // tearDownInstance removes the lingering resources including instance and Windows security group when required steps of
 // the test fail.
-func tearDownInstance(t *testing.T, Msg string, terr error) {
-	t.Logf("%s, tearing down lingering resources", Msg)
-
+func tearDownInstance() error {
 	if createdInstanceID != "" {
 		err := awsProvider.TerminateInstance(createdInstanceID)
 		if err != nil {
-			t.Errorf("error terminating instance during teardown, %v", err)
+			return fmt.Errorf("error terminating instance during teardown, %v", err)
 		}
 	}
+	// Return the global variables to their original state to no longer reference the torn down instance
+	createdInstanceID = ""
+	createdInstance = &ec2.Instance{}
 
 	if createdSgID != "" {
 		err := awsProvider.DeleteSG(createdSgID)
 		if err != nil {
-			t.Errorf("error terminating instance during teardown, %v", err)
+			return fmt.Errorf("error deleting security group during teardown, %v", err)
 		}
 	}
-	assert.FailNow(t, terr.Error(), Msg)
+	return nil
+}
+
+// testImageUsed tests that the proper Windows AMI was used
+func testImageUsed(t *testing.T) {
+	describedImages, err := awsProvider.EC2.DescribeImages(&ec2.DescribeImagesInput{
+		ImageIds: []*string{createdInstance.ImageId},
+	})
+	require.NoErrorf(t, err, "Could not describe images with imageID: %s", createdInstance.ImageId)
+	require.Lenf(t, describedImages.Images, 1, "Found unexpected amount of AMIs with imageID %s",
+		createdInstance.ImageId)
+
+	foundImage := describedImages.Images[0]
+	require.Contains(t, *foundImage.Name, "Windows_Server-2019-English-Full-ContainersLatest")
 }
 
 // testInstanceProperties updates the createdInstance global object and asserts if an instance is in the running
 // state, has the right image id, instance type, and ssh key associated.
 func testInstanceProperties(t *testing.T) {
-	instance, err := getInstance(createdInstanceID)
-	if err != nil {
-		tearDownInstance(t, "error getting ec2 instance object after creation", err)
-	} else {
-		createdInstance = instance
-	}
 	assert.Equal(t, ec2.InstanceStateNameRunning, *createdInstance.State.Name,
 		"created instance is not in running state")
-
-	assert.Equalf(t, imageID, *createdInstance.ImageId, "created instance image ID mismatch")
 
 	assert.Equalf(t, instanceType, *createdInstance.InstanceType, "created instance type mismatch")
 
 	assert.Equalf(t, sshKey, *createdInstance.KeyName, "created instance ssh key mismatch")
 }
 
-// testInstanceHasPublicSubnetAndIp asserts if the instance is associated with a public IP address and  subnet by
+// testInstanceHasPublicSubnetAndIp asserts if the instance is associated with a public IP address and subnet by
 // checking if the subnet routing table has internet gateway attached.
 func testInstanceHasPublicSubnetAndIp(t *testing.T) {
 	assert.NotEmpty(t, createdInstance.PublicIpAddress, "instance does not have a public IP address")
@@ -371,16 +425,10 @@ func testInstanceIsAssociatedWithClusterWorkerIAM(t *testing.T) {
 // destroyingWindowsInstance destroys Windows instance and updates the createdInstance global object.
 func destroyingWindowsInstance(t *testing.T) {
 	err := awsProvider.DestroyWindowsVMs()
-	if err != nil {
-		tearDownInstance(t, "error destroying Windows instance", err)
-	}
+	require.NoError(t, err, "Error destroying Windows VMs")
 
 	createdInstance, err = getInstance(createdInstanceID)
-	if err != nil {
-		tearDownInstance(t, "error getting ec2 instance object after termination", err)
-	} else {
-		createdInstanceID = ""
-	}
+	require.NoError(t, err, "Error retrieving Windows VM")
 
 	assert.Equal(t, ec2.InstanceStateNameTerminated, *createdInstance.State.Name,
 		"instance is not in the terminated state")

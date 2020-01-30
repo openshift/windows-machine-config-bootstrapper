@@ -130,7 +130,15 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // resourceTrackerDir.
 // On success, the function outputs RDP access information in the commandline interface. It also returns the
 // the credentials to access the Windows VM created,
-func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, rerr error) {
+func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, err error) {
+	// If no AMI was provided, use the latest Windows AMI
+	if a.imageID == "" {
+		var err error
+		a.imageID, err = a.getLatestWindowsAMI()
+		if err != nil {
+			return nil, fmt.Errorf("could not find latest Windows AMI: %s", err)
+		}
+	}
 	// Obtains information from AWS and the existing OpenShift cluster for creating an instance.
 	infraID, err := a.GetInfraID()
 	if err != nil {
@@ -419,6 +427,47 @@ func (a *AwsProvider) createInstance(imageID, instanceType, sshKey string,
 		return nil, fmt.Errorf("failed to create an instance")
 	}
 	return runResult.Instances[0], nil
+}
+
+// getLatestWindowsAMI returns the imageid of the latest released "Windows Server with Containers" image
+func (a *AwsProvider) getLatestWindowsAMI() (string, error) {
+	// Have to create these variables, as the below functions require pointers to them
+	windowsAMIOwner := "amazon"
+	windowsAMIFilterName := "name"
+	// This filter will grab all ami's that match the exact name. The '?' indicate any character will match.
+	// The ami's will have the name format: Windows_Server-2019-English-Full-ContainersLatest-2020.01.15
+	// so the question marks will match the date of creation
+	windowsAMIFilterValue := "Windows_Server-2019-English-Full-ContainersLatest-????.??.??"
+	searchFilter := ec2.Filter{Name: &windowsAMIFilterName, Values: []*string{&windowsAMIFilterValue}}
+
+	describedImages, err := a.EC2.DescribeImages(&ec2.DescribeImagesInput{
+		Filters: []*ec2.Filter{&searchFilter},
+		Owners:  []*string{&windowsAMIOwner},
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(describedImages.Images) < 1 {
+		return "", fmt.Errorf("found zero images matching given filter: %v", searchFilter)
+	}
+
+	// Find the last created image
+	latestImage := describedImages.Images[0]
+	latestTime, err := time.Parse(time.RFC3339, *latestImage.CreationDate)
+	if err != nil {
+		return "", err
+	}
+	for _, image := range describedImages.Images[1:] {
+		newTime, err := time.Parse(time.RFC3339, *image.CreationDate)
+		if err != nil {
+			return "", err
+		}
+		if newTime.After(latestTime) {
+			latestImage = image
+			latestTime = newTime
+		}
+	}
+	return *latestImage.ImageId, nil
 }
 
 // getInfrastructureVPC gets the VPC of a given infrastructure or returns error.
