@@ -20,6 +20,9 @@ const (
 	RetryInterval = 5 * time.Second
 	// WindowsLabel represents the node label that need to be applied to the Windows node created
 	WindowsLabel = "node.openshift.io/os_id=Windows"
+
+	// awsUsername is the default windows username on AWS
+	awsUsername = "Administrator"
 )
 
 var (
@@ -64,8 +67,9 @@ func (c *Creds) Set(value string) error {
 	}
 
 	// TODO: Add input validation if we want to use this in production
+	// TODO: Change username based on cloud provider if this is to be used for clouds other than AWS
 	for i := 0; i < len(splitValue); i += 3 {
-		cred := types.NewCredentials(splitValue[i], splitValue[i+1], splitValue[i+2])
+		cred := types.NewCredentials(splitValue[i], splitValue[i+1], splitValue[i+2], awsUsername)
 		*c = append(*c, cred)
 	}
 	return nil
