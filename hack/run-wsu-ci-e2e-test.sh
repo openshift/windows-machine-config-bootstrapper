@@ -45,6 +45,7 @@ oc patch network.operator cluster --type=merge -p '{"spec":{"defaultNetwork":{"o
 # Even though the above patch will take non-zero time to apply, no delay is needed, as the WSU test suite
 # begins by creating a VM, an action which will take 4+ minutes. More than enough time for the patch to apply.
 
+sleep 5h
 # Run the test suite
 cd $TEST_DIR
 GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on CLUSTER_ADDR=$CLUSTER_ADDR WSU_PATH=$WMCO_ROOT/tools/ansible/tasks/wsu/main.yaml go test -v -vmCreds="$VM_CREDS" $SKIP_VM_SETUP -timeout 60m .
