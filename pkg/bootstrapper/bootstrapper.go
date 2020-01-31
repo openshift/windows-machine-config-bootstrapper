@@ -124,6 +124,9 @@ type winNodeBootstrapper struct {
 	svcMgr *mgr.Mgr
 	// installDir is the directory the the kubelet service will be installed
 	installDir string
+	// logDir is the directory that captures log outputs of Kubelet
+	// TODO: make this directory available in Artifacts
+	logDir string
 	// kubeletArgs is a map of the variable arguments that will be passed to the kubelet
 	kubeletArgs map[string]string
 	// cni holds all the CNI specific information
@@ -163,6 +166,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		kubeletConfPath:    filepath.Join(k8sInstallDir, "kubelet.conf"),
 		ignitionFilePath:   ignitionFile,
 		installDir:         k8sInstallDir,
+		logDir:             filepath.Join(k8sInstallDir, "log"),
 		initialKubeletPath: kubeletPath,
 		svcMgr:             svcMgr,
 		kubeletArgs:        make(map[string]string),
@@ -376,6 +380,13 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 			return fmt.Errorf("could not copy kubelet: %s", err)
 		}
 	}
+
+	// Create log directory
+	err = os.MkdirAll(wmcb.logDir, os.ModeDir)
+	if err != nil {
+		return fmt.Errorf("could not make %s directory: %v", wmcb.logDir, err)
+	}
+
 	// Populate destination directory with the files we need
 	if wmcb.ignitionFilePath != "" {
 		ignitionFileContents, err := ioutil.ReadFile(wmcb.ignitionFilePath)
@@ -406,7 +417,7 @@ func (wmcb *winNodeBootstrapper) createKubeletService() error {
 		"--cert-dir=" + certDirectory,
 		"--windows-service",
 		"--logtostderr=false",
-		"--log-file=" + filepath.Join(wmcb.installDir, "kubelet.log"),
+		"--log-file=" + filepath.Join(wmcb.logDir, "kubelet.log"),
 		// Registers the Kubelet with Windows specific taints so that linux pods won't get scheduled onto
 		// Windows nodes.
 		// TODO: Write a `against the cluster` e2e test which checks for the Windows node object created

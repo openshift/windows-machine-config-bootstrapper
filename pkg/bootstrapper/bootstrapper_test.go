@@ -516,7 +516,7 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 		kubeletCmd := "c:\\k\\kubelet.exe --config=c:\\k\\kubelet.conf" +
 			"--bootstrap-kubeconfig=c:\\k\\bootstrap-kubeconfig --kubeconfig=c:\\k\\kubeconfig " +
 			"--pod-infra-container-image=mcr.microsoft.com/k8s/core/pause:1.2.0 --cert-dir=c:/var/lib/kubelet/pki/ " +
-			"--windows-service --logtostderr=false --log-file=c:\\k\\kubelet.log " +
+			"--windows-service --logtostderr=false --log-file=c:\\k\\log\\kubelet.log " +
 			"--register-with-taints=os=Windows:NoSchedule --cloud-provider=aws --v=3"
 
 		err := cniTest.cni.updateKubeletArgs(&kubeletCmd)
@@ -528,7 +528,7 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 		kubeletCmd := "c:\\k\\kubelet.exe --config=c:\\k\\kubelet.conf" +
 			"--bootstrap-kubeconfig=c:\\k\\bootstrap-kubeconfig --kubeconfig=c:\\k\\kubeconfig " +
 			"--pod-infra-container-image=mcr.microsoft.com/k8s/core/pause:1.2.0 --cert-dir=c:/var/lib/kubelet/pki/ " +
-			"--windows-service --logtostderr=false --log-file=c:\\k\\kubelet.log " +
+			"--windows-service --logtostderr=false --log-file=c:\\k\\log\\kubelet.log " +
 			"--register-with-taints=os=Windows:NoSchedule --cloud-provider=aws --v=3 " +
 			"--resolv-conf=d:\\k\\etc\\resolv.conf--network-plugin=xyz --cni-bin-dir=d:\\k\\cni " +
 			"--cni-conf-dir=d:\\k\\cni\\config\\cni.conf"
@@ -552,8 +552,8 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 	})
 }
 
-// TestPodManifestDirCreation tests if the pod manifest directory was created
-func TestPodManifestDirCreation(t *testing.T) {
+// TestKubeletDirectoriesCreation tests if the directories needed for Kubelet are initialized as required
+func TestKubeletDirectoriesCreation(t *testing.T) {
 	// Create a temp directory with wmcb prefix
 	dir, err := ioutil.TempDir("", "wmcb")
 	require.NoError(t, err, "error creating temp directory")
@@ -561,11 +561,15 @@ func TestPodManifestDirCreation(t *testing.T) {
 	defer os.RemoveAll(dir)
 	// podManifestDirectory which has to be created by wmcb.
 	podManifestDirectory := filepath.Join(dir, "etc", "kubernetes", "manifests")
+	// logDirectory which has to be created by wmcb
+	logDirectory := filepath.Join(dir, "log")
 	wnb := winNodeBootstrapper{
 		installDir:  dir,
+		logDir:      logDirectory,
 		kubeletArgs: make(map[string]string),
 	}
 	err = wnb.initializeKubeletFiles()
 	assert.NoError(t, err, "error initializing kubelet files")
 	assert.DirExists(t, podManifestDirectory, "pod manifest directory was not created")
+	assert.DirExists(t, logDirectory, "log directory was not created")
 }
