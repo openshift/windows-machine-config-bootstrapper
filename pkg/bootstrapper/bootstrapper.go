@@ -282,6 +282,7 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 	}
 
 	// Find the kubelet systemd service specified in the ignition file and grab the variable arguments
+	// TODO: Refactor this to handle environment variables in argument values
 	for _, unit := range configuration.Systemd.Units {
 		if unit.Name != kubeletSystemdName {
 			continue
@@ -316,6 +317,11 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 		if len(results) == 2 {
 			wmcb.kubeletArgs["v"] = results[1]
 		}
+	}
+
+	// In case the verbosity argument is missing, use a default value
+	if wmcb.kubeletArgs["v"] == "" {
+		wmcb.kubeletArgs["v"] = "3"
 	}
 
 	// For each new file in the ignition file check if is a file we are interested in, if so, decode, transform,

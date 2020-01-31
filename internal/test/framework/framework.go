@@ -20,6 +20,9 @@ const (
 	RetryInterval = 5 * time.Second
 	// WindowsLabel represents the node label that need to be applied to the Windows node created
 	WindowsLabel = "node.openshift.io/os_id=Windows"
+
+	// awsUsername is the default windows username on AWS
+	awsUsername = "Administrator"
 )
 
 var (
@@ -64,8 +67,9 @@ func (c *Creds) Set(value string) error {
 	}
 
 	// TODO: Add input validation if we want to use this in production
+	// TODO: Change username based on cloud provider if this is to be used for clouds other than AWS
 	for i := 0; i < len(splitValue); i += 3 {
-		cred := types.NewCredentials(splitValue[i], splitValue[i+1], splitValue[i+2])
+		cred := types.NewCredentials(splitValue[i], splitValue[i+1], splitValue[i+2], awsUsername)
 		*c = append(*c, cred)
 	}
 	return nil
@@ -111,11 +115,6 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 		}
 		f.noTeardown = true
 	}
-	// Use Windows 2019 server image with containers in us-east1 zone for CI testing.
-	// TODO: Move to environment variable that can be fetched from the cloud provider
-	// The CI-operator uses AWS region `us-east-1` which has the corresponding image ID: ami-0105f663dc99752af for
-	// Microsoft Windows Server 2019 Base with Containers.
-	imageID := "ami-0105f663dc99752af"
 	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
 	// the Intel 82599 network driver
 	instanceType := "m5a.large"
@@ -130,7 +129,8 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 		if credentials != nil {
 			creds = credentials[i]
 		}
-		f.WinVMs[i], err = newWindowsVM(imageID, instanceType, creds, skipVMsetup)
+		// Pass an empty imageID so that WNI will use the latest Windows image
+		f.WinVMs[i], err = newWindowsVM("", instanceType, creds, skipVMsetup)
 		if err != nil {
 			return fmt.Errorf("unable to instantiate Windows VM: %v", err)
 		}
