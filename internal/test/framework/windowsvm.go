@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -48,9 +49,16 @@ type WindowsVM interface {
 	// Run executes the given command remotely on the Windows VM and returns the output of stdout and stderr. If the
 	// bool is set, it implies that the cmd is to be execute in PowerShell.
 	Run(string, bool) (string, string, error)
+	// Run executes the given command remotely on the Windows VM over a ssh connection and returns the combined output
+	// of stdout and stderr. If the bool is set, it implies that the cmd is to be execute in PowerShell. This function
+	// should be used in scenarios where you want to execute a command that runs in the background. In these cases we
+	// have observed that Run() returns before the command completes and as a result killing the process.
+	RunOverSSH(string, bool) (string, error)
 	// GetCredentials returns the interface for accessing the VM credentials. It is up to the caller to check if non-nil
 	// Credentials are returned before usage.
 	GetCredentials() *types.Credentials
+	// Reinitialize re-initializes the Windows VM. Presently only the ssh client is reinitialized.
+	Reinitialize() error
 	// Destroy destroys the Windows VM
 	Destroy() error
 }
@@ -162,8 +170,37 @@ func (w *windowsVM) Run(cmd string, psCmd bool) (string, string, error) {
 	return stdout.String(), stderr.String(), nil
 }
 
+func (w *windowsVM) RunOverSSH(cmd string, psCmd bool) (string, error) {
+	if w.sshClient == nil {
+		return "", fmt.Errorf("RunOverSSH cannot be called without a ssh client")
+	}
+
+	session, err := w.sshClient.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer session.Close()
+
+	if psCmd {
+		cmd = remotePowerShellCmdPrefix + cmd
+	}
+
+	out, err := session.CombinedOutput(cmd)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
 func (w *windowsVM) GetCredentials() *types.Credentials {
 	return w.credentials
+}
+
+func (w *windowsVM) Reinitialize() error {
+	if err := w.getSSHClient(); err != nil {
+		return fmt.Errorf("failed to reinitialize ssh client: %v", err)
+	}
+	return nil
 }
 
 func (w *windowsVM) Destroy() error {
@@ -229,6 +266,13 @@ func (w *windowsVM) configureOpenSSHServer() error {
 
 // getSSHClient gets the ssh client associated with Windows VM created
 func (w *windowsVM) getSSHClient() error {
+	if w.sshClient != nil {
+		// Close the existing client to be on the safe side
+		if err := w.sshClient.Close(); err != nil {
+			log.Printf("error closing ssh client connection: %v", err)
+		}
+	}
+
 	config := &ssh.ClientConfig{
 		User:            "Administrator",
 		Auth:            []ssh.AuthMethod{ssh.Password(w.credentials.GetPassword())},
