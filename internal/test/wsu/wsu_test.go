@@ -77,12 +77,24 @@ ansible_winrm_server_cert_validation=ignore
 func TestWSU(t *testing.T) {
 	require.NotEmptyf(t, playbookPath, "WSU_PATH environment variable not set")
 
-	t.Run("VM specific tests", func(t *testing.T) {
-		testAllVMs(t)
-	})
+	// Run the WSU before applying hybrid overlay patch, expecting it to fail with a verbose error message
+	t.Run("Expect failure when hybrid overlay is not enabled", testWithoutHybridOverlay)
+
+	// Apply the hybrid overlay patch, and run the full VM test suite for each VM
+	err := framework.ApplyHybridOverlayPatch()
+	require.NoError(t, err, "Could not apply hybrid overlay patch")
+	t.Run("VM specific tests", testAllVMs)
 
 	// Run cluster wide tests
 	t.Run("Pending CSRs were approved", testNoPendingCSRs)
+}
+
+// testWithoutHybridOverlay ensures that the WSU fails early when hybrid overlay is not enabled
+func testWithoutHybridOverlay(t *testing.T) {
+	wsuOut, err := runWSU(framework.WinVMs[0])
+	assert.NotNil(t, err, "Expected WSU to throw an error, but no error was thrown")
+	assert.Contains(t, string(wsuOut), "Cluster not patched for hybrid overlay",
+		"Expected hybrid overlay error and couldn't find one")
 }
 
 // testAllVMs runs all VM specific tests

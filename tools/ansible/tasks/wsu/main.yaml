@@ -6,9 +6,22 @@
     wmcb_exe: "wmcb.exe"
 
   tasks:
+    - name: Check if cluster is using ovn-kubernetes
+      shell: "oc get network cluster -o jsonpath='{.spec.networkType}'"
+      register: cluster_type
+      failed_when: "cluster_type.stdout != 'OVNKubernetes'"
+
+    - name: Check hybrid overlay is enabled
+      shell: "oc get network.operator cluster -o jsonpath='{.spec.defaultNetwork.ovnKubernetesConfig.hybridOverlayConfig.hybridClusterNetwork}'"
+      register: hybrid_query
+
+    - name: Fail if hybrid overlay is not enabled
+      fail:
+        msg: "Cluster not patched for hybrid overlay"
+      when: "hybrid_query.stdout == ''"
+
     - name: Gather required files
       block:
-
         - name: Create directory to store files to be used later
           tempfile:
             state: directory
