@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openshift/windows-machine-config-operator/internal/test"
 	e2ef "github.com/openshift/windows-machine-config-operator/internal/test/framework"
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
@@ -36,11 +37,8 @@ var (
 		"a9659d14b79cc46e2067f6b13e6df3f3f1b0f64"
 	// workerLabel is the worker label that needs to be applied to the Windows node
 	workerLabel = "node-role.kubernetes.io/worker"
-	// hybridOverlaySubnet is an annotation applied by the cluster network operator which is used by the hybrid overlay
-	hybridOverlaySubnet = "k8s.ovn.org/hybrid-overlay-node-subnet"
 	// hybridOverlayMac is an annotation applied by the hybrid overlay
 	hybridOverlayMac = "k8s.ovn.org/hybrid-overlay-distributed-router-gateway-mac"
-
 	// windowsServerImage is the name/location of the Windows Server 2019 image we will use to test pod deployment
 	windowsServerImage = "mcr.microsoft.com/windows/servercore:ltsc2019"
 	// ubi8Image is the name/location of the linux image we will use for testing
@@ -141,7 +139,7 @@ func testCNIConfig(t *testing.T, vm e2ef.WindowsVM) {
 		vmCount, len(windowsNodes.Items))
 
 	// By the time, we reach here the annotation should be present, so need to validate again
-	hostSubnet := windowsNodes.Items[0].Annotations[hybridOverlaySubnet]
+	hostSubnet := windowsNodes.Items[0].Annotations[test.HybridOverlaySubnet]
 	// Check if the host subnet matches our expected value
 	assert.Contains(t, cniConfigFileContents, hostSubnet, "CNI config does not contain host subnet")
 
@@ -260,7 +258,7 @@ func testHybridOverlayAnnotations(t *testing.T) {
 	require.NoError(t, err, "Could not get list of Windows nodes")
 	assert.Equalf(t, len(windowsNodes.Items), vmCount, "expected %d Windows node(s) to be present but found %v",
 		vmCount, len(windowsNodes.Items))
-	assert.Contains(t, windowsNodes.Items[0].Annotations, hybridOverlaySubnet)
+	assert.Contains(t, windowsNodes.Items[0].Annotations, test.HybridOverlaySubnet)
 	assert.Contains(t, windowsNodes.Items[0].Annotations, hybridOverlayMac)
 }
 

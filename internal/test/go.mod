@@ -11,6 +11,7 @@ replace (
 require (
 	github.com/gogo/protobuf v1.3.1 // indirect
 	github.com/golang/protobuf v1.3.3 // indirect
+	github.com/google/go-github/v29 v29.0.2
 	github.com/google/gofuzz v1.1.0 // indirect
 	github.com/googleapis/gnostic v0.4.0 // indirect
 	github.com/imdario/mergo v0.3.8 // indirect
