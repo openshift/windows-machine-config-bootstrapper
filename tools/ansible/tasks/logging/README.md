@@ -4,7 +4,7 @@ These playbooks install Fluentd on Windows Instance, in order to enable logging 
 
 Before running,
 - Set up an OpenShift cluster.
-- Set up a Windows instance as part of the cluster. You can use `wni` tool to set it up by following this [link](https://github.com/openshift/windows-machine-config-operator/tree/master/tools/windows-node-installer).
+- Set up a Windows instance as part of the cluster. You can use `wni` tool to set it up by following this [link](https://github.com/openshift/windows-machine-config-bootstrapper/tree/master/tools/windows-node-installer).
 - Ensure Ansible environment is set up to run the playbook.
 - Ensure a valid inventory file is set up.
 

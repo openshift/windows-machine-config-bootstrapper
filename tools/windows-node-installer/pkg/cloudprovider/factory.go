@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 
 	"github.com/openshift/api/config/v1"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/aws"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/client"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider/aws"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider/azure"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	"k8s.io/client-go/util/homedir"
 )
 

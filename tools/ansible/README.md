@@ -3,7 +3,7 @@
 ## Prerequisites for using these playbooks
 - Access to an OpenShift cluster
 - A Windows Server 2019 instance within the cluster's subnet, with WinRM [configured](https://docs.ansible.com/ansible/latest/user_guide/windows_setup.html#winrm-setup) for ansible
-    - You can use the [wni](https://github.com/openshift/windows-machine-config-operator/tree/master/tools/windows-node-installer) tool to create a ready Windows instance on certain cloud providers
+    - You can use the [wni](https://github.com/openshift/windows-machine-config-bootstrapper/tree/master/tools/windows-node-installer) tool to create a ready Windows instance on certain cloud providers
     - If you are using a cloud provider, you may have to add a tag to the Windows instance.
       It will be of the format `key:kubernetes.io/cluster/<infraID>` with `value: owned`.
       - You can find the infraID in the Ignition config file metadata `metadata.json`

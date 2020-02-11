@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/go-github/v29/github"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -223,7 +223,7 @@ func (f *TestFramework) getLatestGithubRelease() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 	defer cancel()
-	releases, _, err := client.Repositories.ListReleases(ctx, "openshift", "windows-machine-config-operator",
+	releases, _, err := client.Repositories.ListReleases(ctx, "openshift", "windows-machine-config-bootstrapper",
 		&github.ListOptions{})
 	if err != nil {
 		return err

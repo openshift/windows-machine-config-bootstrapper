@@ -1,6 +1,6 @@
 all: build build-tools build-wmcb-unit-test build-wmcb-e2e-test verify-all
 
-PACKAGE=github.com/openshift/windows-machine-config-operator
+PACKAGE=github.com/openshift/windows-machine-config-bootstrapper
 MAIN_PACKAGE=$(PACKAGE)/cmd/bootstrapper
 TOOLS_DIR=$(PACKAGE)/tools/windows-node-installer
 

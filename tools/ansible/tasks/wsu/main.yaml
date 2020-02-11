@@ -103,12 +103,12 @@
         exit 0
       register: cluster_version
 
-    # curl -s https://api.github.com/repos/openshift/windows-machine-config-operator/releases gets the list of all
+    # curl -s https://api.github.com/repos/openshift/windows-machine-config-bootstrapper/releases gets the list of all
     # releases, we use the cluster version from previous ansible task to select the release we need.
     - name: Get release
       delegate_to: localhost
       shell: |
-        RELEASES="$(curl -s https://api.github.com/repos/openshift/windows-machine-config-operator/releases)"
+        RELEASES="$(curl -s https://api.github.com/repos/openshift/windows-machine-config-bootstrapper/releases)"
         TAGNAME="$(echo $RELEASES | jq '.[]' | jq '.tag_name' | grep -i {{ cluster_version.stdout }} | sort -r | awk 'NR==1')"
         echo $RELEASES | \
         jq '.[] | select (.tag_name == '$TAGNAME')'

@@ -3,7 +3,7 @@
 
 FROM centos:centos8
 
-WORKDIR /go/src/github.com/openshift/windows-machine-config-operator/
+WORKDIR /go/src/github.com/openshift/windows-machine-config-bootstrapper/
 
 COPY . .
 

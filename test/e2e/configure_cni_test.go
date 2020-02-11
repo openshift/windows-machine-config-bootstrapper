@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openshift/windows-machine-config-operator/pkg/bootstrapper"
+	"github.com/openshift/windows-machine-config-bootstrapper/pkg/bootstrapper"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

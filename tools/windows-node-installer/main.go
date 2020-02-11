@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/cmd"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/cmd"
 )
 
 // main is the entry point for windows-node-installer.

@@ -2,7 +2,7 @@ package wsu
 
 import (
 	"flag"
-	e2ef "github.com/openshift/windows-machine-config-operator/internal/test/framework"
+	e2ef "github.com/openshift/windows-machine-config-bootstrapper/internal/test/framework"
 	"log"
 	"os"
 	"testing"

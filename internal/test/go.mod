@@ -1,4 +1,4 @@
-module github.com/openshift/windows-machine-config-operator/internal/test
+module github.com/openshift/windows-machine-config-bootstrapper/internal/test
 
 go 1.12
 
@@ -19,7 +19,7 @@ require (
 	github.com/masterzen/winrm v0.0.0-20190308153735-1d17eaf15943
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/openshift/client-go v0.0.0-20190813201236-5a5508328169
-	github.com/openshift/windows-machine-config-operator/tools/windows-node-installer v0.0.0-20200130180731-c1f47e5c73f3
+	github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200130180731-c1f47e5c73f3
 	github.com/pkg/sftp v1.10.1
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/testify v1.4.0

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openshift/windows-machine-config-operator/internal/test"
-	e2ef "github.com/openshift/windows-machine-config-operator/internal/test/framework"
+	"github.com/openshift/windows-machine-config-bootstrapper/internal/test"
+	e2ef "github.com/openshift/windows-machine-config-bootstrapper/internal/test/framework"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"

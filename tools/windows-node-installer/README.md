@@ -2,7 +2,7 @@
 The `windows-node-installer (wni)` is a tool that creates a Windows instance under the same virtual network 
 (AWS-VCP, Azure-Vnet, and etc.) used by a given OpenShift cluster running on the selected provider.
 The actual configuration on the created Windows instance is done by the 
-[WMCB](https://github.com/openshift/windows-machine-config-operator) to ensure that the instance joins the
+[WMCB](https://github.com/openshift/windows-machine-config-bootstrapper) to ensure that the instance joins the
 OpenShift cluster as a Windows worker node.
 
 ### Supported Platforms
@@ -19,8 +19,8 @@ OpenShift cluster as a Windows worker node.
 ## Getting Started
 Install:
 ```bash
-git clone https://github.com/openshift/windows-machine-config-operator.git
-cd windows-machine-config-operator
+git clone https://github.com/openshift/windows-machine-config-bootstrapper.git
+cd windows-machine-config-bootstrapper
 make build-tools
 ```
 
