@@ -31,6 +31,8 @@ func TestMain(m *testing.M) {
 		log.Fatal(err)
 	}
 	testStatus := m.Run()
+	// Retrieve artifacts after running the test
+	framework.RetrieveArtifacts()
 	// TODO: Add one more check to remove lingering cloud resources
 	framework.TearDown()
 	os.Exit(testStatus)

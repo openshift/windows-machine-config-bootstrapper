@@ -3,6 +3,7 @@ package wsu
 import (
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -98,24 +99,36 @@ func testAllVMs(t *testing.T) {
 func setupAndTest(t *testing.T, vmNum int) {
 	// Indicate that we can run the test suite on each node in parallel
 	t.Parallel()
-
+	vm := framework.WinVMs[vmNum]
 	// Run the WSU against the VM
-	wsuOut, err := runWSU(framework.WinVMs[vmNum])
-	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, wsuOut)
-
+	wsuOut, err := runWSU(vm)
+	wsuStringOutput := string(wsuOut)
+	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, wsuStringOutput)
+	// TODO: Think of a better way to refactor this function later to get just output that can be consumed by framework.
+	logFileName := t.Name() + "wsu.log"
+	externalIP := vm.GetCredentials().GetIPAddress()
+	nodeName, err := framework.GetNodeName(externalIP)
+	if err != nil {
+		log.Printf("could not node name associated with the vm %s\n", vm.GetCredentials().GetInstanceId())
+	}
+	require.NoErrorf(t, err, "Error getting node associated with vm %s", vm.GetCredentials().GetInstanceId())
+	localLogDirLocation := filepath.Join("nodes", nodeName, "logs")
+	if err = framework.WriteToArtifactDir(wsuOut, localLogDirLocation, logFileName); err != nil {
+		log.Printf("could not write %s to artifact dir: %s\n", logFileName, err)
+	}
 	// Run our VM test suite
-	runTest(t, framework.WinVMs[vmNum], wsuOut)
+	runTest(t, vm, wsuStringOutput)
 }
 
 // runWSU runs the WSU playbook against a VM. Returns WSU stdout
-func runWSU(vm e2ef.WindowsVM) (string, error) {
+func runWSU(vm e2ef.WindowsVM) ([]byte, error) {
 	var ansibleCmd *exec.Cmd
 
 	// In order to run the ansible playbook we create an inventory file:
 	// https://docs.ansible.com/ansible/latest/user_guide/intro_inventory.html
 	hostFilePath, err := createHostFile([]e2ef.WindowsVM{vm})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	// Run the WSU against the VM
@@ -123,7 +136,7 @@ func runWSU(vm e2ef.WindowsVM) (string, error) {
 
 	// Run the playbook
 	wsuOut, err := ansibleCmd.CombinedOutput()
-	return string(wsuOut), err
+	return wsuOut, err
 }
 
 // testVM runs the WSU against the given VM and runs the e2e test suite against that VM as well
