@@ -41,6 +41,8 @@ const (
 	// sshPort to access the OpenSSH server installed on the windows node. This is needed
 	// for our CI testing.
 	sshPort = 22
+	//RDP port for requests
+	rdpPort = 3389
 )
 
 // Constant value
@@ -386,7 +388,7 @@ func (a *AwsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkI
 	if err != nil {
 		return nil, fmt.Errorf("failed to get a Public subnet, %v", err)
 	}
-	sgID, err := a.findOrCreateSg(infraID, vpc)
+	sgID, err := a.handleSg(infraID, vpc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Windows worker security group, %v", err)
 	}
@@ -477,188 +479,43 @@ func (a *AwsProvider) getInfrastructureVPC(infraID string) (*ec2.Vpc, error) {
 	return vpc, nil
 }
 
-// findOrCreateSg tries to find Windows security group for RDP into windows instance and allow all traffic within the
-// VPC. If no such security group exists, it creates a security group under the VPC with a group name
-// '<infraID>-windows-worker-sg'.
+// handleSg handles the Windows security group activities like finding, creating, verifying sg and updating them for
+// WinRM, SSH and RDP access for Windows instance and allow all traffic within the VPC. If no such security group exists,
+// it creates a security group under the VPC with a group name '<infraID>-windows-worker-sg'. It then verifies if the sg
+// contains all the rules required for RDP and updates them.
 // The function returns security group ID or error for both finding or creating a security group.
-func (a *AwsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, error) {
-	sgID, err := a.findWindowsWorkerSg(infraID)
-	if err != nil {
-		return a.createWindowsWorkerSg(infraID, vpc)
-	}
-
-	log.Printf("Using existing Security Group: %s.", sgID)
-
-	// Check winrm port open status for the existing security group
-	iswinrmPortOpen, err := a.IsPortOpen(sgID, WINRM_PORT)
-	if err != nil {
-		return "", err
-	}
-	// TODO: Add a map so that we can have a specific protocol to port mapping.
-	// Add winrm port to security group if it doesn't exist
-	if !iswinrmPortOpen {
-		err := a.addPortToSg(sgID, WINRM_PORT)
-		if err != nil {
-			return "", err
-		}
-		log.Printf("Winrm port is now added to Security Group %s", sgID)
-	} else {
-		log.Printf("Winrm port already opened for Security Group: %s.", sgID)
-	}
-
-	// Check if ssh port is open
-	isSSHPortOpen, err := a.IsPortOpen(sgID, sshPort)
-	if err != nil {
-		return "", err
-	}
-
-	// Add ssh port to security group if it doesn't exist
-	if !isSSHPortOpen {
-		err := a.addPortToSg(sgID, sshPort)
-		if err != nil {
-			return "", err
-		}
-		log.Printf("ssh port is now added to Security Group %s", sgID)
-	} else {
-		log.Printf("ssh port already opened for Security Group: %s.", sgID)
-	}
-
-	return sgID, nil
-}
-
-// IsPort checks whether the given port is open in the given security group.
-// Return boolean for the checking result.
-func (a *AwsProvider) IsPortOpen(sgId string, port int64) (bool, error) {
-	// Get security group information
-	SgResult, err := a.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
-		GroupIds: []*string{
-			aws.String(sgId),
-		},
-	})
-	if err != nil {
-		return false, err
-	}
-
-	// Search winrm port in the inbound rule of the security group
-	for _, rule := range SgResult.SecurityGroups[0].IpPermissions {
-		if (rule.FromPort != nil && *rule.FromPort == port) && (rule.ToPort != nil && *rule.ToPort == port) {
-			return true, nil
-		}
-	}
-	log.Printf("Given port %v is not open for Security Group: %s.", port, sgId)
-	return false, nil
-}
-
-// addPortToSg adds the given port to the given security group.
-func (a *AwsProvider) addPortToSg(sgId string, port int64) error {
+func (a *AwsProvider) handleSg(infraID string, vpc *ec2.Vpc) (string, error) {
 	myIP, err := GetMyIp()
 	if err != nil {
-		return err
+		return "", fmt.Errorf("error getting IP: %s", err)
+	}
+	sg, err := a.findWindowsWorkerSg(infraID)
+	if err != nil {
+		createdSG, err := a.createWindowsWorkerSg(infraID, vpc)
+		if err != nil {
+			return "", fmt.Errorf("error creating new security group: %s", err)
+		}
+		err = resource.AppendInstallerInfo([]string{}, []string{*createdSG.GroupId}, a.resourceTrackerDir)
+		if err != nil {
+			return "", fmt.Errorf("failed to record security group ID to file at '%s',"+
+				"security group will not be deleted, %v", a.resourceTrackerDir, err)
+		}
+		// Get sg of type *ec2.securityGroup using the GroupId of newly created sg(type *ec2.CreateSecurityGroupOutput).
+		// This newly created sg will have unpopulated fields.
+		sg = &ec2.SecurityGroup{GroupId: createdSG.GroupId}
 	}
 
-	// Add winrm https port to security group
-	log.Printf("Adding winrm https port to Security Group %s", sgId)
-	_, err = a.EC2.AuthorizeSecurityGroupIngress(&ec2.AuthorizeSecurityGroupIngressInput{
-		GroupId: aws.String(sgId),
-		IpPermissions: []*ec2.IpPermission{
-			(&ec2.IpPermission{}).
-				SetIpProtocol("tcp").
-				SetFromPort(port).
-				SetToPort(port).
-				SetIpRanges([]*ec2.IpRange{
-					(&ec2.IpRange{}).
-						SetCidrIp(myIP + "/32"),
-				}),
-		},
-	})
-	if err != nil {
-		return err
-	}
-	return nil
-}
+	// Once we have found or created the security group, we can check if there are any rules to be
+	// updated in the sg and update them.
+	_, err = a.verifyAndUpdateSg(myIP, sg, vpc)
 
-// findWindowsWorkerSg creates the Windows worker security group with name <infraID>-windows-worker-sg.
-func (a *AwsProvider) createWindowsWorkerSg(infraID string, vpc *ec2.Vpc) (string, error) {
-	sgName := strings.Join([]string{infraID, "windows", "worker", "sg"}, "-")
-	sg, err := a.EC2.CreateSecurityGroup(&ec2.CreateSecurityGroupInput{
-		GroupName:   aws.String(sgName),
-		Description: aws.String("security group for RDP, winrm, ssh and all traffic within VPC"),
-		VpcId:       vpc.VpcId,
-	})
-	if err != nil {
-		return "", err
-	}
-
-	err = a.authorizeSgIngress(*sg.GroupId, vpc)
-	if err != nil {
-		return "", err
-	}
-
-	err = resource.AppendInstallerInfo([]string{}, []string{*sg.GroupId}, a.resourceTrackerDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to record security group ID to file at '%s',"+
-			"security group will not be deleted, %v", a.resourceTrackerDir, err)
-	}
+	log.Printf(fmt.Sprintf("Using existing Security Group: %s", *sg.GroupId))
 
 	return *sg.GroupId, nil
 }
 
-// authorizeSgIngress attaches inbound rules for RDP from user's external IP address and all traffic within the VPC
-// on newly created security group for Windows instance. The function returns error if failed.
-func (a *AwsProvider) authorizeSgIngress(sgID string, vpc *ec2.Vpc) error {
-	myIP, err := GetMyIp()
-	if err != nil {
-		return err
-	}
-
-	_, err = a.EC2.AuthorizeSecurityGroupIngress(&ec2.AuthorizeSecurityGroupIngressInput{
-		GroupId: aws.String(sgID),
-		IpPermissions: []*ec2.IpPermission{
-			(&ec2.IpPermission{}).
-				// -1 is to allow all ports.
-				SetIpProtocol("-1").
-				SetIpRanges([]*ec2.IpRange{
-					(&ec2.IpRange{}).
-						SetCidrIp(*vpc.CidrBlock),
-				}),
-			(&ec2.IpPermission{}).
-				SetIpProtocol("tcp").
-				SetFromPort(3389).
-				SetToPort(3389).
-				SetIpRanges([]*ec2.IpRange{
-					(&ec2.IpRange{}).
-						SetCidrIp(myIP + "/32"),
-				}),
-			(&ec2.IpPermission{}).
-				SetIpProtocol("tcp").
-				// winrm ansible https port
-				SetFromPort(WINRM_PORT).
-				SetToPort(WINRM_PORT).
-				SetIpRanges([]*ec2.IpRange{
-					(&ec2.IpRange{}).
-						SetCidrIp(myIP + "/32"),
-				}),
-			(&ec2.IpPermission{}).
-				SetIpProtocol("tcp").
-				// SSH port to be opened for
-				// TODO: add validation to check if the port is already opened, inform the user
-				// of the same and this should be a no-op
-				SetFromPort(sshPort).
-				SetToPort(sshPort).
-				SetIpRanges([]*ec2.IpRange{
-					(&ec2.IpRange{}).
-						SetCidrIp(myIP + "/32"),
-				}),
-		},
-	})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // findWindowsWorkerSg finds the Windows worker security group based on security group name <infraID>-windows-worker-sg.
-func (a *AwsProvider) findWindowsWorkerSg(infraID string) (string, error) {
+func (a *AwsProvider) findWindowsWorkerSg(infraID string) (*ec2.SecurityGroup, error) {
 	sgName := strings.Join([]string{infraID, "windows", "worker", "sg"}, "-")
 	sgs, err := a.EC2.DescribeSecurityGroups(&ec2.DescribeSecurityGroupsInput{
 		Filters: []*ec2.Filter{
@@ -669,9 +526,132 @@ func (a *AwsProvider) findWindowsWorkerSg(infraID string) (string, error) {
 		},
 	})
 	if err != nil || len(sgs.SecurityGroups) == 0 {
-		return "", fmt.Errorf("worker security group not found, %v", err)
+		return nil, fmt.Errorf("worker security group not found, %v", err)
 	}
-	return *sgs.SecurityGroups[0].GroupId, nil
+
+	return sgs.SecurityGroups[0], nil
+}
+
+// createWindowsWorkerSg creates the Windows worker security group with name <infraID>-windows-worker-sg.
+func (a *AwsProvider) createWindowsWorkerSg(infraID string, vpc *ec2.Vpc) (*ec2.CreateSecurityGroupOutput, error) {
+	sgName := strings.Join([]string{infraID, "windows", "worker", "sg"}, "-")
+	sg, err := a.EC2.CreateSecurityGroup(&ec2.CreateSecurityGroupInput{
+		GroupName:   aws.String(sgName),
+		Description: aws.String("security group for RDP, winrm, ssh and all traffic within VPC"),
+		VpcId:       vpc.VpcId,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return sg, nil
+}
+
+// verifyAndUpdateSg verifies if an update is required to the rules in existing sg, or adding all the rules if the sg
+// is new. These rules are updated in the sg using addIngressRules. Returns error if rules
+// to be updated cannot be returned or  cannot be updated.
+func (a *AwsProvider) verifyAndUpdateSg(myIP string, sg *ec2.SecurityGroup, vpc *ec2.Vpc) ([]*ec2.IpPermission, error) {
+
+	// Get the list of rules to be updated, returns empty list is there are no rules to be updated
+	rules := a.GetRulesForSgUpdate(myIP, sg.IpPermissions, *vpc.CidrBlock)
+
+	// call addIngressRules() only if there are any rules returned from GetRulesForSgUpdate()
+	if len(rules) != 0 {
+		err := a.addIngressRules(*sg.GroupId, rules)
+		if err != nil {
+			return nil, fmt.Errorf("could not set rules in sg %s: %s", *sg.GroupId, err)
+		}
+	}
+	return rules, nil
+}
+
+// GetRulesForSgUpdate returns a list of rules which are required to be updated in sg with local IP. If there are no
+// rules to be updated it returns an empty slice. This serves as an input to addIngressRules function.
+func (a *AwsProvider) GetRulesForSgUpdate(myIP string, rules []*ec2.IpPermission, vpcCidr string) []*ec2.IpPermission {
+	rulesForUpdate := make([]*ec2.IpPermission, 0)
+
+	ports, hasClusterCidrRule := examineRulesInSg(myIP, rules, vpcCidr)
+
+	// If ClusterCidrRule is missing, add default rule with IpProtocol value "-1"
+	if !hasClusterCidrRule {
+		rulesForUpdate = append(rulesForUpdate,
+			(&ec2.IpPermission{}).
+				// -1 is to allow all ports.
+				SetIpProtocol("-1").
+				SetIpRanges([]*ec2.IpRange{
+					(&ec2.IpRange{}).
+						SetCidrIp(vpcCidr),
+				}))
+	}
+
+	// create a list of rules to be updated in sg
+	rulesForUpdate = append(rulesForUpdate, createRulesFromPorts(ports, myIP)...)
+	return rulesForUpdate
+}
+
+// Create a set of rules to be added in sg given the input ports, helps in creating an appended list of all rules
+func createRulesFromPorts(ports []int64, myIP string) []*ec2.IpPermission {
+	populatedRules := make([]*ec2.IpPermission, 0)
+	for _, port := range ports {
+		populatedRules = append(populatedRules,
+			(&ec2.IpPermission{}).
+				SetIpProtocol("tcp").
+				SetFromPort(port).
+				SetToPort(port).
+				SetIpRanges([]*ec2.IpRange{
+					(&ec2.IpRange{}).
+						SetCidrIp(myIP + "/32"),
+				}))
+		log.Printf(fmt.Sprintf("Added rule with port %d to the security groups of your local IP \n", port))
+	}
+	return populatedRules
+}
+
+// examineRulesInSg returns a list of ports which need to be updated in the rules for local IP and a flag indicating
+// whether or not the rule with IP protocol "-1" which allows communication within the cluster is present in the rule
+// set.
+func examineRulesInSg(myIP string, rules []*ec2.IpPermission, vpcCidr string) ([]int64, bool) {
+	var ports []int64
+	var hasClusterCIDRRule bool
+	portTracker := map[int64]bool{}
+	// Loop through the rules, then loop through the ips to get a map of ports
+	if rules != nil {
+		for _, rule := range rules {
+			for _, ips := range rule.IpRanges {
+				if *ips.CidrIp == myIP+"/32" {
+					portTracker[*rule.FromPort] = true
+				}
+				if *ips.CidrIp == vpcCidr && *rule.IpProtocol == "-1" {
+					hasClusterCIDRRule = true
+				}
+			}
+		}
+	}
+	// Add ports that need to be updated in a slice ports
+	if !portTracker[WINRM_PORT] {
+		ports = append(ports, WINRM_PORT)
+	}
+	if !portTracker[sshPort] {
+		ports = append(ports, sshPort)
+	}
+	if !portTracker[rdpPort] {
+		ports = append(ports, rdpPort)
+	}
+	return ports, hasClusterCIDRRule
+}
+
+// addIngressRules makes the call to the AWS AuthorizeSecurityGroupIngress to attach inbound rules for RDP from user's
+// external IP address and all traffic within the VPC  on newly created security group for Windows instance.
+// The function returns error if failed.
+func (a *AwsProvider) addIngressRules(sgID string, rules []*ec2.IpPermission) error {
+	_, err := a.EC2.AuthorizeSecurityGroupIngress(&ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId:       aws.String(sgID),
+		IpPermissions: rules,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // GetMyIp get the external IP of user's machine from https://checkip.amazonaws.com and returns an address or an error.
