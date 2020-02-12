@@ -29,8 +29,7 @@ make build-tools
 The `wni` requires the kubeconfig of the OpenShift cluster, a provider specific credentials file to create and 
 destroy a Windows instance on the selected provider. To create an instance, `wni` also 
 requires extra information such as the instance type. Some optional flags include directory path to
-windows-node-installer.json file and log level display. For more information please 
-visit `--help` for any commands or sub-commands.
+windows-node-installer.json file. For more information please use `--help` for any commands or sub-commands.
 Available Commands:
   aws         Create and destroy windows instances in aws
   azure       Create and destroy windows instances in azure
