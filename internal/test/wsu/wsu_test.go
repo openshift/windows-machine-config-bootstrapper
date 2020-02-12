@@ -89,35 +89,52 @@ func TestWSU(t *testing.T) {
 func testAllVMs(t *testing.T) {
 	for i := range framework.WinVMs {
 		t.Run("VM "+strconv.Itoa(i), func(t *testing.T) {
-			setupAndTest(t, i)
+			runTests(t, framework.WinVMs[i])
 		})
 	}
 
 }
 
-// setupAndTest runs the WSU and runs tests against the setup node
-func setupAndTest(t *testing.T, vmNum int) {
+// runTests runs all the tests required for a specific VM
+func runTests(t *testing.T, vm e2ef.WindowsVM) {
 	// Indicate that we can run the test suite on each node in parallel
 	t.Parallel()
-	vm := framework.WinVMs[vmNum]
+
+	runWSUAndTest(t, vm)
+	//Run the test suite again, to ensure that the WSU can be run multiple times against the same VM
+	t.Run("Run the WSU against the same VM again", func(t *testing.T) {
+		runWSUAndTest(t, vm)
+	})
+}
+
+// runWSUAndTest runs the WSU and runs tests against the setup node
+func runWSUAndTest(t *testing.T, vm e2ef.WindowsVM) {
+	// TODO: Think of a better way to refactor this function later to get just output that can be consumed by framework.
 	// Run the WSU against the VM
 	wsuOut, err := runWSU(vm)
 	wsuStringOutput := string(wsuOut)
 	require.NoError(t, err, "WSU playbook returned error: %s, with output: %s", err, wsuStringOutput)
-	// TODO: Think of a better way to refactor this function later to get just output that can be consumed by framework.
-	logFileName := t.Name() + "wsu.log"
+
+	// Capture the WSU logs
+	captureWSULogs(wsuOut, vm, t.Name()+"wsu.log")
+
+	// Run our VM test suite
+	runE2ETestSuite(t, vm, wsuStringOutput)
+}
+
+// captureWSULogs saves the WSU logs to the artifact directory
+func captureWSULogs(wsuOut []byte, vm e2ef.WindowsVM, logFileName string) {
 	externalIP := vm.GetCredentials().GetIPAddress()
 	nodeName, err := framework.GetNodeName(externalIP)
 	if err != nil {
-		log.Printf("could not node name associated with the vm %s\n", vm.GetCredentials().GetInstanceId())
+		log.Printf("could not get the node name associated with the vm %s. "+
+			"WSU logs for this vm will not be written to the artifact directory\n", vm.GetCredentials().GetInstanceId())
+		return
 	}
-	require.NoErrorf(t, err, "Error getting node associated with vm %s", vm.GetCredentials().GetInstanceId())
 	localLogDirLocation := filepath.Join("nodes", nodeName, "logs")
 	if err = framework.WriteToArtifactDir(wsuOut, localLogDirLocation, logFileName); err != nil {
 		log.Printf("could not write %s to artifact dir: %s\n", logFileName, err)
 	}
-	// Run our VM test suite
-	runTest(t, vm, wsuStringOutput)
 }
 
 // runWSU runs the WSU playbook against a VM. Returns WSU stdout
@@ -137,17 +154,6 @@ func runWSU(vm e2ef.WindowsVM) ([]byte, error) {
 	// Run the playbook
 	wsuOut, err := ansibleCmd.CombinedOutput()
 	return wsuOut, err
-}
-
-// testVM runs the WSU against the given VM and runs the e2e test suite against that VM as well
-func runTest(t *testing.T, vm e2ef.WindowsVM, wsuOut string) {
-	// Run the test suite
-	runE2ETestSuite(t, vm, wsuOut)
-
-	//Run the test suite again, to ensure that the WSU can be run multiple times against the same VM
-	t.Run("Run the WSU against the same VM again", func(t *testing.T) {
-		runE2ETestSuite(t, vm, wsuOut)
-	})
 }
 
 // getAnsibleTempDirPath returns the path of the ansible temp directory on the remote VM
