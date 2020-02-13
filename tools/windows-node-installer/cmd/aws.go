@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider"
 	"github.com/spf13/cobra"
 )
 

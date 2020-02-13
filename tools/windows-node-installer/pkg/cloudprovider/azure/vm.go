@@ -19,9 +19,9 @@ import (
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/Azure/go-autorest/autorest/to"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/client"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 

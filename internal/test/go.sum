@@ -132,8 +132,8 @@ github.com/openshift/api v3.9.1-0.20190814194116-a94e914914f4+incompatible h1:3n
 github.com/openshift/api v3.9.1-0.20190814194116-a94e914914f4+incompatible/go.mod h1:dh9o4Fs58gpFXGSYfnVxGR9PnV53I8TW84pQaJDdGiY=
 github.com/openshift/client-go v0.0.0-20190813201236-5a5508328169 h1:rQZe9w0+xEmsJ7sqWrDLji/9vuMqjamMrhwVkKVGIqc=
 github.com/openshift/client-go v0.0.0-20190813201236-5a5508328169/go.mod h1:6rzn+JTr7+WYS2E1TExP4gByoABxMznR6y2SnUIkmxk=
-github.com/openshift/windows-machine-config-operator/tools/windows-node-installer v0.0.0-20200130180731-c1f47e5c73f3 h1:MBiNYmWuo34DpDDVAUjFaFAwIqe4LAE6KjZYBOOoMds=
-github.com/openshift/windows-machine-config-operator/tools/windows-node-installer v0.0.0-20200130180731-c1f47e5c73f3/go.mod h1:zUtCq4uKnmVcXY4k4G70jYj/I8FMa3LaOX5DCTCztfc=
+github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200130180731-c1f47e5c73f3 h1:MBiNYmWuo34DpDDVAUjFaFAwIqe4LAE6KjZYBOOoMds=
+github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200130180731-c1f47e5c73f3/go.mod h1:zUtCq4uKnmVcXY4k4G70jYj/I8FMa3LaOX5DCTCztfc=
 github.com/pborman/uuid v0.0.0-20170612153648-e790cca94e6c/go.mod h1:VyrYX9gd7irzKovcSS6BIIEwPRkP2Wm2m9ufcdFSJ34=
 github.com/pelletier/go-toml v1.2.0/go.mod h1:5z9KED0ma1S8pY6P1sdut58dfprrGBbd/94hg7ilaic=
 github.com/pkg/errors v0.8.1 h1:iURUrRGxPUNPdy5/HRSm+Yj6okJ6UtLINN0Q9M4+h3I=

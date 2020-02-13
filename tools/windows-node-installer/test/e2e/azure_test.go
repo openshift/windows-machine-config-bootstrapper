@@ -18,10 +18,10 @@ import (
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-04-01/network"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/client"
-	wniAzure "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/client"
+	wniAzure "github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider/azure"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 )
 
 const (

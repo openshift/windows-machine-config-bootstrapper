@@ -8,9 +8,9 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider"
-	awscp "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/aws"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/resource"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider"
+	awscp "github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider/aws"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

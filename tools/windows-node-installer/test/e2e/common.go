@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/masterzen/winrm"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
 )
 

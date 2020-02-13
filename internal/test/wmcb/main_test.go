@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	e2ef "github.com/openshift/windows-machine-config-operator/internal/test/framework"
+	e2ef "github.com/openshift/windows-machine-config-bootstrapper/internal/test/framework"
 )
 
 // framework holds the instantiation of test suite being executed. As of now, temp dir is hardcoded.

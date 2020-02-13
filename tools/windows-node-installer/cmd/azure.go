@@ -5,8 +5,8 @@ import (
 	"os"
 
 	"github.com/Azure/go-autorest/autorest/azure/auth"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider"
-	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/cloudprovider/azure"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider/azure"
 	"github.com/spf13/cobra"
 )
 

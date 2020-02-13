@@ -13,7 +13,7 @@ environment, and other resources to help get contributions into the project.
 
 If any part of the project has bugs or documentation mistakes, please let us know by opening a
 [Jira issue](https://jira.coreos.com/projects/WINC/summary) (Red Hat internal) or a
-[GitHub issue](https://github.com/openshift/windows-machine-config-operator/issues/new) (external users) or a PR.
+[GitHub issue](https://github.com/openshift/windows-machine-config-bootstrapper/issues/new) (external users) or a PR.
 
 ## Contribution flow
 
@@ -30,7 +30,7 @@ development flow.
 - Push changes in a topic branch to a personal fork of the repository.
 - To make sure that your topic branch is in sync with the remote master branch,
 follow a [rebase workflow](https://www.atlassian.com/git/tutorials/merging-vs-rebasing).
-- Submit a pull request to openshift/windows-machine-config-operator (see PR workflow below).
+- Submit a pull request to openshift/windows-machine-config-bootstrapper (see PR workflow below).
 - The PR must receive one `/lgtm` and one `/approve` comments from the maintainers of the project.
 
 Thanks for contributing!

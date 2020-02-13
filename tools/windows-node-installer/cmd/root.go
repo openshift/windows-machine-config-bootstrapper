@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	wnilog "github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/log"
+	wnilog "github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/log"
 	"github.com/spf13/cobra"
 	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )

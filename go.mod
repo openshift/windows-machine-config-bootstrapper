@@ -1,4 +1,4 @@
-module github.com/openshift/windows-machine-config-operator
+module github.com/openshift/windows-machine-config-bootstrapper
 
 go 1.12
 

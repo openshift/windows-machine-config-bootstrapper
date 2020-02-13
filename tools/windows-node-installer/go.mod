@@ -1,4 +1,4 @@
-module github.com/openshift/windows-machine-config-operator/tools/windows-node-installer
+module github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer
 
 go 1.12
 
