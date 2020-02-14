@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net/http"
 	"reflect"
@@ -22,7 +23,6 @@ import (
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/client"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
-	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
 
 const (
@@ -52,7 +52,6 @@ const (
 	winUser = "core"
 )
 
-var log = logger.Log.WithName("azure-vm")
 var windowsWorker string = "winworker-"
 
 // AzureProvider holds azure platform specific information required for creating/deleting
@@ -722,21 +721,21 @@ func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
 	ctx := context.Background()
 	vmHardwareProfile := &compute.HardwareProfile{
 		VMSize: compute.VirtualMachineSizeTypes(az.instanceType)}
-	log.Info(fmt.Sprintf("constructed the HardwareProfile for node"))
+	log.Printf("constructed the HardwareProfile for node")
 
 	vmStorageProfile := az.constructStorageProfile(az.imageID)
-	log.Info(fmt.Sprintf("constructed the Storage Profile for node"))
+	log.Printf("constructed the Storage Profile for node")
 
 	vmOSProfile, instanceName, adminPassword := az.constructOSProfile(ctx)
-	log.Info(fmt.Sprintf("constructed the OSProfile for the node"))
+	log.Printf("constructed the OSProfile for the node")
 
 	vmNetworkProfile, err := az.constructNetworkProfile(ctx, instanceName)
 	if errorCheck(err) {
 		return nil, err
 	}
-	log.Info(fmt.Sprintf("constructed the network profile for the node"))
+	log.Printf("constructed the network profile for the node")
 
-	log.Info(fmt.Sprintf("constructed all the profiles, about to create instance."))
+	log.Printf("constructed all the profiles, about to create instance.")
 	future, err := az.vmClient.CreateOrUpdate(
 		ctx,
 		az.resourceGroupName,
@@ -760,35 +759,33 @@ func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
 	}
 	vmInfo, err := future.Result(az.vmClient)
 	if errorCheck(err) {
-		log.Error(err, fmt.Sprintf("failed to obtain instance info"))
+		log.Printf("failed to obtain instance info: %s", err)
 	}
 
 	resourceTrackerFilePath, err := resource.MakeFilePath(az.resourceTrackerDir)
 	if errorCheck(err) {
-		log.Error(err, fmt.Sprintf("unable to create a file"))
+		log.Printf("unable to create resource file: %s", err)
 	}
 
 	err = resource.AppendInstallerInfo([]string{*(vmInfo.Name)}, []string{az.NsgName}, resourceTrackerFilePath)
 	if errorCheck(err) {
-		log.Error(err, fmt.Sprintf("unable to append the resources"))
+		log.Printf("unable to add installer info to the resource file: %s", err)
 	}
-
-	log.Info(fmt.Sprintf("Successfully created windows instance: %s", instanceName))
 
 	ipAddress, ipErr := az.getIPAddress(ctx)
 	if errorCheck(ipErr) {
-		log.Error(err, fmt.Sprintf("couldn't get the IP Address for corresponding resource: %s", az.IpName))
+		log.Printf("failed to get the IP address of %s: %s", az.IpName, ipErr)
 		*ipAddress = az.IpName
 	}
 	resultData := fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:'%s' \n", *ipAddress, adminPassword)
 	resultPath := az.resourceTrackerDir + instanceName
 	err = resource.StoreCredentialData(resultPath, resultData)
 	if errorCheck(err) {
-		log.Error(err, fmt.Sprintf("unable to write data into file"))
-		log.Info(fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:%s", *ipAddress, adminPassword))
+		log.Printf("unable to write data into resource file: %s", err)
+		log.Printf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:%s", *ipAddress, adminPassword)
 	} else {
-		log.Info(fmt.Sprintf("Please Check for file %s in %s directory on how to access the node",
-			instanceName, az.resourceTrackerDir))
+		log.Printf("Please check file %s in directory %s to access the node",
+			instanceName, az.resourceTrackerDir)
 	}
 	credentials := types.NewCredentials(instanceName, *ipAddress, adminPassword, winUser)
 	return credentials, nil
@@ -798,7 +795,7 @@ func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
 func (az *AzureProvider) getNICname(ctx context.Context, vmName string) (err error, nicName string) {
 	vmStruct, err := az.vmClient.Get(ctx, az.resourceGroupName, vmName, "instanceView")
 	if err != nil {
-		log.Error(err, fmt.Sprintf("cannot fetch the instance data of %s", vmName))
+		log.Printf("cannot fetch the instance data of %s: %s", vmName, err)
 		return
 	}
 	networkProfile := vmStruct.VirtualMachineProperties.NetworkProfile
@@ -812,7 +809,7 @@ func (az *AzureProvider) getNICname(ctx context.Context, vmName string) (err err
 func (az *AzureProvider) getIPname(ctx context.Context, vmName string) (err error, ipName string) {
 	vmStruct, err := az.vmClient.Get(ctx, az.resourceGroupName, vmName, "instanceView")
 	if err != nil {
-		log.Error(err, fmt.Sprintf("cannot fetch the instance data of %s", vmName))
+		log.Printf("cannot fetch the instance data of %s: %s", vmName, err)
 		return
 	}
 	networkProfile := vmStruct.VirtualMachineProperties.NetworkProfile
@@ -821,7 +818,7 @@ func (az *AzureProvider) getIPname(ctx context.Context, vmName string) (err erro
 	nicName := extractResourceName(nicID)
 	interfaceStruct, err := az.nicClient.Get(ctx, az.resourceGroupName, nicName, "")
 	if err != nil {
-		log.Error(err, fmt.Sprintf("cannot fetch the network interface data of %s", vmName))
+		log.Printf("cannot fetch the network interface data of %s: %s", vmName, err)
 	}
 	interfacePropFormat := *(interfaceStruct.InterfacePropertiesFormat)
 	interfaceIPConfigs := *(interfacePropFormat.IPConfigurations)
@@ -835,7 +832,7 @@ func (az *AzureProvider) getIPname(ctx context.Context, vmName string) (err erro
 func (az *AzureProvider) destroyIP(ctx context.Context, ipName string) (err error) {
 	_, err = az.ipClient.Delete(ctx, az.resourceGroupName, ipName)
 	if errorCheck(err) {
-		log.Error(err, fmt.Sprintf("failed to delete the public IP: %s", ipName))
+		log.Printf("failed to delete the public IP: %s,%s", ipName, err)
 		return
 	}
 	return
@@ -845,12 +842,12 @@ func (az *AzureProvider) destroyIP(ctx context.Context, ipName string) (err erro
 func (az *AzureProvider) destroyInstance(ctx context.Context, vmName string) (err error) {
 	future, err := az.vmClient.Delete(ctx, az.resourceGroupName, vmName)
 	if errorCheck(err) {
-		log.Error(err, fmt.Sprintf("failed to delete the instance: %s", vmName))
+		log.Printf("failed to delete the instance: %s: %s", vmName, err)
 		return
 	}
 	err = future.WaitForCompletionRef(ctx, az.vmClient.Client)
 	if errorCheck(err) {
-		log.Error(err, fmt.Sprintf("failed to delete the instance: %s", vmName))
+		log.Printf("failed to delete instance %s: %s", vmName, err)
 		return
 	}
 	return nil
@@ -860,7 +857,7 @@ func (az *AzureProvider) destroyInstance(ctx context.Context, vmName string) (er
 func (az *AzureProvider) destroyNIC(ctx context.Context, nicName string) (err error) {
 	_, err = az.nicClient.Delete(ctx, az.resourceGroupName, nicName)
 	if errorCheck(err) {
-		log.Error(err, fmt.Sprintf("failed to delete the nic: %s", nicName))
+		log.Printf("failed to delete nic %s: %s", nicName, err)
 		return
 	}
 	return
@@ -894,8 +891,7 @@ func (az *AzureProvider) deleteNSGRules(ctx context.Context, nsgName string) (er
 
 	if errMsg != "" {
 		err = errors.New(errMsg)
-		log.Error(err, fmt.Sprintf("unable to delete SG rules"))
-
+		log.Printf("unable to delete SG rules: %s", err)
 	}
 	return
 }
@@ -908,7 +904,7 @@ func (az *AzureProvider) destroyDisk(ctx context.Context, vmInfo compute.Virtual
 	diskName := *(vmOSdiskProperties.Name)
 	_, err = az.diskClient.Delete(ctx, az.resourceGroupName, diskName)
 	if errorCheck(err) {
-		log.Error(err, fmt.Sprintf("failed to delete the root disk: %s", diskName))
+		log.Printf("failed to delete the root disk %s: %s", diskName, err)
 		return
 	}
 	return
@@ -917,7 +913,7 @@ func (az *AzureProvider) destroyDisk(ctx context.Context, vmInfo compute.Virtual
 // DestroyWindowsVMs destroys all the resources created by the CreateWindows method.
 func (az *AzureProvider) DestroyWindowsVMs() error {
 	// Read from `windows-node-installer.json` file
-	log.Info(fmt.Sprintf("processing file '%s'", az.resourceTrackerDir))
+	log.Printf("processing file '%s'", az.resourceTrackerDir)
 	ctx := context.Background()
 	resourceTrackerFilePath, err := resource.MakeFilePath(az.resourceTrackerDir)
 	if errorCheck(err) {
@@ -937,32 +933,32 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 
 		vmInfo, _ := az.vmClient.Get(ctx, az.resourceGroupName, vmName, compute.InstanceView)
 
-		log.Info(fmt.Sprintf("deleting the resources associated with the instance: %s", vmName))
+		log.Printf("deleting the resources associated with instance %s: %s", vmName, err)
 
 		err = az.destroyInstance(ctx, vmName)
 		if !errorCheck(err) {
-			log.Info(fmt.Sprintf("deleted the instance '%s'", vmName))
+			log.Printf("deleted the instance '%s'", vmName)
 		}
 
 		err = az.destroyNIC(ctx, nicName)
 		if !errorCheck(err) {
-			log.Info(fmt.Sprintf("deleted the NIC of instance"))
+			log.Printf("deleted the NIC of instance")
 		}
 
 		err = az.destroyIP(ctx, ipName)
 		if !errorCheck(err) {
-			log.Info(fmt.Sprintf("deleted the IP of instance"))
+			log.Printf("deleted the IP of instance")
 		}
 
 		err = az.destroyDisk(ctx, vmInfo)
 		if !errorCheck(err) {
-			log.Info(fmt.Sprintf("deleted the disk attached to the instance"))
+			log.Printf("deleted the disk attached to the instance")
 		}
 
 		rdpFilePath = az.resourceTrackerDir + vmName
 		err = resource.DeleteCredentialData(rdpFilePath)
 		if errorCheck(err) {
-			log.Error(err, fmt.Sprintf("unable to remove the file: %s", rdpFilePath))
+			log.Printf("unable to remove file %s: %s", rdpFilePath, err)
 		}
 
 		terminatedInstances = append(terminatedInstances, vmName)
@@ -971,7 +967,7 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 	for _, nsgName := range installerInfo.SecurityGroupIDs {
 		err = az.deleteNSGRules(ctx, nsgName)
 		if !errorCheck(err) {
-			log.Info(fmt.Sprintf("deleted the created security group rules in worker subnet"))
+			log.Printf("deleted the created security group rules in worker subnet")
 		}
 
 		deletedSg = append(deletedSg, nsgName)
@@ -980,7 +976,7 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 	// Update the 'windows-node-installer.json' file
 	err = resource.RemoveInstallerInfo(terminatedInstances, deletedSg, resourceTrackerFilePath)
 	if errorCheck(err) {
-		log.Info(fmt.Sprintf("%s file was not updated, %v", resourceTrackerFilePath, err))
+		log.Printf("%s file was not updated: %v", resourceTrackerFilePath, err)
 	}
 	return nil
 }

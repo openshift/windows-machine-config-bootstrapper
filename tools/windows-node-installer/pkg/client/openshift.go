@@ -2,17 +2,13 @@ package client
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/openshift/api/config/v1"
 	clientset "github.com/openshift/client-go/config/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
-	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
 )
-
-// log is the global logger for the client package.
-// Each log record produced by this logger will have an identifier containing `client` tag.
-var log = logger.Log.WithName("client")
 
 // OpenShift is an Client struct which will be used for all OpenShift related functions to interact with the existing
 // Cluster.
@@ -22,8 +18,7 @@ type OpenShift struct {
 
 // GetOpenShift uses kubeconfig to create a client for existing OpenShift cluster and returns it or an error.
 func GetOpenShift(kubeConfigPath string) (*OpenShift, error) {
-	log.V(0).Info(fmt.Sprintf("kubeconfig source: %s", kubeConfigPath))
-
+	log.Printf("kubeconfig source: %s", kubeConfigPath)
 	rc, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
 	if err != nil {
 		return nil, err

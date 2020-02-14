@@ -8,6 +8,13 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	awssession "github.com/aws/aws-sdk-go/aws/session"
@@ -16,13 +23,7 @@ import (
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/client"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
-	"io/ioutil"
 	"k8s.io/apimachinery/pkg/util/rand"
-	"net/http"
-	"os"
-	logger "sigs.k8s.io/controller-runtime/pkg/runtime/log"
-	"strings"
-	"time"
 )
 
 const (
@@ -41,10 +42,6 @@ const (
 	// for our CI testing.
 	sshPort = 22
 )
-
-// log is the global logger for the aws package. Each log record produced
-// by this logger will have an identifier containing `aws-ec2` tag.
-var log = logger.Log.WithName("aws-ec2")
 
 // Constant value
 const (
@@ -180,7 +177,7 @@ func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, err err
 	}
 	_, err = a.createInstanceNameTag(instance, infraID)
 	if err != nil {
-		log.V(0).Info(fmt.Sprintf("failed to assign name for instance: %s, %v", instanceID, err))
+		log.Printf("failed to assign name for instance: %s, %v", instanceID, err)
 	}
 
 	// Get the public IP
@@ -206,9 +203,9 @@ func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, err err
 	}
 
 	// Output commandline message to help RDP into the created instance.
-	log.Info(fmt.Sprintf("Successfully created windows instance: %s, "+
+	log.Printf("Successfully created windows instance: %s, "+
 		"please RDP into the Windows instance created at %s using Admininstrator as user and %s password",
-		instanceID, publicIPAddress, decryptedPassword))
+		instanceID, publicIPAddress, decryptedPassword)
 	// TODO: Output the information to a file
 	return credentials, nil
 }
@@ -277,7 +274,7 @@ func (a *AwsProvider) waitUntilPasswordDataIsAvailable(instanceID string) (*ec2.
 		pwdData, err := a.getPasswordDataOutput(instanceID)
 		if err != nil {
 			// Eventually we may get succeed, so let's continue till we hit 15 min limit
-			log.Info("error while getting password", err)
+			log.Printf("error while getting password: %s", err)
 			continue
 		}
 		if len(*pwdData.PasswordData) > 0 {
@@ -330,7 +327,7 @@ func (a *AwsProvider) GetInfraID() (string, error) {
 // 'windows-node-installer.json' file. The security groups still in use by other instances will not be deleted.
 func (a *AwsProvider) DestroyWindowsVMs() error {
 	// Read from `windows-node-installer.json` file.
-	log.V(0).Info(fmt.Sprintf("processing file '%s'", a.resourceTrackerDir))
+	log.Printf("processing file '%s'", a.resourceTrackerDir)
 	destroyList, err := resource.ReadInstallerInfo(a.resourceTrackerDir)
 	if err != nil {
 		return err
@@ -342,14 +339,14 @@ func (a *AwsProvider) DestroyWindowsVMs() error {
 	for _, instanceID := range destroyList.InstanceIDs {
 		err = a.TerminateInstance(instanceID)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("failed to terminate instance: %s", instanceID))
+			log.Printf("failed to terminate instance %s: %s", instanceID, err)
 		}
 	}
 	// Wait for instances termination after they are initiated.
 	for _, instanceID := range destroyList.InstanceIDs {
 		err = a.waitUntilInstanceTerminated(instanceID)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("timeout waiting for instance: %s to terminate", instanceID))
+			log.Printf("timeout waiting for instance %s to terminate: %s", instanceID, err)
 		} else {
 			terminatedInstances = append(terminatedInstances, instanceID)
 		}
@@ -359,7 +356,7 @@ func (a *AwsProvider) DestroyWindowsVMs() error {
 	for _, sgID := range destroyList.SecurityGroupIDs {
 		err = a.DeleteSG(sgID)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("failed to delete security group: %s", sgID))
+			log.Printf("failed to delete security group %s: %s", sgID, err)
 		} else {
 			deletedSg = append(deletedSg, sgID)
 		}
@@ -368,7 +365,7 @@ func (a *AwsProvider) DestroyWindowsVMs() error {
 	// Update 'windows-node-installer.json' file.
 	err = resource.RemoveInstallerInfo(terminatedInstances, deletedSg, a.resourceTrackerDir)
 	if err != nil {
-		log.V(0).Info(fmt.Sprintf("%s file was not updated, %v", a.resourceTrackerDir, err))
+		log.Printf("%s file was not updated: %s", a.resourceTrackerDir, err)
 	}
 	return nil
 }
@@ -490,7 +487,7 @@ func (a *AwsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, erro
 		return a.createWindowsWorkerSg(infraID, vpc)
 	}
 
-	log.Info(fmt.Sprintf("Using existing Security Group: %s.", sgID))
+	log.Printf("Using existing Security Group: %s.", sgID)
 
 	// Check winrm port open status for the existing security group
 	iswinrmPortOpen, err := a.IsPortOpen(sgID, WINRM_PORT)
@@ -504,9 +501,9 @@ func (a *AwsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, erro
 		if err != nil {
 			return "", err
 		}
-		log.Info(fmt.Sprintf("Winrm port is now added to Security Group %s", sgID))
+		log.Printf("Winrm port is now added to Security Group %s", sgID)
 	} else {
-		log.Info(fmt.Sprintf("Winrm port already opened for Security Group: %s.", sgID))
+		log.Printf("Winrm port already opened for Security Group: %s.", sgID)
 	}
 
 	// Check if ssh port is open
@@ -521,9 +518,9 @@ func (a *AwsProvider) findOrCreateSg(infraID string, vpc *ec2.Vpc) (string, erro
 		if err != nil {
 			return "", err
 		}
-		log.Info(fmt.Sprintf("ssh port is now added to Security Group %s", sgID))
+		log.Printf("ssh port is now added to Security Group %s", sgID)
 	} else {
-		log.Info(fmt.Sprintf("ssh port already opened for Security Group: %s.", sgID))
+		log.Printf("ssh port already opened for Security Group: %s.", sgID)
 	}
 
 	return sgID, nil
@@ -548,7 +545,7 @@ func (a *AwsProvider) IsPortOpen(sgId string, port int64) (bool, error) {
 			return true, nil
 		}
 	}
-	log.Info(fmt.Sprintf("Given port %v is not open for Security Group: %s.", port, sgId))
+	log.Printf("Given port %v is not open for Security Group: %s.", port, sgId)
 	return false, nil
 }
 
@@ -560,7 +557,7 @@ func (a *AwsProvider) addPortToSg(sgId string, port int64) error {
 	}
 
 	// Add winrm https port to security group
-	log.Info(fmt.Sprintf("Adding winrm https port to Security Group %s", sgId))
+	log.Printf("Adding winrm https port to Security Group %s", sgId)
 	_, err = a.EC2.AuthorizeSecurityGroupIngress(&ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId: aws.String(sgId),
 		IpPermissions: []*ec2.IpPermission{
@@ -753,7 +750,7 @@ func (a *AwsProvider) GetVPCByInfrastructure(infraID string) (*ec2.Vpc, error) {
 	if len(res.Vpcs) < 1 {
 		return nil, fmt.Errorf("failed to find the VPC of the infrastructure")
 	} else if len(res.Vpcs) > 1 {
-		log.V(0).Info(fmt.Sprintf("more than one VPC is found, using %s", *res.Vpcs[0].VpcId))
+		log.Printf("more than one VPC is found, using %s", *res.Vpcs[0].VpcId)
 	}
 	return res.Vpcs[0], nil
 }
@@ -903,7 +900,7 @@ func (a *AwsProvider) isSGInUse(sgID string) (bool, error) {
 	}
 
 	if len(reservingInstances) > 0 {
-		log.V(0).Info(fmt.Sprintf("Security Group %s is in use by: %s", sgID, strings.Join(reservingInstances, ", ")))
+		log.Printf("Security Group %s is in use by: %s", sgID, strings.Join(reservingInstances, ", "))
 		return true, nil
 	}
 	return false, nil
