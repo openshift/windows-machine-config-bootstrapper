@@ -3,8 +3,10 @@ package framework
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +30,9 @@ const (
 
 	// awsUsername is the default windows username on AWS
 	awsUsername = "Administrator"
+	// remoteLogPath is the directory where all the log files related to components that we need are generated on the
+	// Windows VM
+	remoteLogPath = "C:\\k\\log\\"
 )
 
 var (
@@ -292,6 +297,76 @@ func (f *TestFramework) GetNode(externalIP string) (*v1.Node, error) {
 		return nil, fmt.Errorf("could not find node with IP: %s", externalIP)
 	}
 	return matchedNode, nil
+}
+
+// WriteToArtifactDir will write contents to $ARTIFACT_DIR/subDirName/filename. If subDirName is empty, contents
+// will be written to $ARTIFACT_DIR/filename
+func (f *TestFramework) WriteToArtifactDir(contents []byte, subDirName, filename string) error {
+	path := filepath.Join(artifactDir, subDirName, filename)
+	dir, _ := filepath.Split(path)
+	err := os.MkdirAll(dir, os.ModePerm)
+	if err != nil {
+		return fmt.Errorf("could not create %s: %s", dir, err)
+	}
+	return ioutil.WriteFile(path, contents, os.ModePerm)
+}
+
+// GetNode uses external IP and finds out the name associated with the node
+func (f *TestFramework) GetNodeName(externalIP string) (string, error) {
+	node, err := f.GetNode(externalIP)
+	if err != nil {
+		return "", fmt.Errorf("error while getting required kubernetes node object: %v", err)
+	}
+	return node.Name, nil
+}
+
+// RetrieveArtifacts should retrieve artifacts related the test run. Ideally this should retrieve all the logs related
+// to the Windows VM. This shouldn't return an error but should print the failures as log collection is nice to have
+// rather than a must have.
+// TODO: Think about how we can retrieve stdout from ansible out within this function
+func (f *TestFramework) RetrieveArtifacts() {
+	for i, vm := range f.WinVMs {
+		if vm == nil {
+			continue
+		}
+		if vm.GetCredentials() == nil {
+			log.Printf("no credentials provided for vm %d ", i)
+			continue
+		}
+
+		instanceID := vm.GetCredentials().GetInstanceId()
+		if len(instanceID) == 0 {
+			log.Printf("no instance id provided for vm %d", i)
+			continue
+		}
+
+		externalIP := vm.GetCredentials().GetIPAddress()
+		if len(externalIP) == 0 {
+			log.Printf("no external ip address found for the vm with instance ID %s", instanceID)
+			continue
+		}
+
+		nodeName, err := f.GetNodeName(externalIP)
+		if err != nil {
+			log.Printf("error while getting node name associated with the vm %s: %v", instanceID, err)
+		}
+
+		// We want a format like "nodes/ip-10-0-141-99.ec2.internal/logs/wsu/kubelet"
+		localKubeletLogPath := filepath.Join(artifactDir, "nodes", nodeName, "logs")
+
+		// Let's reinitialize the ssh client as hybrid overlay is known to cause ssh connections to be dropped
+		// TODO: Reduce the usage of Reinitialize as much as possible, this is to ensure that when we move to operator
+		// 		model, the reconnectivity should be handled automatically.
+		if err := vm.Reinitialize(); err != nil {
+			log.Printf("failed re-initializing ssh connectivity with on vm %s: %v", instanceID, err)
+		}
+		// Get the VM's private ip and populate log files in the test container.
+		// Make this a map["'"artifact_that_we_want_to_pull"]="log_file.name"
+		if err := vm.RetrieveFiles(remoteLogPath, localKubeletLogPath); err != nil {
+			log.Printf("failed retrieving log files on vm %s: %v", instanceID, err)
+			continue
+		}
+	}
 }
 
 // TearDown destroys the resources created by the Setup function
