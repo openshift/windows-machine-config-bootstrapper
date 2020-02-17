@@ -39,6 +39,9 @@ type windowsVM struct {
 	sshClient *ssh.Client
 	// winrmClient to access the Windows VM created
 	winrmClient *winrm.Client
+	// buildWMCB indicates if WSU should build WMCB and use it
+	// TODO This is a WSU specific property and should be moved to wsu_test -> https://issues.redhat.com/browse/WINC-249
+	buildWMCB bool
 }
 
 // WindowsVM is the interface for interacting with a Windows VM in the test framework
@@ -64,6 +67,11 @@ type WindowsVM interface {
 	Reinitialize() error
 	// Destroy destroys the Windows VM
 	Destroy() error
+	// BuildWMCB returns the value of buildWMCB. It can be used by WSU to decide if it should build WMCB before using it
+	BuildWMCB() bool
+	// SetBuildWMCB sets the value of buildWMCB. Setting buildWMCB to true would indicate WSU will build WMCB instead of
+	// downloading the latest as per the cluster version. False by default
+	SetBuildWMCB(bool)
 }
 
 // newWindowsVM creates and sets up a Windows VM in the cloud and returns the WindowsVM interface that can be used to
@@ -356,4 +364,12 @@ func (w *windowsVM) getSSHClient() error {
 	}
 	w.sshClient = sshClient
 	return nil
+}
+
+func (w *windowsVM) BuildWMCB() bool {
+	return w.buildWMCB
+}
+
+func (w *windowsVM) SetBuildWMCB(buildWMCB bool) {
+	w.buildWMCB = buildWMCB
 }

@@ -48,7 +48,12 @@ Run the WSU playbook:
 ```
 $ ansible-playbook -i hosts tasks/wsu/main.yaml -v
 ```
+On a default run, WSU will automatically get the latest version of WMCB based on the cluster version.
 
+To use WSU which builds WMCB for development purposes, set value of `build_wmcb` to `True`:
+```
+$ ansible-playbook -i hosts tasks/wsu/main.yaml -v -e "{build_wmcb: True}"
+```
 ### End to end testing
 The following environment variables need to be set for running the end to end tests of the playbook:
 - ARTIFACT_DIR

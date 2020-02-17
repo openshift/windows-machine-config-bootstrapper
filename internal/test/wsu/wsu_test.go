@@ -15,6 +15,7 @@ import (
 
 	"github.com/openshift/windows-machine-config-bootstrapper/internal/test"
 	e2ef "github.com/openshift/windows-machine-config-bootstrapper/internal/test/framework"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
@@ -28,12 +29,6 @@ import (
 var (
 	// Path of the WSU playbook
 	playbookPath = os.Getenv("WSU_PATH")
-
-	// kubernetes-node-windows-amd64.tar.gz SHA512
-	// Value from https://github.com/kubernetes/kubernetes/blob/master/CHANGELOG-1.16.md#node-binaries-1
-	// This value should be updated when we change the kubelet version in WSU
-	expectedKubeTarSha = "a88e7a1c6f72ea6073dbb4ddfe2e7c8bd37c9a56d94a33823f531e303a9915e7a844ac5880097724e44dfa7f4" +
-		"a9659d14b79cc46e2067f6b13e6df3f3f1b0f64"
 	// workerLabel is the worker label that needs to be applied to the Windows node
 	workerLabel = "node-role.kubernetes.io/worker"
 	// hybridOverlayMac is an annotation applied by the hybrid overlay
@@ -43,6 +38,43 @@ var (
 	// ubi8Image is the name/location of the linux image we will use for testing
 	ubi8Image = "registry.access.redhat.com/ubi8/ubi:latest"
 )
+
+type wsuFramework struct {
+	// TestFramework holds the instantiation of test suite being executed
+	*e2ef.TestFramework
+	// Number of VMs which should use built version of WMCB
+	// TODO Expose this option to the user along with vmCount -> https://issues.redhat.com/browse/WINC-240
+	vmCountWithBuiltWMCB int
+}
+
+// Setup initializes the wsuFramework.
+func (f *wsuFramework) Setup(vmCount int, credentials []*types.Credentials, skipVMsetup bool) error {
+	f.TestFramework = &e2ef.TestFramework{}
+
+	// If vmCount is 3 and vmCountWithBuiltWMCB is 2, 2 VMs will run WSU that will build WMCB and 1 VM will
+	// auto-download the latest WMCB based on the cluster version
+	f.vmCountWithBuiltWMCB = 1
+	// vmCountWithBuiltWMCB should not be greater than vmCount
+	if f.vmCountWithBuiltWMCB > vmCount {
+		return fmt.Errorf("tried to run WSU against %d VMs but vmCount set to %d", f.vmCountWithBuiltWMCB, vmCount)
+	}
+
+	// Set up the framework
+	err := f.TestFramework.Setup(vmCount, credentials, skipVMsetup)
+	if err != nil {
+		fmt.Errorf("framework setup failed: %v", err)
+		return err
+	}
+
+	// Set 'buildWMCB' property of Windows VM
+	// Not ideal to set a generic property in a specific implementation. This is a temporary workaround and will be
+	// updated in https://issues.redhat.com/browse/WINC-249
+	for i := 0; i < f.vmCountWithBuiltWMCB; i++ {
+		f.WinVMs[i].SetBuildWMCB(true)
+	}
+
+	return nil
+}
 
 // createhostFile creates an ansible host file for the VMs we have spun up
 func createHostFile(vmList []e2ef.WindowsVM) (string, error) {
@@ -104,7 +136,6 @@ func testAllVMs(t *testing.T) {
 			runTests(t, framework.WinVMs[i])
 		})
 	}
-
 }
 
 // runTests runs all the tests required for a specific VM
@@ -161,7 +192,14 @@ func runWSU(vm e2ef.WindowsVM) ([]byte, error) {
 	}
 
 	// Run the WSU against the VM
-	ansibleCmd = exec.Command("ansible-playbook", "-v", "-i", hostFilePath, playbookPath)
+	if vm.BuildWMCB() {
+		// Build WMCB
+		ansibleCmd = exec.Command("ansible-playbook", "-v", "-i", hostFilePath, playbookPath, "-e",
+			"{build_wmcb: True}")
+	} else {
+		// Download latest released version of WMCB based on cluster version
+		ansibleCmd = exec.Command("ansible-playbook", "-v", "-i", hostFilePath, playbookPath)
+	}
 
 	// Run the playbook
 	wsuOut, err := ansibleCmd.CombinedOutput()
@@ -195,6 +233,15 @@ func runE2ETestSuite(t *testing.T, vm e2ef.WindowsVM, ansibleOutput string) {
 	t.Run("Files copied to Windows node", func(t *testing.T) {
 		testFilesCopied(t, vm, tempDirPath)
 	})
+	if vm.BuildWMCB() {
+		t.Run("Check if wmcb was built", func(t *testing.T) {
+			testBuiltWMCB(t, ansibleOutput)
+		})
+	} else {
+		t.Run("Check if wmcb was downloaded", func(t *testing.T) {
+			testDownloadedWMCB(t, ansibleOutput)
+		})
+	}
 	t.Run("Node is in ready state", func(t *testing.T) {
 		testNodeReady(t, node)
 	})
@@ -216,6 +263,28 @@ func runE2ETestSuite(t *testing.T, vm e2ef.WindowsVM, ansibleOutput string) {
 	t.Run("North-south networking", func(t *testing.T) {
 		testNorthSouthNetworking(t, node, vm)
 	})
+}
+
+// testDownloadedWMCB checks if the task 'Download WMCB' in the Ansible output was executed, not skipped
+func testDownloadedWMCB(t *testing.T, ansibleOutput string) {
+	// split the output for each task
+	tasks := strings.Split(ansibleOutput, "TASK")
+	// grab the output for the task "Download WMCB"
+	downloadWmcbTaskOutput := ""
+	for i := 0; i < len(tasks); i++ {
+		if strings.Contains(tasks[i], "Download WMCB") {
+			downloadWmcbTaskOutput = tasks[i]
+		}
+	}
+	// check if the outcome was changed i.e. the task was executed ("changed": true)
+	require.Contains(t, downloadWmcbTaskOutput, "\"changed\": true")
+}
+
+// testBuiltWMCB checks the Ansible output to ensure WMCB was built
+func testBuiltWMCB(t *testing.T, ansibleOutput string) {
+	require.Contains(t, ansibleOutput,
+		"CGO_ENABLED=0 GO111MODULE=on GOOS=windows go build -o wmcb.exe  "+
+			"github.com/openshift/windows-machine-config-bootstrapper/cmd/bootstrapper")
 }
 
 // testCNIConfig tests if the CNI config has required hostsubnet and servicenetwork CIDR
@@ -255,20 +324,6 @@ func testFilesCopied(t *testing.T, vm e2ef.WindowsVM, ansibleTempDir string) {
 		assert.NoError(t, err, "Error looking for %s: %s", fullPath, err)
 		assert.Emptyf(t, stdout, "Missing file: %s", fullPath)
 	}
-
-	// Check the SHA of kube.tar.gz downloaded
-	kubeTarPath := ansibleTempDir + "\\" + "kube.tar.gz"
-	// certutil is part of default OS installation Windows 7+
-	command := fmt.Sprintf("certutil -hashfile %s SHA512", kubeTarPath)
-	stdout, stderr, err := vm.Run(command, false)
-	require.NoError(t, err, "Error generating SHA512 for %s", kubeTarPath)
-	require.Equalf(t, "", stderr, "Error generating SHA512 for %s", kubeTarPath)
-	// CertUtil output example:
-	// SHA512 hash of <filepath>:\r\n<SHA-output>\r\nCertUtil: -hashfile command completed successfully.
-	// Extracting SHA value from the output
-	actualKubeTarSha := strings.Split(stdout, "\r\n")[1]
-	assert.Equal(t, expectedKubeTarSha, actualKubeTarSha,
-		"kube.tar.gz downloaded does not match expected checksum")
 }
 
 // testNodeReady tests that the bootstrapped node was added to the cluster and is in the ready state
