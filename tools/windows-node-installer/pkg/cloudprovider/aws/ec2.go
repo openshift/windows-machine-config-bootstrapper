@@ -202,11 +202,6 @@ func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, err err
 			"%v", a.resourceTrackerDir, err)
 	}
 
-	// Output commandline message to help RDP into the created instance.
-	log.Printf("Successfully created windows instance: %s, "+
-		"please RDP into the Windows instance created at %s using Admininstrator as user and %s password",
-		instanceID, publicIPAddress, decryptedPassword)
-	// TODO: Output the information to a file
 	return credentials, nil
 }
 
