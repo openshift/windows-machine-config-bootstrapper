@@ -13,10 +13,14 @@ import (
 
 	"github.com/google/go-github/v29/github"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
+	operatorv1 "github.com/openshift/client-go/operator/clientset/versioned/typed/operator/v1"
+	"github.com/openshift/windows-machine-config-bootstrapper/internal/test"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -57,6 +61,8 @@ type TestFramework struct {
 	K8sclientset *kubernetes.Clientset
 	// OSConfigClient is the OpenShift config client, we will use to query the OpenShift api object status
 	OSConfigClient *configclient.Clientset
+	// OSOperatorClient is the OpenShift operator client, we will use to interact with OpenShift operator objects
+	OSOperatorClient *operatorv1.OperatorV1Client
 	// noTeardown is an indicator that the user supplied the VMs and they should not be destroyed
 	noTeardown bool
 	// ClusterVersion is the major.minor.patch version of the OpenShift cluster
@@ -149,11 +155,18 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 			return fmt.Errorf("unable to instantiate Windows VM: %v", err)
 		}
 	}
-	if err := f.getKubeClient(); err != nil {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		return fmt.Errorf("unable to build config from kubeconfig: %s", err)
+	}
+	if err := f.getKubeClient(config); err != nil {
 		return fmt.Errorf("unable to get kube client: %v", err)
 	}
-	if err := f.getOpenShiftConfigClient(); err != nil {
+	if err := f.getOpenShiftConfigClient(config); err != nil {
 		return fmt.Errorf("unable to get OpenShift client: %v", err)
+	}
+	if err := f.getOpenShiftOperatorClient(config); err != nil {
+		return fmt.Errorf("unable to get OpenShift operator client: %v", err)
 	}
 	if err := f.getClusterVersion(); err != nil {
 		return fmt.Errorf("unable to get OpenShift cluster version: %v", err)
@@ -165,12 +178,7 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 }
 
 // getKubeClient setups the kubeclient that can be used across all the test suites.
-func (f *TestFramework) getKubeClient() error {
-	kubeconfig := os.Getenv("KUBECONFIG")
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		return fmt.Errorf("could not build config from flags: %v", err)
-	}
+func (f *TestFramework) getKubeClient(config *restclient.Config) error {
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("could not create k8s clientset: %v", err)
@@ -180,17 +188,24 @@ func (f *TestFramework) getKubeClient() error {
 }
 
 // getOpenShiftConfigClient gets the new OpenShift config v1 client
-func (f *TestFramework) getOpenShiftConfigClient() error {
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		return fmt.Errorf("could not build config from flags: %v", err)
-	}
+func (f *TestFramework) getOpenShiftConfigClient(config *restclient.Config) error {
 	// Get openshift api config client.
 	configClient, err := configclient.NewForConfig(config)
 	if err != nil {
 		return fmt.Errorf("could not create config clientset: %v", err)
 	}
 	f.OSConfigClient = configClient
+	return nil
+}
+
+// getOpenShiftConfigClient gets a new OpenShift operator v1 client
+func (f *TestFramework) getOpenShiftOperatorClient(config *restclient.Config) error {
+	// Get openshift operator client
+	operatorClient, err := operatorv1.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("could not create operator clientset: %v", err)
+	}
+	f.OSOperatorClient = operatorClient
 	return nil
 }
 
@@ -367,6 +382,100 @@ func (f *TestFramework) RetrieveArtifacts() {
 			continue
 		}
 	}
+}
+
+// ApplyHybridOverlayPatch will enable the hybrid overlay on the cluster
+func (f *TestFramework) ApplyHybridOverlayPatch() error {
+	jsonPatch := []byte(`{"spec":{"defaultNetwork":{"ovnKubernetesConfig":{"hybridOverlayConfig":` +
+		`{"hybridClusterNetwork":[{"cidr":"10.132.0.0/14","hostPrefix":23}]}}}}}`)
+
+	_, err := f.OSOperatorClient.Networks().Patch("cluster", k8stypes.MergePatchType, jsonPatch)
+	if err != nil {
+		return fmt.Errorf("could not apply patch %s to cluster network: %s", string(jsonPatch), err)
+	}
+
+	// Wait until the hybrid overlay changes are complete
+	if err = f.waitUntilHybridOverlayReady(); err != nil {
+		return fmt.Errorf("error waiting for the hybrid overlay changes to be complete: %s", err)
+	}
+	return nil
+}
+
+// waitUntilHybridOverlayReady returns once OVN is ready again, after applying the hybrid overlay patch.
+func (f *TestFramework) waitUntilHybridOverlayReady() error {
+	if err := f.waitUntilNodesAnnotated(); err != nil {
+		return fmt.Errorf("error waiting for nodes to be annotated: %s", err)
+	}
+
+	// This is being done after we wait for the master nodes, as we need to make sure the patch is being acted on,
+	// and we are not checking the pods before they begin to restart with the hybrid overlay changes
+	if err := f.waitUntilOVNPodsReady(); err != nil {
+		return fmt.Errorf("error waiting for all pods in the OVN namespace to be ready: %s", err)
+	}
+
+	return nil
+}
+
+// waitUntilOVNPodsReady returns when either all pods in the openshift-ovn-kubernetes namespace are ready, or the
+// timeout limit has been reached.
+func (f *TestFramework) waitUntilOVNPodsReady() error {
+	for i := 0; i < RetryCount; i++ {
+		pods, err := f.K8sclientset.CoreV1().Pods("openshift-ovn-kubernetes").List(metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("could not get pods: %s", err)
+		}
+
+		allReady := true
+		for _, pod := range pods.Items {
+			podReady := false
+			for _, condition := range pod.Status.Conditions {
+				if condition.Type == v1.PodReady {
+					podReady = true
+					break
+				}
+			}
+			if !podReady {
+				allReady = false
+				break
+			}
+		}
+		if allReady {
+			return nil
+		}
+		time.Sleep(RetryInterval)
+	}
+	return fmt.Errorf("timed out waiting for pods in namespace \"openshift-ovn-kubernetes\" to be ready")
+
+}
+
+// waitUntilNodesAnnotated returns when either all nodes have had the proper annotations applied to them,
+// or reaches a timeout limit.
+func (f *TestFramework) waitUntilNodesAnnotated() error {
+	for i := 0; i < RetryCount; i++ {
+		nodes, err := f.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{})
+		if err != nil {
+			return fmt.Errorf("could not retrieve list of nodes: %s", err)
+		}
+
+		allAnnotated := true
+		for _, node := range nodes.Items {
+			_, ok := node.Annotations[test.HybridOverlayGatewayMAC]
+			if !ok {
+				allAnnotated = false
+				break
+			}
+			_, ok = node.Annotations[test.HybridOverlaySubnet]
+			if !ok {
+				allAnnotated = false
+				break
+			}
+		}
+		if allAnnotated {
+			return nil
+		}
+		time.Sleep(RetryInterval)
+	}
+	return fmt.Errorf("timed out waiting for master nodes to be annotated with " + test.HybridOverlayGatewayMAC)
 }
 
 // TearDown destroys the resources created by the Setup function
