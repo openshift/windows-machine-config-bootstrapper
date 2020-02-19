@@ -20,7 +20,7 @@ require (
 	github.com/json-iterator/go v1.1.9 // indirect
 	github.com/masterzen/winrm v0.0.0-20190308153735-1d17eaf15943
 	github.com/openshift/client-go v0.0.0-00010101000000-000000000000
-	github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200214230955-da4e7140409c
+	github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200219203823-675f779e3e8e
 	github.com/pkg/sftp v1.10.1
 	github.com/stretchr/testify v1.4.0
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c
