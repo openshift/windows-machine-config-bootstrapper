@@ -128,8 +128,9 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // - logs id and security group information of the created instance in 'windows-node-installer.json' file at the
 // resourceTrackerDir.
 // On success, the function outputs RDP access information in the commandline interface. It also returns the
-// the credentials to access the Windows VM created,
-func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, err error) {
+// the Windows VM Object to interact with using SSH, Winrm etc.
+func (a *AwsProvider) CreateWindowsVM() (windowsVM types.WindowsVM, err error) {
+	w := &types.Windows{}
 	// If no AMI was provided, use the latest Windows AMI
 	if a.imageID == "" {
 		var err error
@@ -197,14 +198,31 @@ func (a *AwsProvider) CreateWindowsVM() (credentials *types.Credentials, err err
 	// Build new credentials structure to be used by other actors. The actor is responsible for checking if
 	// the credentials are being generated properly. This method won't guarantee the existence of credentials
 	// if the VM is spun up
-	credentials = types.NewCredentials(instanceID, publicIPAddress, decryptedPassword, winUser)
+	credentials := types.NewCredentials(instanceID, publicIPAddress, decryptedPassword, winUser)
+	w.Credentials = credentials
+
+	// Setup Winrm and SSH client so that we can interact with the Windows Object we created
+	if err := w.SetupWinRMClient(); err != nil {
+		return nil, fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
+	}
+	// Wait for some time before starting configuring of ssh server. This is to let sshd service be available
+	// in the list of services
+	// TODO: Parse the output of the `Get-Service sshd, ssh-agent` on the Windows node to check if the windows nodes
+	// has those services present
+	time.Sleep(time.Minute)
+	if err := w.ConfigureOpenSSHServer(); err != nil {
+		return w, fmt.Errorf("failed to configure OpenSSHServer on the Windows VM: %v", err)
+	}
+	if err := w.GetSSHClient(); err != nil {
+		return w, fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
+	}
+
 	err = resource.AppendInstallerInfo([]string{instanceID}, []string{}, a.resourceTrackerDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to record instance ID to file at '%s',instance will not be able to be deleted, "+
 			"%v", a.resourceTrackerDir, err)
 	}
-
-	return credentials, nil
+	return w, nil
 }
 
 // GetPublicIP returns the public IP address associated with the instance. Make to sure to call this function

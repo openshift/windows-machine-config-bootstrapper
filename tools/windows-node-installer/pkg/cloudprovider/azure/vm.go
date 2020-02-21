@@ -712,10 +712,12 @@ func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 }
 
 // CreateWindowsVM takes in imageId, instanceType and sshKey name to create Windows instance under the same
-// resourceGroupName as the existing OpenShift
+// resourceGroupName as the existing OpenShift. The returned Windows VM object from this method will provide access
+// to the instance via Winrm, SSH
 // TODO: If it fails during the instance creation process it has to delete the resources created
 // untill that step.
-func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
+func (az *AzureProvider) CreateWindowsVM() (types.WindowsVM, error) {
+	w := &types.Windows{}
 	// Construct the VirtualMachine properties
 	rand.Seed(time.Now().UnixNano())
 	ctx := context.Background()
@@ -777,6 +779,27 @@ func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
 		log.Printf("failed to get the IP address of %s: %s", az.IpName, ipErr)
 		*ipAddress = az.IpName
 	}
+
+	// Build new credentials structure to be used by other actors. The actor is responsible for checking if
+	// the credentials are being generated properly. This method won't guarantee the existence of credentials
+	// if the VM is spun up
+	credentials := types.NewCredentials(instanceName, *ipAddress, adminPassword, winUser)
+	w.Credentials = credentials
+
+	// Setup Winrm and SSH client so that we can interact with the Windows Object we created
+	if err := w.SetupWinRMClient(); err != nil {
+		return nil, fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
+	}
+
+	// Wait for some time before starting configuring of ssh server. This is to let sshd service be available
+	// in the list of services
+	// TODO: Parse the output of the `Get-Service sshd, ssh-agent` on the Windows node to check if the windows nodes
+	// has those services present
+	time.Sleep(time.Minute)
+	if err := w.GetSSHClient(); err != nil {
+		return w, fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
+	}
+
 	resultData := fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:'%s' \n", *ipAddress, adminPassword)
 	resultPath := az.resourceTrackerDir + instanceName
 	err = resource.StoreCredentialData(resultPath, resultData)
@@ -787,8 +810,8 @@ func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
 		log.Printf("Please check file %s in directory %s to access the node",
 			instanceName, az.resourceTrackerDir)
 	}
-	credentials := types.NewCredentials(instanceName, *ipAddress, adminPassword, winUser)
-	return credentials, nil
+	return w, nil
+
 }
 
 // getNICname returns nicName by taking instance name as an argument.

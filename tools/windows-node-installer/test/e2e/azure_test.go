@@ -85,12 +85,15 @@ var (
 	ipAddressPattern = regexp.MustCompile(`\d+.\d+.\d+.\d+`)
 	// passwordPattern looks for the password from vm rdp command file.
 	passwordPattern = regexp.MustCompile(`/p:'.{12}'`)
+	// credentials holds the credentials associated with the Windows VM.
+	credentials *types.Credentials
 )
 
 // TestCreateVM is used to the test the following after a successful run of "wni azure create"
 // 1. check if required rules are present
 // 2. ansible ping check to confirm that windows node is correctly
 //    configured to execute the remote ansible commands.
+// TODO: This is not actually testing the Windows VM creation. Change this function.
 func TestCreateVM(t *testing.T) {
 	err := setup()
 	require.NoErrorf(t, err, "failed at the setup with error: %v", err)
