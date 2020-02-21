@@ -71,8 +71,9 @@ func getAllPortRule(vpcCidr string) *ec2.IpPermission {
 	return ipPermission
 }
 
-// TestGetMissingRules tests the getMissingRules function which gets all the missing rules for local IPs
-func TestGetMissingRules(t *testing.T) {
+// TODO: Add additional test coverage for testing examineRulesInSg function to check for the nil rules input
+// TestGetRulesForSgUpdate tests the getRulesForSgUpdate which gets all the rules to be updated for local IPs
+func TestGetRulesForSgUpdate(t *testing.T) {
 	myIP := "144.121.20.163"
 	otherIP := "100.121.20.163"
 	vpcCidr := "1.1.1.1/32"
@@ -92,14 +93,6 @@ func TestGetMissingRules(t *testing.T) {
 				getOtherPortRules(rdpPort, myIP),
 			},
 		},
-		// test with nil input of rules
-		{
-			name: "Nil input",
-			in:   nil,
-			expected: []*ec2.IpPermission{
-				getAllPortRule(vpcCidr),
-			},
-		},
 		//test with a partial input of rules
 		{
 			name: "Partial input from current IP",
@@ -110,7 +103,8 @@ func TestGetMissingRules(t *testing.T) {
 				getAllPortRule(vpcCidr),
 				getOtherPortRules(sshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
-			}},
+			},
+		},
 		//test with a complete input of rules
 		{
 			name: "Complete input from current IP",
@@ -149,11 +143,12 @@ func TestGetMissingRules(t *testing.T) {
 				getOtherPortRules(WINRM_PORT, myIP),
 				getOtherPortRules(sshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
-			}},
+			},
+		},
 	}
 
 	for _, tt := range testIO {
-		actual := awsProvider.GetRulesForSgUpdate(myIP, tt.in, vpcCidr)
-		assert.ElementsMatch(t, tt.expected, actual, tt.name, "awsProvider.GetRulesForSgUpdate(), actual values do not match expected")
+		actual := awsProvider.getRulesForSgUpdate(myIP, tt.in, vpcCidr)
+		assert.ElementsMatch(t, tt.expected, actual, tt.name, "awsProvider.getRulesForSgUpdate(), actual values do not match expected")
 	}
 }

@@ -566,9 +566,9 @@ func (a *AwsProvider) createWindowsWorkerSg(infraID string, vpc *ec2.Vpc) (*ec2.
 func (a *AwsProvider) verifyAndUpdateSg(myIP string, sg *ec2.SecurityGroup, vpc *ec2.Vpc) ([]*ec2.IpPermission, error) {
 
 	// Get the list of rules to be updated, returns empty list is there are no rules to be updated
-	rules := a.GetRulesForSgUpdate(myIP, sg.IpPermissions, *vpc.CidrBlock)
+	rules := a.getRulesForSgUpdate(myIP, sg.IpPermissions, *vpc.CidrBlock)
 
-	// call addIngressRules() only if there are any rules returned from GetRulesForSgUpdate()
+	// call addIngressRules() only if there are any rules returned from getRulesForSgUpdate()
 	if len(rules) != 0 {
 		err := a.addIngressRules(*sg.GroupId, rules)
 		if err != nil {
@@ -578,9 +578,9 @@ func (a *AwsProvider) verifyAndUpdateSg(myIP string, sg *ec2.SecurityGroup, vpc 
 	return rules, nil
 }
 
-// GetRulesForSgUpdate returns a list of rules which are required to be updated in sg with local IP. If there are no
+// getRulesForSgUpdate returns a list of rules which are required to be updated in sg with local IP. If there are no
 // rules to be updated it returns an empty slice. This serves as an input to addIngressRules function.
-func (a *AwsProvider) GetRulesForSgUpdate(myIP string, rules []*ec2.IpPermission, vpcCidr string) []*ec2.IpPermission {
+func (a *AwsProvider) getRulesForSgUpdate(myIP string, rules []*ec2.IpPermission, vpcCidr string) []*ec2.IpPermission {
 	rulesForUpdate := make([]*ec2.IpPermission, 0)
 
 	ports, hasClusterCidrRule := examineRulesInSg(myIP, rules, vpcCidr)
