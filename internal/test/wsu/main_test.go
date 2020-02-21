@@ -13,7 +13,7 @@ var (
 	framework = &e2ef.TestFramework{}
 	// TODO: expose this to the end user as a command line flag
 	// vmCount is the number of VMs the test suite requires
-	vmCount = 1
+	vmCount = 2
 )
 
 func TestMain(m *testing.M) {
