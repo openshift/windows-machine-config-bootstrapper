@@ -32,8 +32,8 @@
             target: build
             chdir: "{{ project_root }}"
 
-        - name: Move WMCB to temporary directory
-          command: mv "{{ project_root }}/{{ wmcb_exe }}" "{{ tmp_dir.path }}/{{ wmcb_exe }}"
+        - name: Copy WMCB to temporary directory
+          command: cp "{{ project_root }}/{{ wmcb_exe }}" "{{ tmp_dir.path }}/{{ wmcb_exe }}"
 
         - name: Download Windows node kubelet
           get_url:
