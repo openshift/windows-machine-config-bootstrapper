@@ -19,8 +19,8 @@ const (
 )
 
 var (
-	// credentials store the windows instance credential information
-	credentials *types.Credentials
+	// windowsVM provides the Windows VM object with appropriate methods to interact with it
+	windowsVM types.WindowsVM
 	// retryCount is the number of times we hit a request.
 	retryCount = 30
 	// retryInterval is interval of time until we retry after a failure.
@@ -75,8 +75,8 @@ func checkForFirewallRule(winRMClient *winrm.Client) (stderr string, err error) 
 func testInstanceFirewallRule(t *testing.T) {
 	// TODO: Instantiating winRM client should be done in the setup function and client should become
 	//  part of test framework.
-	winRMClient, err := setupWinRMClient(credentials.GetIPAddress(), credentials.GetPassword(),
-		credentials.GetUserName())
+	winRMClient, err := setupWinRMClient(windowsVM.GetCredentials().GetIPAddress(), windowsVM.GetCredentials().GetPassword(),
+		windowsVM.GetCredentials().GetUserName())
 	require.NoErrorf(t, err, "winRM client setup failed with error: %v", err)
 	stderr, err := checkForFirewallRule(winRMClient)
 	assert.Equalf(t, "", stderr, "firewall rule command failed with error: %s", stderr)
