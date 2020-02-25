@@ -35,9 +35,9 @@ type testWindowsVM struct {
 // TestWindowsVM is the interface for interacting with a Windows VM in the test framework. This will hold the
 // specialized information related to test suite
 type TestWindowsVM interface {
-	// RetrieveFiles retrieves the list of file from the directory in the remote Windows VM to the local host. As of
-	// now, we're limiting every file in the remote directory to be written to single directory on the local host
-	RetrieveFiles(string, string) error
+	// RetrieveDirectories recursively copies the files and directories from the directory in the remote Windows VM
+	// to the given directory on the local host.
+	RetrieveDirectories(string, string) error
 	// Destroy destroys the Windows VM
 	// TODO: Remove this and move it to framework or other higher level object capable of doing deletions.
 	//		jira: https://issues.redhat.com/browse/WINC-243
@@ -104,19 +104,15 @@ func newWindowsVM(imageID, instanceType string, credentials *types.Credentials, 
 	return w, nil
 }
 
-// RetrieveFiles retrieves list of files from remote directory to the local directory.
-// The implementation can be changed if the use-case arises. As of now, we're doing a best effort
-// to collect every log possible. If a retrieval of file fails, we would proceed with retrieval
-// of other log files.
-func (w *testWindowsVM) RetrieveFiles(remoteDir, localDir string) error {
+func (w *testWindowsVM) RetrieveDirectories(remoteDir string, localDir string) error {
 	if w.SSHClient == nil {
-		return fmt.Errorf("RetrieveFile cannot be called without a ssh client")
+		return fmt.Errorf("cannot retrieve remote directory without a ssh client")
 	}
 
-	// Create local dir
+	// creating a local directory to store the files and directories from remote directory.
 	err := os.MkdirAll(localDir, os.ModePerm)
 	if err != nil {
-		log.Printf("could not create %s: %s", localDir, err)
+		return fmt.Errorf("could not create %s: %v", localDir, err)
 	}
 
 	sftp, err := sftp.NewClient(w.SSHClient)
@@ -128,46 +124,52 @@ func (w *testWindowsVM) RetrieveFiles(remoteDir, localDir string) error {
 	// Get the list of all files in the directory
 	remoteFiles, err := sftp.ReadDir(remoteDir)
 	if err != nil {
-		return fmt.Errorf("error opening remote file: %v", err)
+		return fmt.Errorf("error opening remote directory %s: %v", remoteDir, err)
 	}
 
 	for _, remoteFile := range remoteFiles {
-		// Assumption: We ignore the directories here the reason being RetrieveFiles should just retrieve files
-		// in a directory, if this is directory, we should have called RetrieveFiles on this directory
+		remotePath := filepath.Join(remoteDir, remoteFile.Name())
+		localPath := filepath.Join(localDir, remoteFile.Name())
+		// check if it is a directory, call itself again
 		if remoteFile.IsDir() {
-			continue
+			if err = w.RetrieveDirectories(remotePath, localPath); err != nil {
+				log.Printf("error while retrieving %s directory from Windows : %v", remotePath, err)
+			}
+		} else {
+			// logging errors as a best effort to retrieve files from remote directory
+			if err = w.copyFileFrom(sftp, remotePath, localPath); err != nil {
+				log.Printf("error while retrieving %s file from Windows : %v", remotePath, err)
+			}
 		}
-		fileName := remoteFile.Name()
-		dstFile, err := os.Create(filepath.Join(localDir, fileName))
-		if err != nil {
-			log.Printf("error creating file locally: %v", err)
-			continue
-		}
-		// TODO: Check if there is some performance implication of multiple Open calls.
-		srcFile, err := sftp.Open(remoteDir + "\\" + fileName)
+	}
+	return nil
+}
 
-		if err != nil {
-			log.Printf("error while opening remote directory on the Windows VM: %v", err)
-			continue
-		}
-		_, err = io.Copy(dstFile, srcFile)
-		if err != nil {
-			log.Printf("error retrieving file %v from Windows VM: %v", fileName, err)
-			continue
-		}
-		// flush memory
-		if err = dstFile.Sync(); err != nil {
-			log.Printf("error flusing memory: %v", err)
-			continue
-		}
-		if err := srcFile.Close(); err != nil {
-			log.Printf("error closing file on the remote host %s", fileName)
-			continue
-		}
-		if err := dstFile.Close(); err != nil {
-			log.Printf("error closing file %s locally", fileName)
-			continue
-		}
+// copyFileFrom copies a file from remote directory to the local directory.
+func (w *testWindowsVM) copyFileFrom(sftp *sftp.Client, remotePath, localPath string) error {
+	localFile, err := os.Create(localPath)
+	if err != nil {
+		return fmt.Errorf("error creating file locally: %v", err)
+	}
+	// TODO: Check if there is some performance implication of multiple Open calls.
+	remoteFile, err := sftp.Open(remotePath)
+	if err != nil {
+		return fmt.Errorf("error while opening remote file on the Windows VM: %v", err)
+	}
+	// logging the errors instead of returning to allow closing of files
+	_, err = io.Copy(localFile, remoteFile)
+	if err != nil {
+		log.Printf("error retrieving file %v from Windows VM: %v", localPath, err)
+	}
+	// flush memory
+	if err = localFile.Sync(); err != nil {
+		log.Printf("error flusing memory: %v", err)
+	}
+	if err := remoteFile.Close(); err != nil {
+		log.Printf("error closing file on the remote host %s", localPath)
+	}
+	if err := localFile.Close(); err != nil {
+		log.Printf("error closing file %s locally", localPath)
 	}
 	return nil
 }
