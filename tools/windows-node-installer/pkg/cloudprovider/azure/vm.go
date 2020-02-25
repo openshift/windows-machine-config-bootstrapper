@@ -933,6 +933,45 @@ func (az *AzureProvider) destroyDisk(ctx context.Context, vmInfo compute.Virtual
 	return
 }
 
+// DestroyWindowsVMWithResources destroys the Windows VMs along with all the errors associated with it.
+func (az *AzureProvider) DestroyWindowsVM(vmName string) error {
+	ctx := context.Background()
+	vmInfo, err := az.vmClient.Get(ctx, az.resourceGroupName, vmName, compute.InstanceView)
+	if err != nil {
+		log.Printf("error getting vminfo for %s: %v", vmName, err)
+	}
+	err, nicName := az.getNICname(ctx, vmName)
+	if err != nil {
+		log.Printf("error getting the nic name for %s: %v", vmName, err)
+	}
+	err, ipName := az.getIPname(ctx, vmName)
+	if err != nil {
+		log.Printf("error getting the ip name for the instance %s: %v", vmName, err)
+	}
+
+	err = az.destroyInstance(ctx, vmName)
+	if err != nil {
+		log.Printf("error destroying the instance %s: %v", vmName, err)
+	}
+
+	err = az.destroyNIC(ctx, nicName)
+	if err != nil {
+		log.Printf("error deleting the NIC of instance %s: %v", vmName, err)
+	}
+
+	err = az.destroyIP(ctx, ipName)
+	if err != nil {
+		log.Printf("error deleting the IP of instance %s: %v", vmName, err)
+	}
+
+	// This may still leak resources as we'll not be able to get vm info once the VM gets deleted.
+	err = az.destroyDisk(ctx, vmInfo)
+	if err != nil {
+		log.Printf("error deleting the disk attached to the instance %s: %v", vmName, err)
+	}
+	return nil
+}
+
 // DestroyWindowsVMs destroys all the resources created by the CreateWindows method.
 func (az *AzureProvider) DestroyWindowsVMs() error {
 	// Read from `windows-node-installer.json` file
@@ -950,33 +989,8 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 	var rdpFilePath string
 
 	for _, vmName := range installerInfo.InstanceIDs {
-
-		_, nicName := az.getNICname(ctx, vmName)
-		_, ipName := az.getIPname(ctx, vmName)
-
-		vmInfo, _ := az.vmClient.Get(ctx, az.resourceGroupName, vmName, compute.InstanceView)
-
-		log.Printf("deleting the resources associated with instance %s: %s", vmName, err)
-
-		err = az.destroyInstance(ctx, vmName)
-		if !errorCheck(err) {
-			log.Printf("deleted the instance '%s'", vmName)
-		}
-
-		err = az.destroyNIC(ctx, nicName)
-		if !errorCheck(err) {
-			log.Printf("deleted the NIC of instance")
-		}
-
-		err = az.destroyIP(ctx, ipName)
-		if !errorCheck(err) {
-			log.Printf("deleted the IP of instance")
-		}
-
-		err = az.destroyDisk(ctx, vmInfo)
-		if !errorCheck(err) {
-			log.Printf("deleted the disk attached to the instance")
-		}
+		log.Printf("deleting the resources associated with instance %s", vmName)
+		az.DestroyWindowsVM(vmName)
 
 		rdpFilePath = az.resourceTrackerDir + vmName
 		err = resource.DeleteCredentialData(rdpFilePath)

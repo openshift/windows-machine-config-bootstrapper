@@ -29,6 +29,10 @@ type Cloud interface {
 	// It deletes the security group only if the group is not associated with any instance.
 	// The association between the instance and security group are available from individual cloud provider.
 	DestroyWindowsVMs() error
+	// DestroyWindowsVM destroys a specific instance that was passed to it. It returns an error when the WindowsVM
+	// deletion fails. It takes the instanceID as argument depending on the cloud provider implementation the
+	// instanceID. Let's if we want to slice of instances instead of individual instances
+	DestroyWindowsVM(string) error
 }
 
 // CloudProviderFactory returns cloud specific interface for performing necessary functions related to creating or
