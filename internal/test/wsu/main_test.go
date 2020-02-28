@@ -8,11 +8,13 @@ import (
 	"testing"
 )
 
-// framework holds the instantiation of test suite being executed. As of now, temp dir is hardcoded.
 var (
-	framework = &e2ef.TestFramework{}
+	// Initialize wsuFramework which specializes TestFramework by adding some properties specific to WSU tests
+	framework = wsuFramework{}
 	// TODO: expose this to the end user as a command line flag
 	// vmCount is the number of VMs the test suite requires
+	// Bring up 2 vms to test wsu run with automatic download of WMCB based on cluster version as well as built from
+	// source version
 	vmCount = 2
 )
 
