@@ -119,6 +119,8 @@ func TestWSU(t *testing.T) {
 
 	// Run cluster wide tests
 	t.Run("Pending CSRs were approved", testNoPendingCSRs)
+
+	t.Run("Tests across Windows nodes", testAcrossWindowsNodes)
 }
 
 // testWithoutHybridOverlay ensures that the WSU fails early when hybrid overlay is not enabled
@@ -136,6 +138,21 @@ func testAllVMs(t *testing.T) {
 			runTests(t, framework.WinVMs[i])
 		})
 	}
+}
+
+// testAcrossWindowsNodes runs all the tests across Windows nodes
+func testAcrossWindowsNodes(t *testing.T) {
+	// Need at least two Windows VMs to run these tests, throwing error if this condition is not met
+	require.GreaterOrEqualf(t, len(framework.WinVMs), 2, "Insufficient number of Windows VMs to run tests across"+
+		" VMs, Minimum VM count: 2, Current VM count: %d", len(framework.WinVMs))
+
+	// Selecting first 2 VMs from WinVms to run the tests
+	firstVM := framework.WinVMs[0]
+	secondVM := framework.WinVMs[1]
+
+	t.Run("East-west networking across Windows nodes", func(t *testing.T) {
+		testEastWestNetworkingAcrossWindowsNodes(t, firstVM, secondVM)
+	})
 }
 
 // runTests runs all the tests required for a specific VM
@@ -452,19 +469,56 @@ func testEastWestNetworking(t *testing.T, node *v1.Node, vm e2ef.WindowsVM) {
 	assert.NoError(t, err, "Could not curl the Windows server from a linux container")
 
 	// test Windows <-> Windows on same node
+	winCurlerJob, err := createWinCurlerJob(vm, winServerIP)
+	require.NoError(t, err, "Could not create Windows job")
+	defer deleteJob(winCurlerJob.Name)
+	err = waitUntilJobSucceeds(winCurlerJob.Name)
+	assert.NoError(t, err, "Could not curl the Windows webserver pod from a separate Windows container")
+}
+
+//  testEastWestNetworkingAcrossWindowsNodes deploys Windows pods on two different Nodes, and tests that the pods can communicate
+func testEastWestNetworkingAcrossWindowsNodes(t *testing.T, firstVM e2ef.WindowsVM, secondVM e2ef.WindowsVM) {
+	firstNode, err := framework.GetNode(firstVM.GetCredentials().GetIPAddress())
+	require.NoError(t, err, "Could not get Windows node object from first VM")
+
+	affinityForFirstNode, err := getAffinityForNode(firstNode)
+	require.NoError(t, err, "Could not get affinity for first node")
+
+	// Deploy a webserver pod on the first node
+	winServerDeploymentOnFirstNode, err := deployWindowsWebServer("win-webserver-"+firstVM.GetCredentials().GetInstanceId(),
+		firstVM, affinityForFirstNode)
+	require.NoError(t, err, "Could not create Windows Server deployment on first Node")
+	defer deleteDeployment(winServerDeploymentOnFirstNode.Name)
+
+	// Get the pod so we can use its IP
+	winServerIP, err := getPodIP(*winServerDeploymentOnFirstNode.Spec.Selector)
+	require.NoError(t, err, "Could not retrieve pod with selector %v", *winServerDeploymentOnFirstNode.Spec.Selector)
+
+	// test Windows <-> Windows across nodes
+	winCurlerJobOnSecondNode, err := createWinCurlerJob(secondVM, winServerIP)
+	require.NoError(t, err, "Could not create Windows job on second Node")
+	defer deleteJob(winCurlerJobOnSecondNode.Name)
+	err = waitUntilJobSucceeds(winCurlerJobOnSecondNode.Name)
+	assert.NoError(t, err, "Could not curl the Windows webserver pod on the first node from Windows container "+
+		"on the second node")
+}
+
+//  createWinCurlerJob creates a Job to curl Windows server at given IP address
+func createWinCurlerJob(vm e2ef.WindowsVM, winServerIP string) (*batchv1.Job, error) {
+	winCurlerCommand := getWinCurlerCommand(winServerIP)
+	winCurlerJob, err := createWindowsServerJob("win-curler-"+vm.GetCredentials().GetInstanceId(), winCurlerCommand)
+	return winCurlerJob, err
+}
+
+// getWinCurlerCommand generates a command to curl a Windows server from the given IP address
+func getWinCurlerCommand(winServerIP string) []string {
 	// This will continually try to read from the Windows Server. We have to try multiple times as the Windows container
 	// takes some time to finish initial network setup.
 	winCurlerCommand := []string{"powershell.exe", "-command", "for (($i =0), ($j = 0); $i -lt 10; $i++) { " +
 		"$response = Invoke-Webrequest -UseBasicParsing -Uri " + winServerIP +
 		"; $code = $response.StatusCode; echo \"GET returned code $code\";" +
-		"If ($code -eq 200) {exit 0}; Start-Sleep -s 10;}; exit 1" + winServerIP}
-	winCurlerJob, err := createWindowsServerJob("win-curler-"+vm.GetCredentials().GetInstanceId(), winCurlerCommand)
-	require.NoError(t, err, "Could not create Windows job")
-	defer deleteJob(winCurlerJob.Name)
-	err = waitUntilJobSucceeds(winCurlerJob.Name)
-	assert.NoError(t, err, "Could not curl the Windows webserver pod from a separate Windows container")
-
-	// TODO: test Windows <-> Windows on different node
+		"If ($code -eq 200) {exit 0}; Start-Sleep -s 10;}; exit 1"}
+	return winCurlerCommand
 }
 
 // deployWindowsWebServer creates a deployment with a single Windows Server pod, listening on port 80
