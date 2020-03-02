@@ -54,6 +54,10 @@ To use WSU which builds WMCB for development purposes, set value of `build_wmcb`
 ```
 $ ansible-playbook -i hosts tasks/wsu/main.yaml -v -e "{build_wmcb: True}"
 ```
+
+#### API rate limit exceeded error when running WSU
+WSU playbook uses GitHub API to fetch releases for WMCB. You might encounter API rate limit exceeded error while running WSU playbook in `TASK [Get release]`. The issue occurs due to GitHub rate-limiting unauthenticated requests at 60 requests per hour. As a workaround, wait for the rate-limit to reset (at most 1 hour) before running the playbook again.
+
 ### End to end testing
 The following environment variables need to be set for running the end to end tests of the playbook:
 - ARTIFACT_DIR
