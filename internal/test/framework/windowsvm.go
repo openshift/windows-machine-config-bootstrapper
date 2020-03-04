@@ -35,6 +35,9 @@ type testWindowsVM struct {
 // TestWindowsVM is the interface for interacting with a Windows VM in the test framework. This will hold the
 // specialized information related to test suite
 type TestWindowsVM interface {
+	// CopyFileTo copies the given file to the remote directory in the Windows VM. The remote directory is created if it
+	// does not exist
+	CopyFileTo(string, string) error
 	// RetrieveFiles retrieves the list of file from the directory in the remote Windows VM to the local host. As of
 	// now, we're limiting every file in the remote directory to be written to single directory on the local host
 	RetrieveFiles(string, string) error
@@ -102,6 +105,43 @@ func newWindowsVM(imageID, instanceType string, credentials *types.Credentials, 
 	}
 
 	return w, nil
+}
+
+func (w *testWindowsVM) CopyFileTo(filePath, remoteDir string) error {
+	if w.SSHClient == nil {
+		return fmt.Errorf("CopyFileTo cannot be called without a SSH client")
+	}
+
+	ftp, err := sftp.NewClient(w.SSHClient)
+	if err != nil {
+		return fmt.Errorf("sftp client initialization failed: %v", err)
+	}
+	defer ftp.Close()
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("error opening %s file to be transferred: %v", filePath, err)
+	}
+	defer f.Close()
+
+	if err = ftp.MkdirAll(remoteDir); err != nil {
+		return fmt.Errorf("error creating remote directory %s: %v", remoteDir, err)
+	}
+
+	remoteFile := remoteDir + "\\" + filepath.Base(filePath)
+	dstFile, err := ftp.Create(remoteFile)
+	if err != nil {
+		return fmt.Errorf("error initializing %s file on Windows VMs: %v", remoteFile, err)
+	}
+
+	_, err = io.Copy(dstFile, f)
+	if err != nil {
+		return fmt.Errorf("error copying %s to the Windows VM: %v", filePath, err)
+	}
+
+	// Forcefully close it so that we can execute the binary later
+	dstFile.Close()
+	return nil
 }
 
 // RetrieveFiles retrieves list of files from remote directory to the local directory.

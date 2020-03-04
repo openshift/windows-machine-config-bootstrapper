@@ -46,9 +46,9 @@ type Windows struct {
 
 // WindowsVM is the interface for interacting with a Windows object created by the cloud provider
 type WindowsVM interface {
-	// CopyFile copies the given file to the remote directory in the Windows VM. The remote directory is created if it
+	// CopyFileTo copies the given file to the remote directory in the Windows VM. The remote directory is created if it
 	// does not exist
-	CopyFile(string, string) error
+	CopyFileTo(string, string) error
 	// Run executes the given command remotely on the Windows VM and returns the output of stdout and stderr. If the
 	// bool is set, it implies that the cmd is to be execute in PowerShell.
 	Run(string, bool) (string, string, error)
@@ -64,9 +64,9 @@ type WindowsVM interface {
 	Reinitialize() error
 }
 
-func (w *Windows) CopyFile(filePath, remoteDir string) error {
+func (w *Windows) CopyFileTo(filePath, remoteDir string) error {
 	if w.SSHClient == nil {
-		return fmt.Errorf("CopyFile cannot be called without a SSH client")
+		return fmt.Errorf("CopyFileTo cannot be called without a SSH client")
 	}
 
 	ftp, err := sftp.NewClient(w.SSHClient)

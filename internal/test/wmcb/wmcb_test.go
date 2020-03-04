@@ -95,7 +95,7 @@ func TestWMCB(t *testing.T) {
 		wVM := &wmcbVM{vm}
 		files := strings.Split(*filesToBeTransferred, ",")
 		for _, file := range files {
-			err := wVM.CopyFile(file, remoteDir)
+			err := wVM.CopyFileTo(file, remoteDir)
 			require.NoError(t, err, "error copying %s to the Windows VM", file)
 		}
 		t.Run("Unit", func(t *testing.T) {
@@ -267,7 +267,7 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 	}
 
 	// Copy the created config to C:\Window\Temp\cni\config\cni.conf on the Windows VM
-	err = vm.CopyFile(cniConfigPath, winCNIConfigPath)
+	err = vm.CopyFileTo(cniConfigPath, winCNIConfigPath)
 	if err != nil {
 		return fmt.Errorf("error copying %s --> VM %s: %v", cniConfigPath, winCNIConfigPath, err)
 	}
