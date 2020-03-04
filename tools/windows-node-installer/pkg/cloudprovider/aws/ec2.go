@@ -275,6 +275,20 @@ func (a *AwsProvider) getDecodedPassword(instanceID string) ([]byte, error) {
 
 }
 
+// DestroyWindowsVM destroys the given Windows VM
+func (a *AwsProvider) DestroyWindowsVM(instanceID string) error {
+	if err := a.TerminateInstance(instanceID); err != nil {
+		return fmt.Errorf("failed deleting the instance %s: %v", instanceID, err)
+	}
+	if err := a.waitUntilInstanceTerminated(instanceID); err != nil {
+		// As of now, I want the error thrown to be consistent across all cloud providers, so I am not specializing
+		// the information in the error message string but the err will have more context. This is cause our operator
+		// to block for a while
+		return fmt.Errorf("failed deleting the instance %s: %v", instanceID, err)
+	}
+	return nil
+}
+
 // waitUntilPasswordDataIsAvailable waits till the ec2 password data is available.
 // AWS sdk's WaitUntilPasswordDataAvailable is returning inspite of password data being available.
 // So, building this function as a wrapper around AWS sdk's GetPasswordData method with constant back-off
