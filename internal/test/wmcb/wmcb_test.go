@@ -75,7 +75,7 @@ var (
 
 // wmcbVM is a wrapper for the WindowsVM interface that associates it with WMCB specific testing
 type wmcbVM struct {
-	e2ef.WindowsVM
+	e2ef.TestWindowsVM
 }
 
 // pkg encapsulates information about a package

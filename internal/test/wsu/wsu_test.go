@@ -77,7 +77,7 @@ func (f *wsuFramework) Setup(vmCount int, credentials []*types.Credentials, skip
 }
 
 // createhostFile creates an ansible host file for the VMs we have spun up
-func createHostFile(vmList []e2ef.WindowsVM) (string, error) {
+func createHostFile(vmList []e2ef.TestWindowsVM) (string, error) {
 	hostFile, err := ioutil.TempFile("", "testWSU")
 	if err != nil {
 		return "", fmt.Errorf("coud not make temporary file: %s", err)
@@ -156,7 +156,7 @@ func testAcrossWindowsNodes(t *testing.T) {
 }
 
 // runTests runs all the tests required for a specific VM
-func runTests(t *testing.T, vm e2ef.WindowsVM) {
+func runTests(t *testing.T, vm e2ef.TestWindowsVM) {
 	// Indicate that we can run the test suite on each node in parallel
 	t.Parallel()
 
@@ -168,7 +168,7 @@ func runTests(t *testing.T, vm e2ef.WindowsVM) {
 }
 
 // runWSUAndTest runs the WSU and runs tests against the setup node
-func runWSUAndTest(t *testing.T, vm e2ef.WindowsVM) {
+func runWSUAndTest(t *testing.T, vm e2ef.TestWindowsVM) {
 	// TODO: Think of a better way to refactor this function later to get just output that can be consumed by framework.
 	// Run the WSU against the VM
 	wsuOut, err := runWSU(vm)
@@ -183,7 +183,7 @@ func runWSUAndTest(t *testing.T, vm e2ef.WindowsVM) {
 }
 
 // captureWSULogs saves the WSU logs to the artifact directory
-func captureWSULogs(wsuOut []byte, vm e2ef.WindowsVM, logFileName string) {
+func captureWSULogs(wsuOut []byte, vm e2ef.TestWindowsVM, logFileName string) {
 	externalIP := vm.GetCredentials().GetIPAddress()
 	nodeName, err := framework.GetNodeName(externalIP)
 	if err != nil {
@@ -198,12 +198,12 @@ func captureWSULogs(wsuOut []byte, vm e2ef.WindowsVM, logFileName string) {
 }
 
 // runWSU runs the WSU playbook against a VM. Returns WSU stdout
-func runWSU(vm e2ef.WindowsVM) ([]byte, error) {
+func runWSU(vm e2ef.TestWindowsVM) ([]byte, error) {
 	var ansibleCmd *exec.Cmd
 
 	// In order to run the ansible playbook we create an inventory file:
 	// https://docs.ansible.com/ansible/latest/user_guide/intro_inventory.html
-	hostFilePath, err := createHostFile([]e2ef.WindowsVM{vm})
+	hostFilePath, err := createHostFile([]e2ef.TestWindowsVM{vm})
 	if err != nil {
 		return nil, err
 	}
@@ -240,7 +240,7 @@ func getAnsibleTempDirPath(ansibleOutput string) (string, error) {
 }
 
 // runE2ETestSuite runs the WSU test suite against a VM
-func runE2ETestSuite(t *testing.T, vm e2ef.WindowsVM, ansibleOutput string) {
+func runE2ETestSuite(t *testing.T, vm e2ef.TestWindowsVM, ansibleOutput string) {
 	tempDirPath, err := getAnsibleTempDirPath(ansibleOutput)
 	require.NoError(t, err, "Could not get path of Ansible temp directory")
 
@@ -306,7 +306,7 @@ func testBuiltWMCB(t *testing.T, ansibleOutput string) {
 
 // testCNIConfig tests if the CNI config has required hostsubnet and servicenetwork CIDR
 // NOTE: split this into multiple tests when this grows
-func testCNIConfig(t *testing.T, node *v1.Node, vm e2ef.WindowsVM, ansibleTempDir string) {
+func testCNIConfig(t *testing.T, node *v1.Node, vm e2ef.TestWindowsVM, ansibleTempDir string) {
 	// Read the CNI config present on the Windows host
 	cniConfigFilePath := filepath.Join(ansibleTempDir, "cni", "config", "cni.conf")
 	cniConfigFileContents, err := readRemoteFile(cniConfigFilePath, vm)
@@ -329,7 +329,7 @@ func testCNIConfig(t *testing.T, node *v1.Node, vm e2ef.WindowsVM, ansibleTempDi
 }
 
 // testFilesCopied tests that the files we attempted to copy to the Windows host, exist on the Windows host
-func testFilesCopied(t *testing.T, vm e2ef.WindowsVM, ansibleTempDir string) {
+func testFilesCopied(t *testing.T, vm e2ef.TestWindowsVM, ansibleTempDir string) {
 	expectedFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe", "hybrid-overlay.exe", "kube.tar.gz"}
 
 	// Check if each of the files we expect on the Windows host are there
@@ -380,7 +380,7 @@ func testWorkerLabelsArePresent(t *testing.T, node *v1.Node) {
 }
 
 // readRemoteFile returns the contents of a remote file. Returns an error on winRM failure, or if it does not exist.
-func readRemoteFile(fileName string, vm e2ef.WindowsVM) (string, error) {
+func readRemoteFile(fileName string, vm e2ef.TestWindowsVM) (string, error) {
 	stdout, _, err := vm.Run("cat "+fileName, true)
 	if err != nil {
 		return "", fmt.Errorf("WinRM failure trying to run cat: %s", err)
@@ -395,7 +395,7 @@ func testHybridOverlayAnnotations(t *testing.T, node *v1.Node) {
 }
 
 // testHNSNetworksCreated tests that the required HNS Networks have been created on the bootstrapped node
-func testHNSNetworksCreated(t *testing.T, vm e2ef.WindowsVM) {
+func testHNSNetworksCreated(t *testing.T, vm e2ef.TestWindowsVM) {
 	stdout, _, err := vm.Run("Get-HnsNetwork", true)
 	require.NoError(t, err, "Could not run Get-HnsNetwork command")
 	assert.Contains(t, stdout, "Name                   : BaseOpenShiftNetwork",
@@ -443,7 +443,7 @@ func getPodEvents(name string) ([]v1.Event, error) {
 }
 
 // testEastWestNetworking deploys Windows and Linux pods, and tests that the pods can communicate
-func testEastWestNetworking(t *testing.T, node *v1.Node, vm e2ef.WindowsVM) {
+func testEastWestNetworking(t *testing.T, node *v1.Node, vm e2ef.TestWindowsVM) {
 	affinity, err := getAffinityForNode(node)
 	require.NoError(t, err, "Could not get affinity for node")
 
@@ -477,7 +477,7 @@ func testEastWestNetworking(t *testing.T, node *v1.Node, vm e2ef.WindowsVM) {
 }
 
 //  testEastWestNetworkingAcrossWindowsNodes deploys Windows pods on two different Nodes, and tests that the pods can communicate
-func testEastWestNetworkingAcrossWindowsNodes(t *testing.T, firstVM e2ef.WindowsVM, secondVM e2ef.WindowsVM) {
+func testEastWestNetworkingAcrossWindowsNodes(t *testing.T, firstVM e2ef.TestWindowsVM, secondVM e2ef.TestWindowsVM) {
 	firstNode, err := framework.GetNode(firstVM.GetCredentials().GetIPAddress())
 	require.NoError(t, err, "Could not get Windows node object from first VM")
 
@@ -504,7 +504,7 @@ func testEastWestNetworkingAcrossWindowsNodes(t *testing.T, firstVM e2ef.Windows
 }
 
 //  createWinCurlerJob creates a Job to curl Windows server at given IP address
-func createWinCurlerJob(vm e2ef.WindowsVM, winServerIP string) (*batchv1.Job, error) {
+func createWinCurlerJob(vm e2ef.TestWindowsVM, winServerIP string) (*batchv1.Job, error) {
 	winCurlerCommand := getWinCurlerCommand(winServerIP)
 	winCurlerJob, err := createWindowsServerJob("win-curler-"+vm.GetCredentials().GetInstanceId(), winCurlerCommand)
 	return winCurlerJob, err
@@ -522,7 +522,7 @@ func getWinCurlerCommand(winServerIP string) []string {
 }
 
 // deployWindowsWebServer creates a deployment with a single Windows Server pod, listening on port 80
-func deployWindowsWebServer(name string, vm e2ef.WindowsVM, affinity *v1.Affinity) (*appsv1.Deployment, error) {
+func deployWindowsWebServer(name string, vm e2ef.TestWindowsVM, affinity *v1.Affinity) (*appsv1.Deployment, error) {
 	// Preload the image that will be used on the Windows node, to prevent download timeouts
 	// and separate possible failure conditions into multiple operations
 	err := pullDockerImage(windowsServerImage, vm)
@@ -726,7 +726,7 @@ func deleteDeployment(name string) error {
 }
 
 // pullDockerImage pulls the designated image on the remote host
-func pullDockerImage(name string, vm e2ef.WindowsVM) error {
+func pullDockerImage(name string, vm e2ef.TestWindowsVM) error {
 	command := "docker pull " + name
 	_, _, err := vm.Run(command, false)
 	if err != nil {
@@ -736,7 +736,7 @@ func pullDockerImage(name string, vm e2ef.WindowsVM) error {
 }
 
 // testNorthSouthNetworking deploys a Windows Server pod, and tests that we can network with it from outside the cluster
-func testNorthSouthNetworking(t *testing.T, node *v1.Node, vm e2ef.WindowsVM) {
+func testNorthSouthNetworking(t *testing.T, node *v1.Node, vm e2ef.TestWindowsVM) {
 	affinity, err := getAffinityForNode(node)
 	require.NoError(t, err, "Could not get affinity for node")
 

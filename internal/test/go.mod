@@ -18,12 +18,11 @@ require (
 	github.com/googleapis/gnostic v0.4.0 // indirect
 	github.com/imdario/mergo v0.3.8 // indirect
 	github.com/json-iterator/go v1.1.9 // indirect
-	github.com/masterzen/winrm v0.0.0-20190308153735-1d17eaf15943
 	github.com/openshift/client-go v0.0.0-00010101000000-000000000000
-	github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200219203823-675f779e3e8e
-	github.com/pkg/sftp v1.10.1
+	github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200304171500-1009dc222b8c
+	github.com/pkg/sftp v1.11.0
 	github.com/stretchr/testify v1.4.0
-	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c
+	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c // indirect
 	golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d // indirect
 	golang.org/x/time v0.0.0-20191024005414-555d28b269f0 // indirect
 	k8s.io/api v0.16.7

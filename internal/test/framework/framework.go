@@ -56,7 +56,7 @@ var (
 // TestFramework holds the info to run the test suite.
 type TestFramework struct {
 	// WinVms contains the Windows VMs that are created to execute the test suite
-	WinVMs []WindowsVM
+	WinVMs []TestWindowsVM
 	// k8sclientset is the kubernetes clientset we will use to query the cluster's status
 	K8sclientset *kubernetes.Clientset
 	// OSConfigClient is the OpenShift config client, we will use to query the OpenShift api object status
@@ -141,7 +141,7 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 	if err := initCIvars(); err != nil {
 		return fmt.Errorf("unable to initialize CI variables: %v", err)
 	}
-	f.WinVMs = make([]WindowsVM, vmCount)
+	f.WinVMs = make([]TestWindowsVM, vmCount)
 	// TODO: make them run in parallel: https://issues.redhat.com/browse/WINC-178
 	for i := 0; i < vmCount; i++ {
 		var err error
