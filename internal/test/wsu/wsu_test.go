@@ -285,6 +285,9 @@ func runE2ETestSuite(t *testing.T, vm e2ef.TestWindowsVM, ansibleOutput string) 
 	t.Run("Check cni config generated on the Windows host", func(t *testing.T) {
 		testCNIConfig(t, node, vm, tempDirPath)
 	})
+	t.Run("Kubelet is running with the latest 0.8.x version of CNI Plugins", func(t *testing.T) {
+		testCNIPluginsVersion(t, vm)
+	})
 	t.Run("East-west networking", func(t *testing.T) {
 		testEastWestNetworking(t, node, vm)
 	})
@@ -337,6 +340,43 @@ func testCNIConfig(t *testing.T, node *v1.Node, vm e2ef.TestWindowsVM, ansibleTe
 		len(serviceNetworks))
 	requiredServiceNetwork := serviceNetworks[0]
 	assert.Contains(t, cniConfigFileContents, requiredServiceNetwork, "CNI config does not contain service network")
+}
+
+// testCNIPluginsVersion tests if the kubelet on the Windows VM is running with latest 0.8.x version of CNI Plugins
+func testCNIPluginsVersion(t *testing.T, vm e2ef.TestWindowsVM) {
+	// Fetching kubelet service image path which includes the  directory path of the CNI Plugin binaries
+	// Example kubelet service image path: c:\k\kubelet.exe --windows-service --bootstrap-kubeconfig=c:\k\bootstrap-kubeconfig
+	// --kubeconfig=c:\k\kubeconfig --network-plugin=cni --cni-bin-dir=c:\k\cni --log-file=c:\k\log\kubelet.log
+	// --node-labels=node.openshift.io/os_id=Windows --cloud-provider=aws --resolv-conf="" --config=c:\k\kubelet.conf
+	// --pod-infra-container-image=mcr.microsoft.com/k8s/core/pause:1.2.0 --logtostderr=false --v=3
+	// --cert-dir=c:\var\lib\kubelet\pki\ --register-with-taints=os=Windows:NoSchedule --cni-conf-dir=c:\k\cni\config
+	kubeletImagePath, _, err := vm.Run("$service=get-wmiobject -query \\\"select * from win32_service "+
+		"where name='kubelet'\\\"; echo $service.pathname", true)
+	require.NoError(t, err, "Could not fetch image path of the kubelet service")
+	// Extracting directory path of the CNI Plugin binaries from kubelet service image path
+	var cniBinaryDir string
+	kubeletArgs := strings.Split(kubeletImagePath, " ")
+	for _, kubeletArg := range kubeletArgs {
+		// if kubelet arg is of the form --<option>=<value> and option='--cni-bn-dir' then its value will be the required
+		// directory path of the CNI Plugin binaries
+		kubeletArgOptionAndValue := strings.Split(kubeletArg, "=")
+		if len(kubeletArgOptionAndValue) == 2 && kubeletArgOptionAndValue[0] == "--cni-bin-dir" {
+			cniBinaryDir = kubeletArgOptionAndValue[1]
+			break
+		}
+	}
+	// Fetching names of CNI Plugins as a comma separated string
+	// Example: flannel,host-local,win-bridge,win-overlay
+	pluginNamesCommaSeparated, _, err := vm.Run("(gci -FILE "+cniBinaryDir+").basename -join ','", true)
+	pluginNames := strings.Split(pluginNamesCommaSeparated, ",")
+	// Executing each CNI Plugin to check if it is of latest 0.8.x version
+	for _, pluginName := range pluginNames {
+		// Example stderr after executing plugin executable: CNI win-overlay plugin v0.8.2
+		_, pluginExecutionStderr, err := vm.Run(cniBinaryDir+"\\"+pluginName, true)
+		require.NoError(t, err, "Could not execute CNI Plugin "+pluginName)
+		assert.Contains(t, pluginExecutionStderr, framework.LatestCniPluginsVersion, "CNI Plugin "+
+			pluginName+" is not of latest 0.8.x version")
+	}
 }
 
 // testRemoteFilesExist tests that the files we expect, exist on the Windows host

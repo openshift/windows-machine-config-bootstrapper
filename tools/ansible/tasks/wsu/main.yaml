@@ -215,7 +215,7 @@
         # from the file
         - name: Get the SHA for cni plugins
           shell: |
-            cat {{ tmp_dir.path }}/cni_plugins_checksum_file | awk -F ' ' '{ print $1 }'
+            cat {{ tmp_dir.path }}/cni_plugins_checksum_file | awk -F ' ' '{print $1}'
           register: cni_plugins_sha
           failed_when: cni_plugins_sha.stdout == ""
 
@@ -236,6 +236,12 @@
           unarchive:
             src: "{{ tmp_dir.path }}/cni_plugins.tgz"
             dest: "{{ tmp_dir.path }}/cni"
+
+        # Removing cni_plugins.tgz from temporary directory as we do not want to copy it to Windows VM
+        - name: Remove cni plugins tar
+          file:
+            path: "{{ tmp_dir.path }}/cni_plugins.tgz"
+            state: absent
 
 - hosts: win
   vars:

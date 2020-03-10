@@ -66,11 +66,7 @@ var (
 		shaType: "sha512",
 	}
 	// cniPlugins contains information about the CNI plugin package
-	cniPlugins = pkgInfo{
-		url:     "https://github.com/containernetworking/plugins/releases/download/v0.8.2/cni-plugins-windows-amd64-v0.8.2.tgz",
-		sha:     "705a760673fd9e2164ac38f0df7d739ca6c3ec4f4204b0c439227ec6da7cb153859013c917e7f8f1a9456365dd9193f627a7e9e4e1981725cab89bb5ab881ec0",
-		shaType: "sha512",
-	}
+	cniPlugins = pkgInfo{}
 )
 
 // wmcbVM is a wrapper for the WindowsVM interface that associates it with WMCB specific testing
@@ -88,9 +84,29 @@ type pkgInfo struct {
 	shaType string
 }
 
+func initializeCniPluginsPkgInfo() error {
+	cniPluginsURL, err := framework.GetLatestCniPluginsURL()
+	if err != nil {
+		return fmt.Errorf("unable to get URL for CNI Plugins: %v", err)
+	}
+	cniPlugins.url = cniPluginsURL
+
+	cniPluginsSHA, err := framework.GetLatestCniPluginsSHA()
+	if err != nil {
+		return fmt.Errorf("unable to get SHA for CNI Plugins: %v", err)
+	}
+	cniPlugins.sha = cniPluginsSHA
+
+	cniPlugins.shaType = "sha512"
+	return nil
+}
+
 // TestWMCB runs the unit and e2e tests for WMCB on the remote VMs
 func TestWMCB(t *testing.T) {
 	remoteDir := "C:\\Temp"
+	err := initializeCniPluginsPkgInfo()
+	require.NoError(t, err, "error while initializing CNI Plugins package info")
+
 	for _, vm := range framework.WinVMs {
 		wVM := &wmcbVM{vm}
 		files := strings.Split(*filesToBeTransferred, ",")
