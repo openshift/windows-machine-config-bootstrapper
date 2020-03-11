@@ -375,10 +375,11 @@ func (f *TestFramework) RetrieveArtifacts() {
 		if err := vm.Reinitialize(); err != nil {
 			log.Printf("failed re-initializing ssh connectivity with on vm %s: %v", instanceID, err)
 		}
-		// Get the VM's private ip and populate log files in the test container.
-		// Make this a map["'"artifact_that_we_want_to_pull"]="log_file.name"
-		if err := vm.RetrieveFiles(remoteLogPath, localKubeletLogPath); err != nil {
-			log.Printf("failed retrieving log files on vm %s: %v", instanceID, err)
+		// TODO: Make this a map["'"artifact_that_we_want_to_pull"]="log_file.name" to only capture
+		//  the logs we are interested in, to avoid capturing every directory in c:\\k\\log
+		// Retrieve directories copies the directories from remote VM to the Artifacts directory
+		if err := vm.RetrieveDirectories(remoteLogPath, localKubeletLogPath); err != nil {
+			log.Printf("failed retrieving log directories on vm %s: %v", instanceID, err)
 			continue
 		}
 	}

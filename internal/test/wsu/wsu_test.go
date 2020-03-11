@@ -39,6 +39,9 @@ var (
 	ubi8Image = "registry.access.redhat.com/ubi8/ubi:latest"
 )
 
+const hybridOverlayDir = "C:\\k\\log\\hybrid-overlay"
+const kubeProxyDir = "C:\\k\\log\\kube-proxy"
+
 type wsuFramework struct {
 	// TestFramework holds the instantiation of test suite being executed
 	*e2ef.TestFramework
@@ -244,11 +247,15 @@ func runE2ETestSuite(t *testing.T, vm e2ef.TestWindowsVM, ansibleOutput string) 
 	tempDirPath, err := getAnsibleTempDirPath(ansibleOutput)
 	require.NoError(t, err, "Could not get path of Ansible temp directory")
 
+	binaryFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe", "hybrid-overlay.exe", "kube.tar.gz"}
+	hybridOverlaylogList := []string{"hybridOverlayStdout.log", "hybridOverlayStderr.log"}
+	kubeProxylogList := []string{"kube-proxy.exe.INFO", "kube-proxy.exe.WARNING"}
+
 	node, err := framework.GetNode(vm.GetCredentials().GetIPAddress())
 	require.NoError(t, err, "Could not get Windows node object")
 
 	t.Run("Files copied to Windows node", func(t *testing.T) {
-		testFilesCopied(t, vm, tempDirPath)
+		testRemoteFilesExist(t, vm, binaryFileList, tempDirPath)
 	})
 	if vm.BuildWMCB() {
 		t.Run("Check if wmcb was built", func(t *testing.T) {
@@ -261,6 +268,10 @@ func runE2ETestSuite(t *testing.T, vm e2ef.TestWindowsVM, ansibleOutput string) 
 	}
 	t.Run("Node is in ready state", func(t *testing.T) {
 		testNodeReady(t, node)
+	})
+	t.Run("check if hybrid-overlay and kube-proxy log exists", func(t *testing.T) {
+		testRemoteFilesExist(t, vm, kubeProxylogList, kubeProxyDir)
+		testRemoteFilesExist(t, vm, hybridOverlaylogList, hybridOverlayDir)
 	})
 	t.Run("Check if worker label has been applied to the Windows node", func(t *testing.T) {
 		testWorkerLabelsArePresent(t, node)
@@ -328,13 +339,11 @@ func testCNIConfig(t *testing.T, node *v1.Node, vm e2ef.TestWindowsVM, ansibleTe
 	assert.Contains(t, cniConfigFileContents, requiredServiceNetwork, "CNI config does not contain service network")
 }
 
-// testFilesCopied tests that the files we attempted to copy to the Windows host, exist on the Windows host
-func testFilesCopied(t *testing.T, vm e2ef.TestWindowsVM, ansibleTempDir string) {
-	expectedFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe", "hybrid-overlay.exe", "kube.tar.gz"}
-
+// testRemoteFilesExist tests that the files we expect, exist on the Windows host
+func testRemoteFilesExist(t *testing.T, vm e2ef.TestWindowsVM, expectedFileList []string, directoryPath string) {
 	// Check if each of the files we expect on the Windows host are there
 	for _, filename := range expectedFileList {
-		fullPath := ansibleTempDir + "\\" + filename
+		fullPath := directoryPath + "\\" + filename
 		// This command will write to stdout, only if the file we are looking for does not exist
 		command := fmt.Sprintf("if not exist %s echo fail", fullPath)
 		stdout, _, err := vm.Run(command, false)
