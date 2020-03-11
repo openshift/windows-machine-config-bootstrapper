@@ -1,15 +1,12 @@
 package framework
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -40,8 +37,6 @@ const (
 	// remoteLogPath is the directory where all the log files related to components that we need are generated on the
 	// Windows VM
 	remoteLogPath = "C:\\k\\log\\"
-	// cniPluginsBaseURL is the base URL of the CNI Plugins location
-	cniPluginsBaseURL = "https://github.com/containernetworking/plugins/releases/download/"
 )
 
 var (
@@ -181,9 +176,6 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 	if err := f.getLatestGithubRelease(); err != nil {
 		return fmt.Errorf("unable to get latest github release: %v", err)
 	}
-	if err := f.getLatestCniPluginsVersion(); err != nil {
-		return fmt.Errorf("unable to get latest 0.8.x version of CNI Plugins: %v", err)
-	}
 	return nil
 }
 
@@ -246,15 +238,21 @@ func (f *TestFramework) getClusterVersion() error {
 	return nil
 }
 
+// GetGithubReleases gets all the github releases for a given owner and repo
+func (f *TestFramework) GetGithubReleases(owner string, repo string) ([]*github.RepositoryRelease, error) {
+	// Initializing a client for using the Github API
+	client := github.NewClient(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+	defer cancel()
+	releases, _, err := client.Repositories.ListReleases(ctx, owner, repo,
+		&github.ListOptions{})
+	return releases, err
+}
+
 // getLatestGithubRelease gets the latest github release for the wmcb repo. This release is specific to the cluster
 // version
 func (f *TestFramework) getLatestGithubRelease() error {
-	client := github.NewClient(nil)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
-	defer cancel()
-	releases, _, err := client.Repositories.ListReleases(ctx, "openshift", "windows-machine-config-bootstrapper",
-		&github.ListOptions{})
+	releases, err := f.GetGithubReleases("openshift", "windows-machine-config-bootstrapper")
 	if err != nil {
 		return err
 	}
@@ -292,67 +290,6 @@ func (f *TestFramework) GetReleaseArtifactSHA(artifactName string) (string, erro
 		}
 	}
 	return "", fmt.Errorf("no artifact with name %s", artifactName)
-}
-
-// getLatestCniPluginsVersion returns the latest 0.8.x version of CNI plugins in 'v<major>.<minor>.<patch>' format
-func (f *TestFramework) getLatestCniPluginsVersion() error {
-	client := github.NewClient(nil)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
-	defer cancel()
-	releases, _, err := client.Repositories.ListReleases(ctx, "containernetworking", "plugins",
-		&github.ListOptions{})
-	if err != nil {
-		return err
-	}
-	// Iterating over releases to fetch versions from tag names
-	var cniPluginsVersions = []string{}
-	for _, release := range releases {
-		cniPluginsVersions = append(cniPluginsVersions, release.GetTagName())
-	}
-	// Sorting versions in reverse order so as to get latest version first
-	sort.Sort(sort.Reverse(sort.StringSlice(cniPluginsVersions)))
-	// Iterating over versions to find first 0.8.x version which is not a release candidate
-	for _, cniPluginsVersion := range cniPluginsVersions {
-		if strings.HasPrefix(cniPluginsVersion, "v0.8.") && !strings.Contains(cniPluginsVersion, "rc") {
-			f.LatestCniPluginsVersion = cniPluginsVersion
-			return nil
-		}
-	}
-	return fmt.Errorf("could not fetch latest 0.8.x version of CNI Plugins")
-}
-
-// GetLatestCniPluginsURL returns the URL of the latest 0.8.x version of CNI Plugins
-func (f *TestFramework) GetLatestCniPluginsURL() (string, error) {
-	latestCniPluginsURL := cniPluginsBaseURL + f.LatestCniPluginsVersion + "/cni-plugins-windows-amd64-" +
-		f.LatestCniPluginsVersion + ".tgz"
-	return latestCniPluginsURL, nil
-}
-
-// GetLatestCniPluginsSHA returns the SHA512 of the latest 0.8.x version of CNI Plugins
-func (f *TestFramework) GetLatestCniPluginsSHA() (string, error) {
-	latestCniPluginsURL, err := f.GetLatestCniPluginsURL()
-	if err != nil {
-		return "", fmt.Errorf("could not fetch latest CNI Plugins URL: %s", err)
-	}
-
-	latestCniPluginsChecksumFileURL := latestCniPluginsURL + ".sha512"
-	response, err := http.Get(latestCniPluginsChecksumFileURL)
-	if err != nil {
-		return "", fmt.Errorf("could not fetch CNI Plugins checksum file: %s", err)
-	}
-	defer response.Body.Close()
-
-	var checksumFileContent string
-	// Fetching checksum file content from the GET Response
-	scanner := bufio.NewScanner(response.Body)
-	for scanner.Scan() {
-		checksumFileContent = scanner.Text()
-	}
-	// The checksum file content is in the format "<sha> <filename>". So to get SHA we need to extract only the <sha>
-	// from the file
-	sha512 := strings.Split(checksumFileContent, " ")[0]
-	return sha512, nil
 }
 
 // GetNode returns a pointer to the node object associated with the external IP provided

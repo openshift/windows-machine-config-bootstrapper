@@ -357,17 +357,25 @@ func testCNIPluginsVersion(t *testing.T, vm e2ef.TestWindowsVM) {
 	var cniBinaryDir string
 	kubeletArgs := strings.Split(kubeletImagePath, " ")
 	for _, kubeletArg := range kubeletArgs {
-		// if kubelet arg is of the form --<option>=<value> and option='--cni-bn-dir' then its value will be the required
+		kubeletArgOptionAndValue := strings.Split(strings.TrimSpace(kubeletArg), "=")
+		// if kubelet arg is of the form --<option>=<value> and option='--network-plugin' does not have value='cni' then
+		// we throw error since CNI Plugins are not enabled
+		if len(kubeletArgOptionAndValue) == 2 && kubeletArgOptionAndValue[0] == "--network-plugin" &&
+			kubeletArgOptionAndValue[1] != "cni" {
+			err := fmt.Errorf("kubelet arg '--network-plugin' should have value 'cni', current value is '%s'",
+				kubeletArgOptionAndValue[1])
+			require.NoError(t, err, "CNI Plugins are not enabled")
+		}
+		// if kubelet arg is of the form --<option>=<value> and option='--cni-bin-dir' then its value will be the required
 		// directory path of the CNI Plugin binaries
-		kubeletArgOptionAndValue := strings.Split(kubeletArg, "=")
 		if len(kubeletArgOptionAndValue) == 2 && kubeletArgOptionAndValue[0] == "--cni-bin-dir" {
 			cniBinaryDir = kubeletArgOptionAndValue[1]
-			break
 		}
 	}
 	// Fetching names of CNI Plugins as a comma separated string
 	// Example: flannel,host-local,win-bridge,win-overlay
 	pluginNamesCommaSeparated, _, err := vm.Run("(gci -FILE "+cniBinaryDir+").basename -join ','", true)
+	require.NoError(t, err, "Could not fetch comma separated names of CNI Plugins from directory %s", cniBinaryDir)
 	pluginNames := strings.Split(pluginNamesCommaSeparated, ",")
 	// Executing each CNI Plugin to check if it is of latest 0.8.x version
 	for _, pluginName := range pluginNames {
