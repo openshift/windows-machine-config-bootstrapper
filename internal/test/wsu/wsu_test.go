@@ -372,6 +372,8 @@ func testCNIPluginsVersion(t *testing.T, vm e2ef.TestWindowsVM) {
 			cniBinaryDir = kubeletArgOptionAndValue[1]
 		}
 	}
+	// Throwing error if directory of CNI Plugin binaries could not be fetched from kubelet service image path
+	require.NotEmpty(t, cniBinaryDir, "Could not fetch directory path of CNI Plugin binaries")
 	// Fetching names of CNI Plugins as a comma separated string
 	// Example: flannel,host-local,win-bridge,win-overlay
 	pluginNamesCommaSeparated, _, err := vm.Run("(gci -FILE "+cniBinaryDir+").basename -join ','", true)

@@ -11,7 +11,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 	"text/template"
@@ -71,8 +70,6 @@ var (
 		sha:     "a88e7a1c6f72ea6073dbb4ddfe2e7c8bd37c9a56d94a33823f531e303a9915e7a844ac5880097724e44dfa7f4a9659d14b79cc46e2067f6b13e6df3f3f1b0f64",
 		shaType: "sha512",
 	}
-	// cniPlugins contains information about the CNI plugin package
-	cniPlugins = pkgInfo{}
 )
 
 // wmcbVM is a wrapper for the WindowsVM interface that associates it with WMCB specific testing
@@ -93,35 +90,27 @@ type pkgInfo struct {
 type wmcbFramework struct {
 	// TestFramework holds the instantiation of test suite being executed
 	*e2ef.TestFramework
-	// latestCniPluginsVersion is the latest 0.8.x version of CNI Plugins
-	LatestCniPluginsVersion string
+	// cniPlugins contains information about the CNI plugin package
+	cniPlugins pkgInfo
 }
 
 // Setup initializes the wsuFramework.
 func (f *wmcbFramework) Setup(vmCount int, credentials []*types.Credentials, skipVMsetup bool) error {
 	f.TestFramework = &e2ef.TestFramework{}
-
-	if err := f.getLatestCniPluginsVersion(); err != nil {
-		return fmt.Errorf("unable to get latest 0.8.x version of CNI Plugins: %v", err)
+	// Set up the framework
+	err := f.TestFramework.Setup(vmCount, credentials, skipVMsetup)
+	if err != nil {
+		return fmt.Errorf("framework setup failed: %v", err)
 	}
 	if err := f.initializeCniPluginsPkgInfo(); err != nil {
 		return fmt.Errorf("unable to initialize CNI Plugins package info: %v", err)
 	}
-
-	// Set up the framework
-	err := f.TestFramework.Setup(vmCount, credentials, skipVMsetup)
-	if err != nil {
-		fmt.Errorf("framework setup failed: %v", err)
-		return err
-	}
-
 	return nil
 }
 
 // TestWMCB runs the unit and e2e tests for WMCB on the remote VMs
 func TestWMCB(t *testing.T) {
 	remoteDir := "C:\\Temp"
-
 	for _, vm := range framework.WinVMs {
 		wVM := &wmcbVM{vm}
 		files := strings.Split(*filesToBeTransferred, ",")
@@ -280,13 +269,13 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 		return fmt.Errorf("unable to create remote directory %s: %v\n%s", remoteDir, err, stderr)
 	}
 
-	cniUrl, err := url.Parse(cniPlugins.url)
+	cniUrl, err := url.Parse(framework.cniPlugins.url)
 	if err != nil {
-		return fmt.Errorf("error parsing %s: %v", cniPlugins.url, err)
+		return fmt.Errorf("error parsing %s: %v", framework.cniPlugins.url, err)
 	}
 
 	// Download and extract the CNI binaries on the Windows VM
-	err = vm.remoteDownloadExtract(cniPlugins, remoteDir+path.Base(cniUrl.Path), winCNIDir)
+	err = vm.remoteDownloadExtract(framework.cniPlugins, remoteDir+path.Base(cniUrl.Path), winCNIDir)
 	if err != nil {
 		return fmt.Errorf("unable to download CNI package: %v", err)
 	}
@@ -648,51 +637,24 @@ func testWMCBCluster(t *testing.T) {
 
 // initializeCNIPluginsPkgInfo populates the fields of cniPlugins
 func (f *wmcbFramework) initializeCniPluginsPkgInfo() error {
-	cniPlugins.url = framework.GetLatestCniPluginsURL()
+	f.cniPlugins = pkgInfo{}
 
-	cniPluginsSHA, err := framework.GetLatestCniPluginsSHA()
+	f.cniPlugins.url = cniPluginsBaseURL + f.TestFramework.LatestCniPluginsVersion + "/cni-plugins-windows-amd64-" +
+		f.TestFramework.LatestCniPluginsVersion + ".tgz"
+
+	cniPluginsSHA, err := framework.getLatestCniPluginsSHA()
 	if err != nil {
 		return fmt.Errorf("unable to get SHA for CNI Plugins: %v", err)
 	}
-	cniPlugins.sha = cniPluginsSHA
+	f.cniPlugins.sha = cniPluginsSHA
 
-	cniPlugins.shaType = "sha512"
+	f.cniPlugins.shaType = "sha512"
 	return nil
 }
 
-// getLatestCniPluginsVersion returns the latest 0.8.x version of CNI plugins in 'v<major>.<minor>.<patch>' format
-func (f *wmcbFramework) getLatestCniPluginsVersion() error {
-	releases, err := f.TestFramework.GetGithubReleases("containernetworking", "plugins")
-	if err != nil {
-		return err
-	}
-	// Iterating over releases to fetch versions from tag names
-	var cniPluginsVersions = []string{}
-	for _, release := range releases {
-		cniPluginsVersions = append(cniPluginsVersions, release.GetTagName())
-	}
-	// Sorting versions in reverse order so as to get latest version first
-	sort.Sort(sort.Reverse(sort.StringSlice(cniPluginsVersions)))
-	// Iterating over versions to find first 0.8.x version which is not a release candidate
-	for _, cniPluginsVersion := range cniPluginsVersions {
-		if strings.HasPrefix(cniPluginsVersion, "v0.8.") && !strings.Contains(cniPluginsVersion, "rc") {
-			f.LatestCniPluginsVersion = cniPluginsVersion
-			return nil
-		}
-	}
-	return fmt.Errorf("could not fetch latest 0.8.x version of CNI Plugins")
-}
-
-// GetLatestCniPluginsURL returns the URL of the latest 0.8.x version of CNI Plugins
-func (f *wmcbFramework) GetLatestCniPluginsURL() string {
-	latestCniPluginsURL := cniPluginsBaseURL + f.LatestCniPluginsVersion + "/cni-plugins-windows-amd64-" +
-		f.LatestCniPluginsVersion + ".tgz"
-	return latestCniPluginsURL
-}
-
-// GetLatestCniPluginsSHA returns the SHA512 of the latest 0.8.x version of CNI Plugins
-func (f *wmcbFramework) GetLatestCniPluginsSHA() (string, error) {
-	latestCniPluginsURL := f.GetLatestCniPluginsURL()
+// getLatestCniPluginsSHA returns the SHA512 of the latest 0.8.x version of CNI Plugins
+func (f *wmcbFramework) getLatestCniPluginsSHA() (string, error) {
+	latestCniPluginsURL := f.cniPlugins.url
 	latestCniPluginsChecksumFileURL := latestCniPluginsURL + ".sha512"
 	response, err := http.Get(latestCniPluginsChecksumFileURL)
 	if err != nil {
@@ -708,6 +670,10 @@ func (f *wmcbFramework) GetLatestCniPluginsSHA() (string, error) {
 	}
 	// The checksum file content is in the format "<sha> <filename>". So to get SHA we need to extract only the <sha>
 	// from the file
-	sha512 := strings.Split(checksumFileContent, " ")[0]
+	sha512AndFilename := strings.Split(checksumFileContent, " ")
+	if len(sha512AndFilename) < 2 {
+		return "", fmt.Errorf("checksum file content is not in the format:'<sha> <filename>'")
+	}
+	sha512 := sha512AndFilename[0]
 	return sha512, nil
 }

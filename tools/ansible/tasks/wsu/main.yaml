@@ -206,26 +206,13 @@
             src: "{{ tmp_dir.path }}/kubernetes/node/bin/kube-proxy.exe"
             dest: "{{ tmp_dir.path }}/kube-proxy.exe"
 
-        - name: Download checksum file for cni plugins
-          get_url:
-            url: "{{ cni_plugins_location }}.sha512"
-            dest: "{{ tmp_dir.path }}/cni_plugins_checksum_file"
-
-        # The checksum file content is in the format "<sha> <filename>". So to get SHA we need to extract only the <sha>
-        # from the file
-        - name: Get the SHA for cni plugins
-          shell: |
-            cat {{ tmp_dir.path }}/cni_plugins_checksum_file | awk -F ' ' '{print $1}'
-          register: cni_plugins_sha
-          failed_when: cni_plugins_sha.stdout == ""
-
         # We match the SHA512 of the downloaded file with the one that is provided upstream to ensure integrity and
         # verify that the download has completed successfully
         - name: Download cni plugins
           get_url:
             url: "{{ cni_plugins_location }}"
             dest: "{{ tmp_dir.path }}/cni_plugins.tgz"
-            checksum: "sha512:{{ cni_plugins_sha.stdout }}"
+            checksum: "sha512:{{ cni_plugins_location }}.sha512"
 
         - name: Create temporary cni directory
           file:
