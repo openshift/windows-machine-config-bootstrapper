@@ -81,6 +81,7 @@ func newWindowsVM(imageID, instanceType string, credentials *types.Credentials, 
 		if credentials.GetIPAddress() == "" || credentials.GetPassword() == "" {
 			return nil, fmt.Errorf("password or IP address not specified in credentials")
 		}
+		w.Windows = &types.Windows{}
 		w.Credentials = credentials
 	}
 
