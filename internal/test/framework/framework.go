@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +70,8 @@ type TestFramework struct {
 	ClusterVersion string
 	// latestRelease is the latest release of the wmcb
 	latestRelease *github.RepositoryRelease
+	// LatestCniPluginsVersion is the latest 0.8.x version of CNI Plugins
+	LatestCniPluginsVersion string
 }
 
 // Creds is used for parsing the vmCreds command line argument
@@ -171,8 +174,11 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 	if err := f.getClusterVersion(); err != nil {
 		return fmt.Errorf("unable to get OpenShift cluster version: %v", err)
 	}
-	if err := f.getLatestGithubRelease(); err != nil {
-		return fmt.Errorf("unable to get latest github release: %v", err)
+	if err := f.getLatestWMCBRelease(); err != nil {
+		return fmt.Errorf("unable to get latest WMCB release: %v", err)
+	}
+	if err := f.getLatestCniPluginsVersion(); err != nil {
+		return fmt.Errorf("unable to get latest 0.8.x version of CNI Plugins: %v", err)
 	}
 	return nil
 }
@@ -236,15 +242,44 @@ func (f *TestFramework) getClusterVersion() error {
 	return nil
 }
 
-// getLatestGithubRelease gets the latest github release for the wmcb repo. This release is specific to the cluster
-// version
-func (f *TestFramework) getLatestGithubRelease() error {
-	client := github.NewClient(nil)
+// getLatestCniPluginsVersion returns the latest 0.8.x version of CNI plugins in 'v<major>.<minor>.<patch>' format
+func (f *TestFramework) getLatestCniPluginsVersion() error {
+	releases, err := f.getGithubReleases("containernetworking", "plugins")
+	if err != nil {
+		return err
+	}
+	// Iterating over releases to fetch versions from tag names
+	var cniPluginsVersions = []string{}
+	for _, release := range releases {
+		cniPluginsVersions = append(cniPluginsVersions, release.GetTagName())
+	}
+	// Sorting versions in reverse order so as to get latest version first
+	sort.Sort(sort.Reverse(sort.StringSlice(cniPluginsVersions)))
+	// Iterating over versions to find first 0.8.x version which is not a release candidate
+	for _, cniPluginsVersion := range cniPluginsVersions {
+		if strings.HasPrefix(cniPluginsVersion, "v0.8.") && !strings.Contains(cniPluginsVersion, "rc") {
+			f.LatestCniPluginsVersion = cniPluginsVersion
+			return nil
+		}
+	}
+	return fmt.Errorf("could not fetch latest 0.8.x version of CNI Plugins")
+}
 
+// getGithubReleases gets all the github releases for a given owner and repo
+func (f *TestFramework) getGithubReleases(owner string, repo string) ([]*github.RepositoryRelease, error) {
+	// Initializing a client for using the Github API
+	client := github.NewClient(nil)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
 	defer cancel()
-	releases, _, err := client.Repositories.ListReleases(ctx, "openshift", "windows-machine-config-bootstrapper",
+	releases, _, err := client.Repositories.ListReleases(ctx, owner, repo,
 		&github.ListOptions{})
+	return releases, err
+}
+
+// getLatestWMCBRelease gets the latest github release for the wmcb repo. This release is specific to the cluster
+// version
+func (f *TestFramework) getLatestWMCBRelease() error {
+	releases, err := f.getGithubReleases("openshift", "windows-machine-config-bootstrapper")
 	if err != nil {
 		return err
 	}

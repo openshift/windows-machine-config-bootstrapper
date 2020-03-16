@@ -11,7 +11,8 @@ import (
 
 // framework holds the instantiation of test suite being executed. As of now, temp dir is hardcoded.
 var (
-	framework = &e2ef.TestFramework{}
+	// Initialize wmcbFramework which specializes TestFramework by adding some properties specific to WMCB tests
+	framework = wmcbFramework{}
 	// TODO: expose this to the end user as a command line flag
 	// vmCount is the number of VMs the test suite requires
 	vmCount = 1

@@ -60,6 +60,21 @@
       register: kubernetes_minor_version
       failed_when: kubernetes_minor_version.stdout == ""
 
+    # curl -s https://api.github.com/containernetworking/plugins/releases gets the list of all releases. We get all the
+    # available versions from the tag_name. Finally, we sort the versions to get latest 0.8.x version which is not a
+    # release candidate
+    - name: Get latest 0.8.x cni plugins version
+      shell: |
+        RELEASES="$(curl -s https://api.github.com/repos/containernetworking/plugins/releases)"
+        echo $RELEASES | jq '.[]' | jq '.tag_name' |
+        sort -r |  awk '/"v0.8.*"/ && !/v0.8.*-rc*/ {print substr($1,2,length($1)-2); exit}'
+      register: cni_plugins_version
+      failed_when: cni_plugins_version is not defined or cni_plugins_version.stdout == ""
+
+    - name: Set cni plugins location
+      set_fact:
+        cni_plugins_location: "https://github.com/containernetworking/plugins/releases/download/{{ cni_plugins_version.stdout }}/cni-plugins-windows-amd64-{{ cni_plugins_version.stdout }}.tgz"
+
     # This translates a kubernetes minor version to an OpenShift version. This works under the assumption that each
     # OpenShift release corresponds with a kubernetes release. This is being done this way, and not with oc get
     # clusterversion, as OpenShift CI doesn't have the actual version attached to its clusters, instead replacing it
@@ -191,16 +206,29 @@
             src: "{{ tmp_dir.path }}/kubernetes/node/bin/kube-proxy.exe"
             dest: "{{ tmp_dir.path }}/kube-proxy.exe"
 
+        # We match the SHA512 of the downloaded file with the one that is provided upstream to ensure integrity and
+        # verify that the download has completed successfully
+        - name: Download cni plugins
+          get_url:
+            url: "{{ cni_plugins_location }}"
+            dest: "{{ tmp_dir.path }}/cni_plugins.tgz"
+            checksum: "sha512:{{ cni_plugins_location }}.sha512"
+
         - name: Create temporary cni directory
           file:
             path: "{{ tmp_dir.path }}/cni"
             state: directory
 
-        - name: Get cni plugins
+        - name: Extract cni plugins
           unarchive:
-            src: "https://github.com/containernetworking/plugins/releases/download/v0.8.2/cni-plugins-windows-amd64-v0.8.2.tgz"
+            src: "{{ tmp_dir.path }}/cni_plugins.tgz"
             dest: "{{ tmp_dir.path }}/cni"
-            remote_src: yes
+
+        # Removing cni_plugins.tgz from temporary directory as we do not want to copy it to Windows VM
+        - name: Remove cni plugins tar
+          file:
+            path: "{{ tmp_dir.path }}/cni_plugins.tgz"
+            state: absent
 
 - hosts: win
   vars:
