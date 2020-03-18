@@ -38,9 +38,6 @@ const (
 	//  after launching an instance before trying to retrieve the generated password.`
 	// Ref: https://godoc.org/github.com/aws/aws-sdk-go/service/ec2#EC2.GetPasswordData
 	awsPasswordDataTimeOut = 15 * time.Minute
-	// sshPort to access the OpenSSH server installed on the windows node. This is needed
-	// for our CI testing.
-	sshPort = 22
 	//RDP port for requests
 	rdpPort = 3389
 )
@@ -658,8 +655,8 @@ func examineRulesInSg(myIP string, rules []*ec2.IpPermission, vpcCidr string) ([
 	if !portTracker[WINRM_PORT] {
 		ports = append(ports, WINRM_PORT)
 	}
-	if !portTracker[sshPort] {
-		ports = append(ports, sshPort)
+	if !portTracker[types.SshPort] {
+		ports = append(ports, types.SshPort)
 	}
 	if !portTracker[rdpPort] {
 		ports = append(ports, rdpPort)

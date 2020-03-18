@@ -28,6 +28,8 @@ const (
 	remotePowerShellCmdPrefix = "powershell.exe -NonInteractive -ExecutionPolicy Bypass "
 	// winRMPort is port used for WinRM communication
 	winRMPort = 5986
+	// SshPort is the SSH port
+	SshPort = 22
 )
 
 // Windows represents a Windows host.
