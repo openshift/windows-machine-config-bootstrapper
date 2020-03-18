@@ -354,8 +354,16 @@ func testAnsiblePing(t *testing.T) {
 
 // testAzureFirewallRule asserts if the created instance has firewall rule that opens container logs port.
 func testAzureInstancesFirewallRule(t *testing.T) {
+	windowsVM = getAzureWindowsVM(t)
+	testInstanceFirewallRule(t)
+}
+
+// Gets a WindowsVM instance object with credentials
+func getAzureWindowsVM(t *testing.T) (windowsVM types.WindowsVM) {
+	w := &types.Windows{}
 	ipAddress, password, err := getIpPass(credentials.GetInstanceId())
 	require.NoErrorf(t, err, "failed to obtain credentials for %s", credentials.GetInstanceId())
 	credentials = types.NewCredentials(credentials.GetInstanceId(), ipAddress, password, azureUser)
-	testInstanceFirewallRule(t)
+	w.Credentials = credentials
+	return w
 }
