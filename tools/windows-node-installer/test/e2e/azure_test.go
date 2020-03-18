@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"golang.org/x/crypto/ssh"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -47,6 +48,10 @@ const (
 	ruleAction = "Allow"
 	// azureUser used to access the windows instance
 	azureUser = "core"
+	// sshRulePriority is the priority for the RDP rule
+	sshRulePriority = 603
+	// sshRuleName is the security group rule name for the RDP rule
+	sshRuleName = "SSH"
 )
 
 type requiredRule struct {
@@ -100,6 +105,7 @@ func TestCreateVM(t *testing.T) {
 	t.Run("check if required security rules are present", testRequiredRules)
 	t.Run("check if ansible is able to ping on the WinRmHttps port", testAnsiblePing)
 	t.Run("check if container logs port is open in Windows firewall", testAzureInstancesFirewallRule)
+	t.Run("check if SSH connection is available", testAzureSSHConnection)
 }
 
 // isNil is a helper functions which checks if the object is a nil pointer or not.
@@ -121,6 +127,8 @@ func constructRequiredRules() (map[string]*requiredRule,
 	requiredRules[winRMRuleName] = &requiredRule{winRMRuleName, myIP, winRMPort, winRMPortPriority, false}
 	requiredRules[vnetRuleName] = &requiredRule{vnetRuleName, to.StringPtr("10.0.0.0/16"), vnetPorts,
 		vnetRulePriority, false}
+	requiredRules[sshRuleName] = &requiredRule{sshRuleName, myIP, sshPort,
+		sshRulePriority, false}
 	return requiredRules, nil
 }
 
@@ -366,4 +374,20 @@ func getAzureWindowsVM(t *testing.T) (windowsVM types.WindowsVM) {
 	credentials = types.NewCredentials(credentials.GetInstanceId(), ipAddress, password, azureUser)
 	w.Credentials = credentials
 	return w
+}
+
+//Creates a SSH client and tests SSH connection to Windows VM
+func testAzureSSHConnection(t *testing.T) {
+	var session *ssh.Session
+	config := &ssh.ClientConfig{
+		User:            credentials.GetUserName(),
+		Auth:            []ssh.AuthMethod{ssh.Password(credentials.GetPassword())},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+	sshClient, err := ssh.Dial("tcp", credentials.GetIPAddress()+":22", config)
+	require.NoErrorf(t, err, "failed to connect via SSH")
+	session, err = sshClient.NewSession()
+	require.NoErrorf(t, err, "failed to create SSH session")
+	err = session.Run("dir")
+	require.NoErrorf(t, err, "failed to communicate vis SSH")
 }

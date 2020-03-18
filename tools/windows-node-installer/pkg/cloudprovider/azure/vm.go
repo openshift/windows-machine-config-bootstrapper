@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,10 @@ const (
 	vnetRuleName = "vnet_traffic"
 	// winUser is the user used to login into the instance.
 	winUser = "core"
+	// sshRulePriority is the priority for the RDP rule
+	sshRulePriority = 603
+	// sshRuleName is the security group rule name for the RDP rule
+	sshRuleName = "SSH"
 )
 
 var windowsWorker string = "winworker-"
@@ -167,6 +172,8 @@ func constructRequiredRules(rulesClient network.SecurityRulesClient, resourceGro
 		winRMPortPriority, network.SecurityRule{}}
 	requiredRules[vnetRuleName] = &nsgRuleWrapper{rulesClient, resourceGroupName, vnetRuleName,
 		to.StringPtr("10.0.0.0/16"), vnetPorts, vnetRulePriority, network.SecurityRule{}}
+	requiredRules[sshRuleName] = &nsgRuleWrapper{rulesClient, resourceGroupName, sshRuleName, myIP, strconv.Itoa(types.SshPort),
+		sshRulePriority, network.SecurityRule{}}
 
 	return requiredRules, nil
 }
@@ -585,6 +592,8 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
     $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
     (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
     & $file
+    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+    Start-Service sshd
     New-NetFirewallRule -DisplayName "` + types.FirewallRuleName + `"
     -Direction Inbound -Action Allow -Protocol TCP -LocalPort ` + types.ContainerLogsPort + ` - EdgeTraversalPolicy Allow`
 
