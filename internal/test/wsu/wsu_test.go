@@ -517,9 +517,6 @@ func testEastWestNetworking(t *testing.T, node *v1.Node, vm e2ef.TestWindowsVM) 
 
 	// test Windows <-> Linux
 	// This will install curl and then curl the windows server.
-	// TODO: This delay was added to work around a bug in OVN
-	//       Remove this sleep once https://bugzilla.redhat.com/show_bug.cgi?id=1789881 is fixed
-	time.Sleep(time.Minute * 10)
 	linuxCurlerCommand := []string{"bash", "-c", "yum update; yum install curl -y; curl " + winServerIP}
 	linuxCurlerJob, err := createLinuxJob("linux-curler-"+vm.GetCredentials().GetInstanceId(), linuxCurlerCommand)
 	require.NoError(t, err, "Could not create Linux job")
