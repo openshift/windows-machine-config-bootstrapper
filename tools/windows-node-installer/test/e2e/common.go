@@ -16,6 +16,8 @@ import (
 const (
 	// winRMPort is the secure WinRM port
 	winRMPort = "5986"
+	// sshPort is the SSH port
+	sshPort = "22"
 )
 
 var (
