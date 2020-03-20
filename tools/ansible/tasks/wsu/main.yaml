@@ -430,6 +430,11 @@
         msg: "CNI Configuration error"
       when: '"CNI configuration completed successfully" not in bootstrap_out.stderr'
 
+    - name: Ensure kube-proxy Windows Service is not running
+      win_service:
+        name: "kube-proxy"
+        state: absent
+
     - name: Copy kube-proxy to C:\k
       win_copy:
         src: "{{ win_temp_dir.path }}\\kube-proxy.exe"
@@ -444,11 +449,6 @@
     - name: Get source-vip
       win_shell: 'Import-Module {{ win_temp_dir.path }}\\hns.psm1; $net = (Get-HnsNetwork | where { $_.Name -eq "OpenShiftNetwork" }); $endpoint = New-HnsEndpoint -NetworkId $net.ID -Name VIPEndpoint; Attach-HNSHostEndpoint -EndpointID $endpoint.ID -CompartmentID 1; (Get-NetIPConfiguration -AllCompartments -All -Detailed | where { $_.NetAdapter.LinkLayerAddress -eq $endpoint.MacAddress }).IPV4Address.IPAddress.Trim()'
       register: source_vip
-
-    - name: Ensure kube-proxy Windows Service is not running
-      win_service:
-        name: "kube-proxy"
-        state: absent
 
     # The bootstrapper runs in one of the above tasks and makes C:\\k\\log directory created before hand
     # Creating a kube-proxy log directory to store kube-proxy specific logs
