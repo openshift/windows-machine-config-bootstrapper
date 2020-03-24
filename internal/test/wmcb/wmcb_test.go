@@ -1,12 +1,10 @@
 package wmcb
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -70,6 +68,10 @@ var (
 		sha:     "a88e7a1c6f72ea6073dbb4ddfe2e7c8bd37c9a56d94a33823f531e303a9915e7a844ac5880097724e44dfa7f4a9659d14b79cc46e2067f6b13e6df3f3f1b0f64",
 		shaType: "sha512",
 	}
+	// hybridOverlayPkgName is the user-defined name of the required hybrid overlay package
+	hybridOverlayPkgName = pkgName("hybridOverlay")
+	// cniPluginPkgName is the user-defined name of the required cni plugins package
+	cniPluginPkgName = pkgName("cniPlugins")
 )
 
 // wmcbVM is a wrapper for the WindowsVM interface that associates it with WMCB specific testing
@@ -77,21 +79,35 @@ type wmcbVM struct {
 	e2ef.TestWindowsVM
 }
 
-// pkg encapsulates information about a package
-type pkgInfo struct {
-	// url is the URL of the package
-	url string
-	// sha is the SHA hash of the package
-	sha string
-	// shaType is the type of SHA used, example: 256 or 512
-	shaType string
-}
-
 type wmcbFramework struct {
 	// TestFramework holds the instantiation of test suite being executed
 	*e2ef.TestFramework
-	// cniPlugins contains information about the CNI plugin package
-	cniPlugins pkgInfo
+	// pkgs contains map of the packages to be downloaded
+	pkgs map[pkgName]PkgInfo
+}
+
+// initializePackages sets up all the required packages of type pkgInfo
+func (f *wmcbFramework) initializePackages() error {
+	var pkgs = make(map[pkgName]PkgInfo)
+	// create pkgInfo struct that implements PkgInfo interface for cni plugins and populate it
+	cniPluginsPkg, err := pkgInfoFactory(cniPluginPkgName, "sha512", cniPluginsBaseURL,
+		framework.LatestCniPluginsVersion)
+	if err != nil {
+		return err
+	}
+	// Add cniPlugins to the pkgs map
+	pkgs[cniPluginsPkg.getName()] = cniPluginsPkg
+
+	// create pkgInfo struct that implements PkgInfo interface for hybrid overlay and populate it
+	hybridOverlayPkg, err := pkgInfoFactory(hybridOverlayPkgName, "sha256", "", "")
+	if err != nil {
+		return err
+	}
+	// Add hybridOverlay to the pkgs map
+	pkgs[hybridOverlayPkg.getName()] = hybridOverlayPkg
+
+	f.pkgs = pkgs
+	return nil
 }
 
 // Setup initializes the wsuFramework.
@@ -102,7 +118,7 @@ func (f *wmcbFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 	if err != nil {
 		return fmt.Errorf("framework setup failed: %v", err)
 	}
-	if err := f.initializeCniPluginsPkgInfo(); err != nil {
+	if err := f.initializePackages(); err != nil {
 		return fmt.Errorf("unable to initialize CNI Plugins package info: %v", err)
 	}
 	return nil
@@ -221,23 +237,24 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 }
 
 // remoteDownload downloads the tar file in url to the remoteDownloadFile location and checks if the SHA matches
-func (vm *wmcbVM) remoteDownload(pkg pkgInfo, remoteDownloadFile string) error {
-	_, stderr, err := vm.Run("if (!(Test-Path "+remoteDownloadFile+")) { wget "+pkg.url+" -o "+remoteDownloadFile+" }",
+func (vm *wmcbVM) remoteDownload(pkg PkgInfo, remoteDownloadFile string) error {
+	_, stderr, err := vm.Run("if (!(Test-Path "+remoteDownloadFile+")) { wget "+pkg.getUrl()+" -o "+remoteDownloadFile+" }",
 		true)
 	if err != nil {
-		return fmt.Errorf("unable to download %s: %v\n%s", pkg.url, err, stderr)
+		return fmt.Errorf("unable to download %s: %v\n%s", pkg.getUrl(), err, stderr)
 	}
 
-	if pkg.sha == "" {
+	shaValue, err := pkg.getShaValue()
+	if err != nil {
 		return nil
 	}
 
 	// Perform a checksum check
-	stdout, _, err := vm.Run("certutil -hashfile "+remoteDownloadFile+" "+pkg.shaType, true)
+	stdout, _, err := vm.Run("certutil -hashfile "+remoteDownloadFile+" "+pkg.getShaType(), true)
 	if err != nil {
 		return fmt.Errorf("unable to check SHA of %s: %v", remoteDownloadFile, err)
 	}
-	if !strings.Contains(stdout, pkg.sha) {
+	if !strings.Contains(stdout, shaValue) {
 		return fmt.Errorf("package %s SHA does not match: %v\n%s", remoteDownloadFile, err, stdout)
 	}
 
@@ -246,11 +263,11 @@ func (vm *wmcbVM) remoteDownload(pkg pkgInfo, remoteDownloadFile string) error {
 
 // remoteDownloadExtract downloads the tar file in url to the remoteDownloadFile location, checks if the SHA matches and
 //  extracts the files to the remoteExtractDir directory
-func (vm *wmcbVM) remoteDownloadExtract(pkg pkgInfo, remoteDownloadFile, remoteExtractDir string) error {
+func (vm *wmcbVM) remoteDownloadExtract(pkg PkgInfo, remoteDownloadFile, remoteExtractDir string) error {
 	// Download the file from the URL
 	err := vm.remoteDownload(pkg, remoteDownloadFile)
 	if err != nil {
-		return fmt.Errorf("unable to download %s: %v", pkg.url, err)
+		return fmt.Errorf("unable to download %s: %v", pkg.getUrl(), err)
 	}
 
 	// Extract files from the archive
@@ -269,13 +286,14 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 		return fmt.Errorf("unable to create remote directory %s: %v\n%s", remoteDir, err, stderr)
 	}
 
-	cniUrl, err := url.Parse(framework.cniPlugins.url)
+	cniPkgUrl := framework.pkgs[cniPluginPkgName].getUrl()
+	cniUrl, err := url.Parse(cniPkgUrl)
 	if err != nil {
-		return fmt.Errorf("error parsing %s: %v", framework.cniPlugins.url, err)
+		return fmt.Errorf("error parsing %s: %v", cniPkgUrl, err)
 	}
 
 	// Download and extract the CNI binaries on the Windows VM
-	err = vm.remoteDownloadExtract(framework.cniPlugins, remoteDir+path.Base(cniUrl.Path), winCNIDir)
+	err = vm.remoteDownloadExtract(framework.pkgs[cniPluginPkgName], remoteDir+path.Base(cniUrl.Path), winCNIDir)
 	if err != nil {
 		return fmt.Errorf("unable to download CNI package: %v", err)
 	}
@@ -297,22 +315,8 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 // initializeHybridOverlayBinary creates the files on the Windows node needed for running "configure-cni"
 func (vm *wmcbVM) initializeHybridOverlayBinary() error {
 	hybridOverlayURL, err := framework.GetReleaseArtifactURL(hybridOverlayName)
-	if err != nil {
-		return fmt.Errorf("unable to get %s URL: %v", hybridOverlayName, err)
-	}
 
-	hybridOverlaySHA, err := framework.GetReleaseArtifactSHA(hybridOverlayName)
-	if err != nil {
-		return fmt.Errorf("unable to get %s SHA: %v", hybridOverlayName, err)
-	}
-
-	hybridOverlay := pkgInfo{
-		url:     hybridOverlayURL,
-		sha:     hybridOverlaySHA,
-		shaType: "sha256",
-	}
-
-	err = vm.remoteDownload(hybridOverlay, hybridOverlayExecutable)
+	err = vm.remoteDownload(framework.pkgs[hybridOverlayPkgName], hybridOverlayExecutable)
 	if err != nil {
 		return fmt.Errorf("unable to download %s on VM: %s", hybridOverlayURL, err)
 	}
@@ -633,47 +637,4 @@ func testWMCBCluster(t *testing.T) {
 	winNodes, err = client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
 	assert.Lenf(t, winNodes.Items, 1, "expected one node to have node label but found: %v", len(winNodes.Items))
-}
-
-// initializeCNIPluginsPkgInfo populates the fields of cniPlugins
-func (f *wmcbFramework) initializeCniPluginsPkgInfo() error {
-	f.cniPlugins = pkgInfo{}
-
-	f.cniPlugins.url = cniPluginsBaseURL + f.TestFramework.LatestCniPluginsVersion + "/cni-plugins-windows-amd64-" +
-		f.TestFramework.LatestCniPluginsVersion + ".tgz"
-
-	cniPluginsSHA, err := framework.getLatestCniPluginsSHA()
-	if err != nil {
-		return fmt.Errorf("unable to get SHA for CNI Plugins: %v", err)
-	}
-	f.cniPlugins.sha = cniPluginsSHA
-
-	f.cniPlugins.shaType = "sha512"
-	return nil
-}
-
-// getLatestCniPluginsSHA returns the SHA512 of the latest 0.8.x version of CNI Plugins
-func (f *wmcbFramework) getLatestCniPluginsSHA() (string, error) {
-	latestCniPluginsURL := f.cniPlugins.url
-	latestCniPluginsChecksumFileURL := latestCniPluginsURL + ".sha512"
-	response, err := http.Get(latestCniPluginsChecksumFileURL)
-	if err != nil {
-		return "", fmt.Errorf("could not fetch CNI Plugins checksum file: %s", err)
-	}
-	defer response.Body.Close()
-
-	var checksumFileContent string
-	// Fetching checksum file content from the GET Response
-	scanner := bufio.NewScanner(response.Body)
-	for scanner.Scan() {
-		checksumFileContent = scanner.Text()
-	}
-	// The checksum file content is in the format "<sha> <filename>". So to get SHA we need to extract only the <sha>
-	// from the file
-	sha512AndFilename := strings.Split(checksumFileContent, " ")
-	if len(sha512AndFilename) < 2 {
-		return "", fmt.Errorf("checksum file content is not in the format:'<sha> <filename>'")
-	}
-	sha512 := sha512AndFilename[0]
-	return sha512, nil
 }
