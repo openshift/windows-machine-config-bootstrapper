@@ -20,6 +20,11 @@ type hybridOverlay struct {
 	pkgInfo
 }
 
+// kubeNode contains the information about  the kubernetes node package for Windows
+type kubeNode struct {
+	pkgInfo
+}
+
 // PkgInfo is an interface to populate pkgInfo structs
 type PkgInfo interface {
 	//getName returns the user defined package name
@@ -51,6 +56,9 @@ func pkgInfoFactory(name pkgName, shaType string, baseUrl string, version string
 		return newCniPluginPkg(name, shaType, baseUrl, version)
 	case hybridOverlayPkgName:
 		return newHybridOverlayPkg(name, shaType)
+	case kubeNodePkgName:
+		return newKubeNodePkg(name, shaType, baseUrl, version)
+
 	default:
 		return nil, fmt.Errorf("invalid Package name")
 	}
@@ -84,6 +92,24 @@ func newHybridOverlayPkg(name pkgName, shaType string) (PkgInfo, error) {
 			name:    name,
 			shaType: shaType,
 			url:     hybridOverlayUrl,
+		},
+	}, nil
+}
+
+// newKubeNodePkg returns kubeNode implementation of PkgInfo interface
+func newKubeNodePkg(name pkgName, shaType string, baseUrl string, version string) (PkgInfo, error) {
+	if version == "" {
+		return nil, fmt.Errorf("k8s version is not specified")
+	}
+	if baseUrl == "" {
+		return nil, fmt.Errorf("base url for kube node binary is not specified")
+	}
+
+	return &kubeNode{
+		pkgInfo{
+			name:    name,
+			shaType: shaType,
+			url:     baseUrl + version + "/kubernetes-node-windows-amd64.tar.gz",
 		},
 	}, nil
 }
@@ -154,4 +180,22 @@ func (h *hybridOverlay) getShaValue() (string, error) {
 	}
 	h.sha = hybridOverlaySHA
 	return h.sha, nil
+}
+
+//getShaValue returns the SHA value for the hybrid overlay package
+func (k *kubeNode) getShaValue() (string, error) {
+	if k.sha != "" {
+		return k.sha, nil
+	}
+	checksumFileContent, err := k.getShaFileContent()
+	if err != nil {
+		return "", err
+	}
+	// The checksum file content is in the format "<sha>".
+	sha512 := strings.Split(checksumFileContent, "\n")
+	if len(sha512) < 1 {
+		return "", fmt.Errorf("checksum file content is not in the format : '<sha>'")
+	}
+	k.sha = sha512[0]
+	return k.sha, nil
 }

@@ -50,6 +50,8 @@ const (
 	hybridOverlayExecutable = remoteDir + hybridOverlayName
 	// cniPluginsBaseURL is the base URL of the CNI Plugins location
 	cniPluginsBaseURL = "https://github.com/containernetworking/plugins/releases/download/"
+	// kubeNodeBaseURL is the base url for kubernetes binaries
+	kubeNodeBaseURL = "https://dl.k8s.io/"
 )
 
 var (
@@ -62,16 +64,12 @@ var (
 	// filesToBeTransferred holds the list of files that needs to be transferred to the Windows VM
 	filesToBeTransferred = flag.String("filesToBeTransferred", "",
 		"Comma separated list of files to be transferred")
-	// kubeNode contains the information about  the kubernetes node package for Windows
-	kubeNode = pkgInfo{
-		url:     "https://dl.k8s.io/v1.16.2/kubernetes-node-windows-amd64.tar.gz",
-		sha:     "a88e7a1c6f72ea6073dbb4ddfe2e7c8bd37c9a56d94a33823f531e303a9915e7a844ac5880097724e44dfa7f4a9659d14b79cc46e2067f6b13e6df3f3f1b0f64",
-		shaType: "sha512",
-	}
 	// hybridOverlayPkgName is the user-defined name of the required hybrid overlay package
 	hybridOverlayPkgName = pkgName("hybridOverlay")
 	// cniPluginPkgName is the user-defined name of the required cni plugins package
 	cniPluginPkgName = pkgName("cniPlugins")
+	// kubeNodePkgName is the user-defined name of the required kube node package
+	kubeNodePkgName = pkgName("kubeNode")
 )
 
 // wmcbVM is a wrapper for the WindowsVM interface that associates it with WMCB specific testing
@@ -105,6 +103,14 @@ func (f *wmcbFramework) initializePackages() error {
 	}
 	// Add hybridOverlay to the pkgs map
 	pkgs[hybridOverlayPkg.getName()] = hybridOverlayPkg
+
+	// create pkgInfo struct that implements PkgInfo interface for hybrid overlay and populate it
+	kubeNodePkg, err := pkgInfoFactory(kubeNodePkgName, "sha512", kubeNodeBaseURL, framework.K8sVersion)
+	if err != nil {
+		return err
+	}
+	// Add kubeNode to the pkgs map
+	pkgs[kubeNodePkg.getName()] = kubeNodePkg
 
 	f.pkgs = pkgs
 	return nil
@@ -216,7 +222,7 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 	}
 
 	// Download and extract the kube package on the VM
-	err = vm.remoteDownloadExtract(kubeNode, remoteDir+"kube.tar.gz", remoteDir)
+	err = vm.remoteDownloadExtract(framework.pkgs[kubeNodePkgName], remoteDir+"kube.tar.gz", remoteDir)
 	if err != nil {
 		return fmt.Errorf("unable to download kube package: %v", err)
 	}
@@ -294,6 +300,7 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 
 	// Download and extract the CNI binaries on the Windows VM
 	err = vm.remoteDownloadExtract(framework.pkgs[cniPluginPkgName], remoteDir+path.Base(cniUrl.Path), winCNIDir)
+
 	if err != nil {
 		return fmt.Errorf("unable to download CNI package: %v", err)
 	}

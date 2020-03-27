@@ -68,6 +68,8 @@ type TestFramework struct {
 	latestRelease *github.RepositoryRelease
 	// LatestCniPluginsVersion is the latest 0.8.x version of CNI Plugins
 	LatestCniPluginsVersion string
+	// K8sVersion is the current version of Kuberenetes
+	K8sVersion string
 	// clusterAddress is the address of the OpenShift cluster e.g. "foo.fah.com".
 	// This should not include "https://api-" or a port.
 	ClusterAddress string
@@ -244,11 +246,12 @@ func (f *TestFramework) getClusterAddress(config *restclient.Config) error {
 func (f *TestFramework) getClusterVersion() error {
 	versionInfo, err := f.OSConfigClient.Discovery().ServerVersion()
 	if err != nil {
-		return err
+		return fmt.Errorf("error while retrieving k8s version : %v", err)
 	}
-
+	//set k8s version in the TestFrameWork
+	f.K8sVersion = versionInfo.GitVersion
 	// Convert kubernetes version to major.minor format. v1.17.0 -> 1.17
-	k8sVersion := strings.TrimLeft(versionInfo.GitVersion, "v")
+	k8sVersion := strings.TrimLeft(f.K8sVersion, "v")
 	k8sSemver := strings.Split(k8sVersion, ".")
 	k8sMinorVersion, err := strconv.Atoi(k8sSemver[1])
 	if err != nil {
