@@ -32,9 +32,11 @@ RUN pip2 install ansible pywinrm
 # Make Ansible happy with arbitrary UID/GID in OpenShift.
 RUN chmod g=u /etc/passwd /etc/group
 
-# Allow building the WMCB
-RUN chmod -R g=u /go
+# Allow building the WMCB and creation of /go/.cache directory
+RUN chmod -R g=u+w /go
 
+# Explicitly set GOCACHE environment variable
+ENV GOCACHE="/go/.cache"
 ENV PATH="${PATH}:/usr/local/go/bin"
 ENV GOPATH="/go"
 
