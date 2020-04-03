@@ -65,7 +65,8 @@ func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 		log.Error(err, "could not run bootstrapper")
 		os.Exit(1)
 	} else {
-		log.Info("Bootstrapping completed successfully")
+		// Send success message to StdOut for WSU to ascertain that bootstrapping was successful
+		os.Stdout.WriteString("Bootstrapping completed successfully")
 	}
 
 	err = wmcb.Disconnect()
