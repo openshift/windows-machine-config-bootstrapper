@@ -28,7 +28,7 @@
 
     # kubernetes_version v1.17.2 should correspond to 1.17 for getting changelog url
     - name: Get kubernetes version without patch version
-      shell: "version={{ kubernetes_version.stdout }} ; echo ${version%.*} | tr -d v"
+      shell: "version={{ kubernetes_version.stdout }} ; baseVersion=${version%-*} ; echo ${baseVersion%.*}  | tr -d v"
       register: kubernetes_version_without_patch
       failed_when: kubernetes_version_without_patch.stdout == ""
 

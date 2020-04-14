@@ -10,10 +10,10 @@ COPY . .
 RUN yum -y update && yum -y install git make python2 python2-pip gcc jq
 
 # Download and install Go
-RUN curl -L -s https://dl.google.com/go/go1.12.13.linux-amd64.tar.gz > go1.12.13.linux-amd64.tar.gz \
-    && sha256sum go1.12.13.linux-amd64.tar.gz \
-    && echo "da036454cb3353f9f507f0ceed4048feac611065e4e1818b434365eb32ac9bdc go1.12.13.linux-amd64.tar.gz" | sha256sum -c \
-    && tar -xzf go1.12.13.linux-amd64.tar.gz \
+RUN curl -L -s https://dl.google.com/go/go1.13.8.linux-amd64.tar.gz > go1.13.8.linux-amd64.tar.gz \
+    && sha256sum go1.13.8.linux-amd64.tar.gz \
+    && echo "0567734d558aef19112f2b2873caa0c600f1b4a5827930eb5a7f35235219e9d8 go1.13.8.linux-amd64.tar.gz" | sha256sum -c \
+    && tar -xzf go1.13.8.linux-amd64.tar.gz \
     && mv go /usr/local \
     && rm -rf ./go*
 
