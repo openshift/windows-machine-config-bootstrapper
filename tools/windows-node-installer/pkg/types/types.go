@@ -157,6 +157,9 @@ func (w *Windows) Reinitialize() error {
 	if err := w.GetSSHClient(); err != nil {
 		return fmt.Errorf("failed to reinitialize ssh client: %v", err)
 	}
+	if err := w.SetupWinRMClient(); err != nil {
+		return fmt.Errorf("failed to reinitialize WinRM client: %v", err)
+	}
 	return nil
 }
 
@@ -218,7 +221,7 @@ func (w *Windows) GetSSHClient() error {
 	if w.SSHClient != nil {
 		// Close the existing client to be on the safe side
 		if err := w.SSHClient.Close(); err != nil {
-			log.Printf("error closing ssh client connection: %v", err)
+			log.Printf("warning - error closing ssh client connection: %v", err)
 		}
 	}
 
