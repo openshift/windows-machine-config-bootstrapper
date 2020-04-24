@@ -55,6 +55,10 @@ const (
 	sshRulePriority = 603
 	// sshRuleName is the security group rule name for the RDP rule
 	sshRuleName = "SSH"
+	// SKU for ip address
+	// We are using a Standard SKU in place of a Basic SKU as the Load balancer and IP SKU should match
+	// https://docs.microsoft.com/en-us/azure/virtual-network/virtual-network-ip-addresses-overview-arm#sku
+	ipSKU = "Standard"
 )
 
 var windowsWorker string = "winworker-"
@@ -128,8 +132,13 @@ func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
 	if errorCheck(err) {
 		return nil, err
 	}
-
-	infraID, _ := openShiftClient.GetInfrastructureID()
+	if subscriptionID == "" {
+		return nil, fmt.Errorf("empty subscriptionID for azure")
+	}
+	infraID, err := openShiftClient.GetInfrastructureID()
+	if err != nil {
+		return nil, err
+	}
 	resourceAuthorizer, err := auth.NewAuthorizerFromFileWithResource(azure.PublicCloud.ResourceManagerEndpoint)
 	if errorCheck(err) {
 		return nil, err
@@ -323,6 +332,7 @@ func (az *AzureProvider) createPublicIP(ctx context.Context) (ip *network.Public
 		network.PublicIPAddress{
 			Name:     to.StringPtr(az.IpName),
 			Location: to.StringPtr(nodeLocation),
+			Sku:      &network.PublicIPAddressSku{Name: ipSKU},
 			PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
 				PublicIPAddressVersion:   network.IPv4,
 				PublicIPAllocationMethod: network.Static,
@@ -374,6 +384,13 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 						Subnet:                    &subnet,
 						PrivateIPAllocationMethod: network.Dynamic,
 						PublicIPAddress:           &ip,
+						// In Azure, for egress as well as for Load balancer service to work, the
+						// windows vm is expected to be placed behind the worker nodes' Load balancer.
+						LoadBalancerBackendAddressPools: &[]network.BackendAddressPool{
+							{
+								ID: az.getWorkerBackendPoolID(),
+							},
+						},
 					},
 				},
 			},
@@ -464,6 +481,15 @@ func (az *AzureProvider) constructStorageProfile(imageId string) (storageProfile
 	return storageProfile
 }
 
+// getWorkerBackendPoolID gets the backend pool id of the worker node loadbalancer
+func (az *AzureProvider) getWorkerBackendPoolID() *string {
+	// We assume that BackendPoolID for worker vm follows the following format
+	// /subscriptions/$SUBSCRIPTID/resourceGroups/$INFRAID-rg/providers/Microsoft.Network/loadBalancers/$INFRAID/backendAddressPools/$INFRAID
+	var wbpi = fmt.Sprintf("/subscriptions/%s/resourceGroups/%[2]s-rg/providers/"+
+		"Microsoft.Network/loadBalancers/%[2]s/backendAddressPools/%[2]s", az.subscriptionID, az.infraID)
+	return &wbpi
+}
+
 // randomPasswordString generates random string with restrictions of given length.
 // ex: 3i[g0|)z for n of size 8
 func randomPasswordString(n int) string {
@@ -514,8 +540,8 @@ func (az *AzureProvider) generateResourceName(resource, randomStr string) (name 
 	return name
 }
 
-// getIPAdress gets the IP Address by IP resource name as an argument.
-func (az *AzureProvider) getIPAddress(ctx context.Context) (ipAddress *string, err error) {
+// getPublicIPAddress gets the public IP Address by IP resource name as an argument.
+func (az *AzureProvider) getPublicIPAddress(ctx context.Context) (ipAddress *string, err error) {
 	result, err := az.ipClient.Get(ctx, az.resourceGroupName, az.IpName, "")
 	if errorCheck(err) {
 		return nil, err
@@ -783,16 +809,20 @@ func (az *AzureProvider) CreateWindowsVM() (types.WindowsVM, error) {
 		log.Printf("unable to add installer info to the resource file: %s", err)
 	}
 
-	ipAddress, ipErr := az.getIPAddress(ctx)
+	publicIPAddress, ipErr := az.getPublicIPAddress(ctx)
 	if errorCheck(ipErr) {
 		log.Printf("failed to get the IP address of %s: %s", az.IpName, ipErr)
-		*ipAddress = az.IpName
+		*publicIPAddress = az.IpName
+	}
+	privateIPAddress, err := az.getPrivateIP(ctx)
+	if err != nil {
+		log.Printf("failed to get the private IP address %s: %s", *(vmInfo.Name), err)
 	}
 
 	// Build new credentials structure to be used by other actors. The actor is responsible for checking if
 	// the credentials are being generated properly. This method won't guarantee the existence of credentials
 	// if the VM is spun up
-	credentials := types.NewCredentials(instanceName, *ipAddress, adminPassword, winUser)
+	credentials := types.NewCredentials(instanceName, *publicIPAddress, adminPassword, winUser)
 	w.Credentials = credentials
 
 	// Setup Winrm and SSH client so that we can interact with the Windows Object we created
@@ -809,15 +839,17 @@ func (az *AzureProvider) CreateWindowsVM() (types.WindowsVM, error) {
 		return w, fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
 	}
 
-	resultData := fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:'%s' \n", *ipAddress, adminPassword)
+	resultData := fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:'%s'\n", *publicIPAddress, adminPassword)
 	resultPath := az.resourceTrackerDir + instanceName
 	err = resource.StoreCredentialData(resultPath, resultData)
 	if errorCheck(err) {
 		log.Printf("unable to write data into resource file: %s", err)
-		log.Printf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:%s", *ipAddress, adminPassword)
+		log.Printf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:%s \n", *publicIPAddress, adminPassword)
 	} else {
 		log.Printf("Please check file %s in directory %s to access the node",
 			instanceName, az.resourceTrackerDir)
+		log.Printf("External IP: %s", *publicIPAddress)
+		log.Printf("Internal IP: %s", privateIPAddress)
 	}
 	return w, nil
 
@@ -858,6 +890,24 @@ func (az *AzureProvider) getIPname(ctx context.Context, vmName string) (err erro
 	ipID := *(ipConfigProp.PublicIPAddress.ID)
 	ipName = extractResourceName(ipID)
 	return nil, ipName
+}
+
+// getPrivateIP gets the private ip address of the vm
+// privateIP wont be stored in the credentials struct
+func (az *AzureProvider) getPrivateIP(ctx context.Context) (string, error) {
+	nicInfo, err := az.nicClient.Get(ctx, az.resourceGroupName, az.NicName, "")
+	if err != nil {
+		return "", fmt.Errorf("cannot get nic info: %v", err)
+	}
+	if nicInfo.IPConfigurations == nil {
+		return "", fmt.Errorf("cannot get IP configuration for nic info: %v", err)
+	}
+	nicIPConf := *(nicInfo.IPConfigurations)
+	if len(nicIPConf) == 0 {
+		return "", fmt.Errorf("empty IP configuration for nic")
+	}
+	privateIp := nicIPConf[0].PrivateIPAddress
+	return *privateIp, nil
 }
 
 // destroyIP deletes the IP address by taking it's name as argument.

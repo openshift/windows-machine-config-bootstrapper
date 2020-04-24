@@ -186,6 +186,12 @@ func (a *AwsProvider) CreateWindowsVM() (windowsVM types.WindowsVM, err error) {
 		return nil, err
 	}
 
+	// get the private IP
+	privateIPAddress, err := a.GetPrivateIP(instanceID)
+	if err != nil {
+		return nil, err
+	}
+
 	// Get the decrypted password
 	decryptedPassword, err := a.GetPassword(instanceID)
 	if err != nil {
@@ -219,6 +225,8 @@ func (a *AwsProvider) CreateWindowsVM() (windowsVM types.WindowsVM, err error) {
 		return nil, fmt.Errorf("failed to record instance ID to file at '%s',instance will not be able to be deleted, "+
 			"%v", a.resourceTrackerDir, err)
 	}
+	log.Printf("External IP: %s", publicIPAddress)
+	log.Printf("Internal IP: %s", privateIPAddress)
 	return w, nil
 }
 
@@ -232,6 +240,18 @@ func (a *AwsProvider) GetPublicIP(instanceID string) (string, error) {
 		return "", err
 	}
 	return *instance.PublicIpAddress, nil
+}
+
+// GetPrivateIP returns the private IP address associated with the instance. Make to sure to call this function
+// after the instance is in running state. Exposing this function to be used in testing later.
+func (a *AwsProvider) GetPrivateIP(instanceID string) (string, error) {
+	// Till the instance comes to running state we cannot get the private ip address associated with it.
+	// So, it's better to query the AWS api again to get the instance object and the ip address.
+	instance, err := a.GetInstance(instanceID)
+	if err != nil {
+		return "", err
+	}
+	return *instance.PrivateIpAddress, nil
 }
 
 // GetPassword returns the password associated with the string. Exposing this to be used in tests later
