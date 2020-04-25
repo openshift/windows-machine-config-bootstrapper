@@ -325,7 +325,7 @@
     # TODO: Move this to a more deterministic way of identifying the node we just bootstrapped
     - name: Get bootstrapped node name
       delegate_to: localhost
-      shell: "oc get node -o wide |awk '/{{ inventory_hostname }}/ {print $1}'"
+      shell: "oc get node -o wide |awk '/{{ inventory_hostname }}/ || /{{ private_ip }}/ {print $1}'"
       register: node_name
       until: node_name.stdout != ""
       retries: 3

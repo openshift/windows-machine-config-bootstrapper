@@ -17,8 +17,8 @@ pip install selinux ansible==2.9 pywinrm
 - A `hosts` file with the required variables defined. See below for an example:
 ```
 [win]
-# Address of a node and its Windows password
-<node_ip> ansible_password=<password>
+# Public ip address of a node and its Windows password and private ip 
+<public_ip> ansible_password=<password> private_ip=<private_ip>
 
 [win:vars]
 # Windows username, typically 'Administrator'
