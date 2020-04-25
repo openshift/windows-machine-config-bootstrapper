@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"golang.org/x/crypto/ssh"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -47,6 +48,10 @@ const (
 	ruleAction = "Allow"
 	// azureUser used to access the windows instance
 	azureUser = "core"
+	// sshRulePriority is the priority for the RDP rule
+	sshRulePriority = 603
+	// sshRuleName is the security group rule name for the RDP rule
+	sshRuleName = "SSH"
 )
 
 type requiredRule struct {
@@ -85,18 +90,22 @@ var (
 	ipAddressPattern = regexp.MustCompile(`\d+.\d+.\d+.\d+`)
 	// passwordPattern looks for the password from vm rdp command file.
 	passwordPattern = regexp.MustCompile(`/p:'.{12}'`)
+	// credentials holds the credentials associated with the Windows VM.
+	credentials *types.Credentials
 )
 
 // TestCreateVM is used to the test the following after a successful run of "wni azure create"
 // 1. check if required rules are present
 // 2. ansible ping check to confirm that windows node is correctly
 //    configured to execute the remote ansible commands.
+// TODO: This is not actually testing the Windows VM creation. Change this function.
 func TestCreateVM(t *testing.T) {
 	err := setup()
 	require.NoErrorf(t, err, "failed at the setup with error: %v", err)
 	t.Run("check if required security rules are present", testRequiredRules)
 	t.Run("check if ansible is able to ping on the WinRmHttps port", testAnsiblePing)
 	t.Run("check if container logs port is open in Windows firewall", testAzureInstancesFirewallRule)
+	t.Run("check if SSH connection is available", testAzureSSHConnection)
 }
 
 // isNil is a helper functions which checks if the object is a nil pointer or not.
@@ -118,6 +127,8 @@ func constructRequiredRules() (map[string]*requiredRule,
 	requiredRules[winRMRuleName] = &requiredRule{winRMRuleName, myIP, winRMPort, winRMPortPriority, false}
 	requiredRules[vnetRuleName] = &requiredRule{vnetRuleName, to.StringPtr("10.0.0.0/16"), vnetPorts,
 		vnetRulePriority, false}
+	requiredRules[sshRuleName] = &requiredRule{sshRuleName, myIP, sshPort,
+		sshRulePriority, false}
 	return requiredRules, nil
 }
 
@@ -322,13 +333,21 @@ func createHostFile(ip, password string) (string, error) {
 	}
 	defer hostFile.Close()
 
+	// Give a loop back ip as internal ip, this would never show up as
+	// private ip for any cloud provider. This is a dummy value for testing
+	// purposes. This is a hack to avoid changes to the Credentials struct or
+	// making cloud provider API calls at this juncture and it would need to be fixed
+	// if we ever want to add Azure e2e tests.
+	// TODO: Remove this and get the ip address from the cloud provider
+	// 		 using instance ID from the node object
+	loopbackIP := "127.0.0.1"
 	_, err = hostFile.WriteString(fmt.Sprintf(`[win]
-%s ansible_password=%s
+%s ansible_password=%s private_ip=%s
 [win:vars]
 ansible_user=core
 ansible_port=%s
 ansible_connection=winrm
-ansible_winrm_server_cert_validation=ignore`, ip, password, winRMPort))
+ansible_winrm_server_cert_validation=ignore`, ip, password, loopbackIP, winRMPort))
 	return hostFile.Name(), err
 }
 
@@ -351,8 +370,32 @@ func testAnsiblePing(t *testing.T) {
 
 // testAzureFirewallRule asserts if the created instance has firewall rule that opens container logs port.
 func testAzureInstancesFirewallRule(t *testing.T) {
+	windowsVM = getAzureWindowsVM(t)
+	testInstanceFirewallRule(t)
+}
+
+// Gets a WindowsVM instance object with credentials
+func getAzureWindowsVM(t *testing.T) (windowsVM types.WindowsVM) {
+	w := &types.Windows{}
 	ipAddress, password, err := getIpPass(credentials.GetInstanceId())
 	require.NoErrorf(t, err, "failed to obtain credentials for %s", credentials.GetInstanceId())
 	credentials = types.NewCredentials(credentials.GetInstanceId(), ipAddress, password, azureUser)
-	testInstanceFirewallRule(t)
+	w.Credentials = credentials
+	return w
+}
+
+//Creates a SSH client and tests SSH connection to Windows VM
+func testAzureSSHConnection(t *testing.T) {
+	var session *ssh.Session
+	config := &ssh.ClientConfig{
+		User:            credentials.GetUserName(),
+		Auth:            []ssh.AuthMethod{ssh.Password(credentials.GetPassword())},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+	sshClient, err := ssh.Dial("tcp", credentials.GetIPAddress()+":22", config)
+	require.NoErrorf(t, err, "failed to connect via SSH")
+	session, err = sshClient.NewSession()
+	require.NoErrorf(t, err, "failed to create SSH session")
+	err = session.Run("dir")
+	require.NoErrorf(t, err, "failed to communicate vis SSH")
 }

@@ -74,11 +74,13 @@ git tools.
   - Ensure each PR commit compiles and all unit and e2e tests pass on your local machine.
     - PRs that have vendor commits are an exception to this rule.
 - Following are the things you should keep in mind once you open a PR:
+  - Add a hold as soon as you open the PR by commenting `/hold`
   - Wait for comments from at least 2 reviewers before pushing changes.
   Open comments in the meanwhile can be worked on locally.
   - PR comments should be addressed in new commits. Before final approval, they have to be squashed.
   - If PR has multiple commits, changes requested should eventually be squashed into the original commit where the
-  change was requested before the final merge. Each commit in the final PR before merge should pass the tests and be
+  change was requested before cancelling the hold. Each commit in the final PR before merge should pass the tests and be
   usable. (see below)
+  - Once the PR is approved, remove the hold by commenting `/hold cancel` to merge the PR
 
 ![Sample PR life-cycle](/images/PR-workflow.png)

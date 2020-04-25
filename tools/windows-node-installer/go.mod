@@ -1,6 +1,6 @@
 module github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer
 
-go 1.12
+go 1.13
 
 replace (
 	github.com/openshift/api => github.com/openshift/api v0.0.0-20200205145930-e9d93e317dd1 // OpenShift 4.3
@@ -23,9 +23,10 @@ require (
 	github.com/masterzen/winrm v0.0.0-20190308153735-1d17eaf15943
 	github.com/openshift/api v0.0.0-00010101000000-000000000000
 	github.com/openshift/client-go v0.0.0-00010101000000-000000000000
+	github.com/pkg/sftp v1.11.0
 	github.com/spf13/cobra v0.0.5
 	github.com/stretchr/testify v1.4.0
-	golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550 // indirect
+	golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550
 	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553 // indirect
 	k8s.io/apimachinery v0.17.3
 	k8s.io/client-go v0.0.0-00010101000000-000000000000

@@ -1,10 +1,12 @@
 package wmcb
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/openshift/windows-machine-config-bootstrapper/internal/test"
 	e2ef "github.com/openshift/windows-machine-config-bootstrapper/internal/test/framework"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	certificates "k8s.io/api/certificates/v1beta1"
@@ -47,6 +50,8 @@ const (
 	hybridOverlayName = "hybrid-overlay.exe"
 	// hybridOverExecutable is the remote location of the hybrid overlay binary
 	hybridOverlayExecutable = remoteDir + hybridOverlayName
+	// cniPluginsBaseURL is the base URL of the CNI Plugins location
+	cniPluginsBaseURL = "https://github.com/containernetworking/plugins/releases/download/"
 )
 
 var (
@@ -65,17 +70,11 @@ var (
 		sha:     "a88e7a1c6f72ea6073dbb4ddfe2e7c8bd37c9a56d94a33823f531e303a9915e7a844ac5880097724e44dfa7f4a9659d14b79cc46e2067f6b13e6df3f3f1b0f64",
 		shaType: "sha512",
 	}
-	// cniPlugins contains information about the CNI plugin package
-	cniPlugins = pkgInfo{
-		url:     "https://github.com/containernetworking/plugins/releases/download/v0.8.2/cni-plugins-windows-amd64-v0.8.2.tgz",
-		sha:     "705a760673fd9e2164ac38f0df7d739ca6c3ec4f4204b0c439227ec6da7cb153859013c917e7f8f1a9456365dd9193f627a7e9e4e1981725cab89bb5ab881ec0",
-		shaType: "sha512",
-	}
 )
 
 // wmcbVM is a wrapper for the WindowsVM interface that associates it with WMCB specific testing
 type wmcbVM struct {
-	e2ef.WindowsVM
+	e2ef.TestWindowsVM
 }
 
 // pkg encapsulates information about a package
@@ -86,6 +85,27 @@ type pkgInfo struct {
 	sha string
 	// shaType is the type of SHA used, example: 256 or 512
 	shaType string
+}
+
+type wmcbFramework struct {
+	// TestFramework holds the instantiation of test suite being executed
+	*e2ef.TestFramework
+	// cniPlugins contains information about the CNI plugin package
+	cniPlugins pkgInfo
+}
+
+// Setup initializes the wsuFramework.
+func (f *wmcbFramework) Setup(vmCount int, credentials []*types.Credentials, skipVMsetup bool) error {
+	f.TestFramework = &e2ef.TestFramework{}
+	// Set up the framework
+	err := f.TestFramework.Setup(vmCount, credentials, skipVMsetup)
+	if err != nil {
+		return fmt.Errorf("framework setup failed: %v", err)
+	}
+	if err := f.initializeCniPluginsPkgInfo(); err != nil {
+		return fmt.Errorf("unable to initialize CNI Plugins package info: %v", err)
+	}
+	return nil
 }
 
 // TestWMCB runs the unit and e2e tests for WMCB on the remote VMs
@@ -249,13 +269,13 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 		return fmt.Errorf("unable to create remote directory %s: %v\n%s", remoteDir, err, stderr)
 	}
 
-	cniUrl, err := url.Parse(cniPlugins.url)
+	cniUrl, err := url.Parse(framework.cniPlugins.url)
 	if err != nil {
-		return fmt.Errorf("error parsing %s: %v", cniPlugins.url, err)
+		return fmt.Errorf("error parsing %s: %v", framework.cniPlugins.url, err)
 	}
 
 	// Download and extract the CNI binaries on the Windows VM
-	err = vm.remoteDownloadExtract(cniPlugins, remoteDir+path.Base(cniUrl.Path), winCNIDir)
+	err = vm.remoteDownloadExtract(framework.cniPlugins, remoteDir+path.Base(cniUrl.Path), winCNIDir)
 	if err != nil {
 		return fmt.Errorf("unable to download CNI package: %v", err)
 	}
@@ -613,4 +633,47 @@ func testWMCBCluster(t *testing.T) {
 	winNodes, err = client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
 	assert.Lenf(t, winNodes.Items, 1, "expected one node to have node label but found: %v", len(winNodes.Items))
+}
+
+// initializeCNIPluginsPkgInfo populates the fields of cniPlugins
+func (f *wmcbFramework) initializeCniPluginsPkgInfo() error {
+	f.cniPlugins = pkgInfo{}
+
+	f.cniPlugins.url = cniPluginsBaseURL + f.TestFramework.LatestCniPluginsVersion + "/cni-plugins-windows-amd64-" +
+		f.TestFramework.LatestCniPluginsVersion + ".tgz"
+
+	cniPluginsSHA, err := framework.getLatestCniPluginsSHA()
+	if err != nil {
+		return fmt.Errorf("unable to get SHA for CNI Plugins: %v", err)
+	}
+	f.cniPlugins.sha = cniPluginsSHA
+
+	f.cniPlugins.shaType = "sha512"
+	return nil
+}
+
+// getLatestCniPluginsSHA returns the SHA512 of the latest 0.8.x version of CNI Plugins
+func (f *wmcbFramework) getLatestCniPluginsSHA() (string, error) {
+	latestCniPluginsURL := f.cniPlugins.url
+	latestCniPluginsChecksumFileURL := latestCniPluginsURL + ".sha512"
+	response, err := http.Get(latestCniPluginsChecksumFileURL)
+	if err != nil {
+		return "", fmt.Errorf("could not fetch CNI Plugins checksum file: %s", err)
+	}
+	defer response.Body.Close()
+
+	var checksumFileContent string
+	// Fetching checksum file content from the GET Response
+	scanner := bufio.NewScanner(response.Body)
+	for scanner.Scan() {
+		checksumFileContent = scanner.Text()
+	}
+	// The checksum file content is in the format "<sha> <filename>". So to get SHA we need to extract only the <sha>
+	// from the file
+	sha512AndFilename := strings.Split(checksumFileContent, " ")
+	if len(sha512AndFilename) < 2 {
+		return "", fmt.Errorf("checksum file content is not in the format:'<sha> <filename>'")
+	}
+	sha512 := sha512AndFilename[0]
+	return sha512, nil
 }

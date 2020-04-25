@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,14 @@ const (
 	vnetRuleName = "vnet_traffic"
 	// winUser is the user used to login into the instance.
 	winUser = "core"
+	// sshRulePriority is the priority for the RDP rule
+	sshRulePriority = 603
+	// sshRuleName is the security group rule name for the RDP rule
+	sshRuleName = "SSH"
+	// SKU for ip address
+	// We are using a Standard SKU in place of a Basic SKU as the Load balancer and IP SKU should match
+	// https://docs.microsoft.com/en-us/azure/virtual-network/virtual-network-ip-addresses-overview-arm#sku
+	ipSKU = "Standard"
 )
 
 var windowsWorker string = "winworker-"
@@ -123,8 +132,13 @@ func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
 	if errorCheck(err) {
 		return nil, err
 	}
-
-	infraID, _ := openShiftClient.GetInfrastructureID()
+	if subscriptionID == "" {
+		return nil, fmt.Errorf("empty subscriptionID for azure")
+	}
+	infraID, err := openShiftClient.GetInfrastructureID()
+	if err != nil {
+		return nil, err
+	}
 	resourceAuthorizer, err := auth.NewAuthorizerFromFileWithResource(azure.PublicCloud.ResourceManagerEndpoint)
 	if errorCheck(err) {
 		return nil, err
@@ -167,6 +181,8 @@ func constructRequiredRules(rulesClient network.SecurityRulesClient, resourceGro
 		winRMPortPriority, network.SecurityRule{}}
 	requiredRules[vnetRuleName] = &nsgRuleWrapper{rulesClient, resourceGroupName, vnetRuleName,
 		to.StringPtr("10.0.0.0/16"), vnetPorts, vnetRulePriority, network.SecurityRule{}}
+	requiredRules[sshRuleName] = &nsgRuleWrapper{rulesClient, resourceGroupName, sshRuleName, myIP, strconv.Itoa(types.SshPort),
+		sshRulePriority, network.SecurityRule{}}
 
 	return requiredRules, nil
 }
@@ -316,6 +332,7 @@ func (az *AzureProvider) createPublicIP(ctx context.Context) (ip *network.Public
 		network.PublicIPAddress{
 			Name:     to.StringPtr(az.IpName),
 			Location: to.StringPtr(nodeLocation),
+			Sku:      &network.PublicIPAddressSku{Name: ipSKU},
 			PublicIPAddressPropertiesFormat: &network.PublicIPAddressPropertiesFormat{
 				PublicIPAddressVersion:   network.IPv4,
 				PublicIPAllocationMethod: network.Static,
@@ -367,6 +384,13 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 						Subnet:                    &subnet,
 						PrivateIPAllocationMethod: network.Dynamic,
 						PublicIPAddress:           &ip,
+						// In Azure, for egress as well as for Load balancer service to work, the
+						// windows vm is expected to be placed behind the worker nodes' Load balancer.
+						LoadBalancerBackendAddressPools: &[]network.BackendAddressPool{
+							{
+								ID: az.getWorkerBackendPoolID(),
+							},
+						},
 					},
 				},
 			},
@@ -457,6 +481,15 @@ func (az *AzureProvider) constructStorageProfile(imageId string) (storageProfile
 	return storageProfile
 }
 
+// getWorkerBackendPoolID gets the backend pool id of the worker node loadbalancer
+func (az *AzureProvider) getWorkerBackendPoolID() *string {
+	// We assume that BackendPoolID for worker vm follows the following format
+	// /subscriptions/$SUBSCRIPTID/resourceGroups/$INFRAID-rg/providers/Microsoft.Network/loadBalancers/$INFRAID/backendAddressPools/$INFRAID
+	var wbpi = fmt.Sprintf("/subscriptions/%s/resourceGroups/%[2]s-rg/providers/"+
+		"Microsoft.Network/loadBalancers/%[2]s/backendAddressPools/%[2]s", az.subscriptionID, az.infraID)
+	return &wbpi
+}
+
 // randomPasswordString generates random string with restrictions of given length.
 // ex: 3i[g0|)z for n of size 8
 func randomPasswordString(n int) string {
@@ -507,8 +540,8 @@ func (az *AzureProvider) generateResourceName(resource, randomStr string) (name 
 	return name
 }
 
-// getIPAdress gets the IP Address by IP resource name as an argument.
-func (az *AzureProvider) getIPAddress(ctx context.Context) (ipAddress *string, err error) {
+// getPublicIPAddress gets the public IP Address by IP resource name as an argument.
+func (az *AzureProvider) getPublicIPAddress(ctx context.Context) (ipAddress *string, err error) {
 	result, err := az.ipClient.Get(ctx, az.resourceGroupName, az.IpName, "")
 	if errorCheck(err) {
 		return nil, err
@@ -585,6 +618,8 @@ func (az *AzureProvider) constructOSProfile(ctx context.Context) (osProfile *com
     $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
     (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
     & $file
+    Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+    Start-Service sshd
     New-NetFirewallRule -DisplayName "` + types.FirewallRuleName + `"
     -Direction Inbound -Action Allow -Protocol TCP -LocalPort ` + types.ContainerLogsPort + ` - EdgeTraversalPolicy Allow`
 
@@ -712,10 +747,12 @@ func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 }
 
 // CreateWindowsVM takes in imageId, instanceType and sshKey name to create Windows instance under the same
-// resourceGroupName as the existing OpenShift
+// resourceGroupName as the existing OpenShift. The returned Windows VM object from this method will provide access
+// to the instance via Winrm, SSH
 // TODO: If it fails during the instance creation process it has to delete the resources created
 // untill that step.
-func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
+func (az *AzureProvider) CreateWindowsVM() (types.WindowsVM, error) {
+	w := &types.Windows{}
 	// Construct the VirtualMachine properties
 	rand.Seed(time.Now().UnixNano())
 	ctx := context.Background()
@@ -772,23 +809,50 @@ func (az *AzureProvider) CreateWindowsVM() (*types.Credentials, error) {
 		log.Printf("unable to add installer info to the resource file: %s", err)
 	}
 
-	ipAddress, ipErr := az.getIPAddress(ctx)
+	publicIPAddress, ipErr := az.getPublicIPAddress(ctx)
 	if errorCheck(ipErr) {
 		log.Printf("failed to get the IP address of %s: %s", az.IpName, ipErr)
-		*ipAddress = az.IpName
+		*publicIPAddress = az.IpName
 	}
-	resultData := fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:'%s' \n", *ipAddress, adminPassword)
+	privateIPAddress, err := az.getPrivateIP(ctx)
+	if err != nil {
+		log.Printf("failed to get the private IP address %s: %s", *(vmInfo.Name), err)
+	}
+
+	// Build new credentials structure to be used by other actors. The actor is responsible for checking if
+	// the credentials are being generated properly. This method won't guarantee the existence of credentials
+	// if the VM is spun up
+	credentials := types.NewCredentials(instanceName, *publicIPAddress, adminPassword, winUser)
+	w.Credentials = credentials
+
+	// Setup Winrm and SSH client so that we can interact with the Windows Object we created
+	if err := w.SetupWinRMClient(); err != nil {
+		return nil, fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
+	}
+
+	// Wait for some time before starting configuring of ssh server. This is to let sshd service be available
+	// in the list of services
+	// TODO: Parse the output of the `Get-Service sshd, ssh-agent` on the Windows node to check if the windows nodes
+	// has those services present
+	time.Sleep(time.Minute)
+	if err := w.GetSSHClient(); err != nil {
+		return w, fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
+	}
+
+	resultData := fmt.Sprintf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:'%s'\n", *publicIPAddress, adminPassword)
 	resultPath := az.resourceTrackerDir + instanceName
 	err = resource.StoreCredentialData(resultPath, resultData)
 	if errorCheck(err) {
 		log.Printf("unable to write data into resource file: %s", err)
-		log.Printf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:%s", *ipAddress, adminPassword)
+		log.Printf("xfreerdp /u:core /v:%s /h:1080 /w:1920 /p:%s \n", *publicIPAddress, adminPassword)
 	} else {
 		log.Printf("Please check file %s in directory %s to access the node",
 			instanceName, az.resourceTrackerDir)
+		log.Printf("External IP: %s", *publicIPAddress)
+		log.Printf("Internal IP: %s", privateIPAddress)
 	}
-	credentials := types.NewCredentials(instanceName, *ipAddress, adminPassword, winUser)
-	return credentials, nil
+	return w, nil
+
 }
 
 // getNICname returns nicName by taking instance name as an argument.
@@ -826,6 +890,24 @@ func (az *AzureProvider) getIPname(ctx context.Context, vmName string) (err erro
 	ipID := *(ipConfigProp.PublicIPAddress.ID)
 	ipName = extractResourceName(ipID)
 	return nil, ipName
+}
+
+// getPrivateIP gets the private ip address of the vm
+// privateIP wont be stored in the credentials struct
+func (az *AzureProvider) getPrivateIP(ctx context.Context) (string, error) {
+	nicInfo, err := az.nicClient.Get(ctx, az.resourceGroupName, az.NicName, "")
+	if err != nil {
+		return "", fmt.Errorf("cannot get nic info: %v", err)
+	}
+	if nicInfo.IPConfigurations == nil {
+		return "", fmt.Errorf("cannot get IP configuration for nic info: %v", err)
+	}
+	nicIPConf := *(nicInfo.IPConfigurations)
+	if len(nicIPConf) == 0 {
+		return "", fmt.Errorf("empty IP configuration for nic")
+	}
+	privateIp := nicIPConf[0].PrivateIPAddress
+	return *privateIp, nil
 }
 
 // destroyIP deletes the IP address by taking it's name as argument.
@@ -910,6 +992,45 @@ func (az *AzureProvider) destroyDisk(ctx context.Context, vmInfo compute.Virtual
 	return
 }
 
+// DestroyWindowsVMWithResources destroys the Windows VMs along with all the errors associated with it.
+func (az *AzureProvider) DestroyWindowsVM(vmName string) error {
+	ctx := context.Background()
+	vmInfo, err := az.vmClient.Get(ctx, az.resourceGroupName, vmName, compute.InstanceView)
+	if err != nil {
+		log.Printf("error getting vminfo for %s: %v", vmName, err)
+	}
+	err, nicName := az.getNICname(ctx, vmName)
+	if err != nil {
+		log.Printf("error getting the nic name for %s: %v", vmName, err)
+	}
+	err, ipName := az.getIPname(ctx, vmName)
+	if err != nil {
+		log.Printf("error getting the ip name for the instance %s: %v", vmName, err)
+	}
+
+	err = az.destroyInstance(ctx, vmName)
+	if err != nil {
+		log.Printf("error destroying the instance %s: %v", vmName, err)
+	}
+
+	err = az.destroyNIC(ctx, nicName)
+	if err != nil {
+		log.Printf("error deleting the NIC of instance %s: %v", vmName, err)
+	}
+
+	err = az.destroyIP(ctx, ipName)
+	if err != nil {
+		log.Printf("error deleting the IP of instance %s: %v", vmName, err)
+	}
+
+	// This may still leak resources as we'll not be able to get vm info once the VM gets deleted.
+	err = az.destroyDisk(ctx, vmInfo)
+	if err != nil {
+		log.Printf("error deleting the disk attached to the instance %s: %v", vmName, err)
+	}
+	return nil
+}
+
 // DestroyWindowsVMs destroys all the resources created by the CreateWindows method.
 func (az *AzureProvider) DestroyWindowsVMs() error {
 	// Read from `windows-node-installer.json` file
@@ -927,33 +1048,8 @@ func (az *AzureProvider) DestroyWindowsVMs() error {
 	var rdpFilePath string
 
 	for _, vmName := range installerInfo.InstanceIDs {
-
-		_, nicName := az.getNICname(ctx, vmName)
-		_, ipName := az.getIPname(ctx, vmName)
-
-		vmInfo, _ := az.vmClient.Get(ctx, az.resourceGroupName, vmName, compute.InstanceView)
-
-		log.Printf("deleting the resources associated with instance %s: %s", vmName, err)
-
-		err = az.destroyInstance(ctx, vmName)
-		if !errorCheck(err) {
-			log.Printf("deleted the instance '%s'", vmName)
-		}
-
-		err = az.destroyNIC(ctx, nicName)
-		if !errorCheck(err) {
-			log.Printf("deleted the NIC of instance")
-		}
-
-		err = az.destroyIP(ctx, ipName)
-		if !errorCheck(err) {
-			log.Printf("deleted the IP of instance")
-		}
-
-		err = az.destroyDisk(ctx, vmInfo)
-		if !errorCheck(err) {
-			log.Printf("deleted the disk attached to the instance")
-		}
+		log.Printf("deleting the resources associated with instance %s", vmName)
+		az.DestroyWindowsVM(vmName)
 
 		rdpFilePath = az.resourceTrackerDir + vmName
 		err = resource.DeleteCredentialData(rdpFilePath)

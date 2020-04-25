@@ -18,8 +18,7 @@ import (
 // that provider.
 type Cloud interface {
 	// CreateWindowsVM creates a Windows VM for a given cloud provider
-	// TODO: CreateWindowsVM should return a provider object for further interaction with the created instance.
-	CreateWindowsVM() (*types.Credentials, error)
+	CreateWindowsVM() (types.WindowsVM, error)
 	// DestroyWindowsVMs uses 'windows-node-installer.json' file that contains IDs of created instance and
 	// security group and deletes them.
 	// Example 'windows-node-installer.json' file:
@@ -30,6 +29,10 @@ type Cloud interface {
 	// It deletes the security group only if the group is not associated with any instance.
 	// The association between the instance and security group are available from individual cloud provider.
 	DestroyWindowsVMs() error
+	// DestroyWindowsVM destroys a specific instance that was passed to it. It returns an error when the WindowsVM
+	// deletion fails. It takes the instanceID as argument depending on the cloud provider implementation the
+	// instanceID. Let's if we want to slice of instances instead of individual instances
+	DestroyWindowsVM(string) error
 }
 
 // CloudProviderFactory returns cloud specific interface for performing necessary functions related to creating or

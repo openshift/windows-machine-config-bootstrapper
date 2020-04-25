@@ -17,8 +17,8 @@ pip install selinux ansible==2.9 pywinrm
 - A `hosts` file with the required variables defined. See below for an example:
 ```
 [win]
-# Address of a node and its Windows password
-<node_ip> ansible_password=<password>
+# Public ip address of a node and its Windows password and private ip 
+<public_ip> ansible_password=<password> private_ip=<private_ip>
 
 [win:vars]
 # Windows username, typically 'Administrator'
@@ -48,6 +48,15 @@ Run the WSU playbook:
 ```
 $ ansible-playbook -i hosts tasks/wsu/main.yaml -v
 ```
+On a default run, WSU will automatically get the latest version of WMCB based on the cluster version.
+
+To use WSU which builds WMCB for development purposes, set value of `build_wmcb` to `True`:
+```
+$ ansible-playbook -i hosts tasks/wsu/main.yaml -v -e "{build_wmcb: True}"
+```
+
+#### API rate limit exceeded error when running WSU
+WSU playbook uses GitHub API to fetch releases for WMCB. You might encounter API rate limit exceeded error while running WSU playbook in `TASK [Get release]`. The issue occurs due to GitHub rate-limiting unauthenticated requests at 60 requests per hour. As a workaround, wait for the rate-limit to reset (at most 1 hour) before running the playbook again.
 
 ### End to end testing
 The following environment variables need to be set for running the end to end tests of the playbook:

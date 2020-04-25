@@ -85,7 +85,7 @@ func createCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("error creating aws client, %v", err)
 			}
-			// TODO: Use the credentials object and print password, user name etc here.
+			// TODO: Use the Windows VM object to get password, user name etc here.
 			_, err = cloud.CreateWindowsVM()
 			if err != nil {
 				return fmt.Errorf("error creating Windows Instance, %v", err)

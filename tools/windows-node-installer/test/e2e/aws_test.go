@@ -127,19 +127,19 @@ func setupAWSCloudProvider() error {
 func setupWindowsInstanceWithResources() error {
 	var err error
 	// Create the instance
-	credentials, err = awsProvider.CreateWindowsVM()
+	windowsVM, err = awsProvider.CreateWindowsVM()
 	if err != nil {
 		return fmt.Errorf("error creating Windows instance: %s", err)
 	}
 
 	// Ensure we have the login info for the instance
-	if credentials == nil {
-		return fmt.Errorf("returned credentials empty")
+	if windowsVM == nil {
+		return fmt.Errorf("returned empty Windows VM object")
 	}
-	if credentials.GetPassword() == "" {
+	if windowsVM.GetCredentials().GetPassword() == "" {
 		return fmt.Errorf("returned password empty")
 	}
-	if credentials.GetInstanceId() == "" {
+	if windowsVM.GetCredentials().GetInstanceId() == "" {
 		return fmt.Errorf("returned instance id empty")
 	}
 
@@ -233,7 +233,7 @@ func getInstanceStatus(instanceId string) (string, error) {
 
 // testInstanceStatusOk tests if instance status is ok or not.
 func testInstanceStatusOk(t *testing.T) {
-	err := waitForStatusOk(credentials.GetInstanceId())
+	err := waitForStatusOk(windowsVM.GetCredentials().GetInstanceId())
 	require.NoErrorf(t, err, "failed to get the instance status as ok")
 }
 

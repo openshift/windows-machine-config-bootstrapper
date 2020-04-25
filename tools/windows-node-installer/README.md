@@ -107,7 +107,7 @@ are run. In addition windows-node-installer.json and winworker-* files need to b
 
 To run the e2e change the directory to the `tools\windows-node-installer` of this repo and run the following commands:
 ```bash
-export ARTIFACT_DIRECTORY=$(pwd)
+export ARTIFACT_DIR=$(pwd)
 export KUBECONFIG=<your kubeconfig location>
 export AZURE_AUTH_LOCATION=<your osServicePrincipal.json location>
 go test -run=TestCreateVM ./test/e2e/... -v
