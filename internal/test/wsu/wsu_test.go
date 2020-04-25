@@ -87,11 +87,19 @@ func createHostFile(vmList []e2ef.TestWindowsVM) (string, error) {
 	}
 	defer hostFile.Close()
 
+	// Give a loop back ip as internal ip, this would never show up as
+	// private ip for any cloud provider. This is a dummy for testing purposes.
+	// This is a hack to avoid changes to the Credentials struct or
+	// making cloud provider API calls at this juncture and it would need to be fixed
+	// if we ever want to add Azure e2e tests.
+	loopbackIP := "127.0.0.1"
+
 	// Add each host to the host file
 	hostFileContents := "[win]\n"
 	for i := 0; i < len(vmList); i++ {
 		creds := vmList[i].GetCredentials()
-		hostFileContents += creds.GetIPAddress() + " " + "ansible_password='" + creds.GetPassword() + "'" + "\n"
+		hostFileContents += creds.GetIPAddress() + " " + "ansible_password='" + creds.GetPassword() + "'" +
+			" " + "private_ip='" + loopbackIP + "'" + "\n"
 	}
 
 	// Add the common variables

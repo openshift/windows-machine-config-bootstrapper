@@ -333,13 +333,21 @@ func createHostFile(ip, password string) (string, error) {
 	}
 	defer hostFile.Close()
 
+	// Give a loop back ip as internal ip, this would never show up as
+	// private ip for any cloud provider. This is a dummy value for testing
+	// purposes. This is a hack to avoid changes to the Credentials struct or
+	// making cloud provider API calls at this juncture and it would need to be fixed
+	// if we ever want to add Azure e2e tests.
+	// TODO: Remove this and get the ip address from the cloud provider
+	// 		 using instance ID from the node object
+	loopbackIP := "127.0.0.1"
 	_, err = hostFile.WriteString(fmt.Sprintf(`[win]
-%s ansible_password=%s
+%s ansible_password=%s private_ip=%s
 [win:vars]
 ansible_user=core
 ansible_port=%s
 ansible_connection=winrm
-ansible_winrm_server_cert_validation=ignore`, ip, password, winRMPort))
+ansible_winrm_server_cert_validation=ignore`, ip, password, loopbackIP, winRMPort))
 	return hostFile.Name(), err
 }
 
