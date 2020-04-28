@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
@@ -89,7 +90,7 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			expected: []*ec2.IpPermission{
 				getAllPortRule(vpcCidr),
 				getOtherPortRules(WINRM_PORT, myIP),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 		},
@@ -101,7 +102,7 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			},
 			expected: []*ec2.IpPermission{
 				getAllPortRule(vpcCidr),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 		},
@@ -110,7 +111,7 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			name: "Complete input from current IP",
 			in: []*ec2.IpPermission{
 				getOtherPortRules(WINRM_PORT, myIP),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 			expected: []*ec2.IpPermission{
@@ -126,7 +127,7 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			},
 			expected: []*ec2.IpPermission{
 				getOtherPortRules(WINRM_PORT, myIP),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 		},
@@ -136,12 +137,12 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			in: []*ec2.IpPermission{
 				getAllPortRule(vpcCidr),
 				getOtherPortRules(WINRM_PORT, otherIP),
-				getOtherPortRules(sshPort, otherIP),
+				getOtherPortRules(types.SshPort, otherIP),
 				getOtherPortRules(rdpPort, otherIP),
 			},
 			expected: []*ec2.IpPermission{
 				getOtherPortRules(WINRM_PORT, myIP),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 		},
