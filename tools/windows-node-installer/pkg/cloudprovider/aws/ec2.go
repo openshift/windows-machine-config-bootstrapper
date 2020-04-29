@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	awssession "github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
 	"github.com/aws/aws-sdk-go/service/iam"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/client"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
@@ -64,7 +65,7 @@ type AwsProvider struct {
 	// using this flag. AWS encrypts the password of the Windows instance created with this public key
 	sshKey string
 	// A client for EC2.
-	EC2 *ec2.EC2
+	EC2 ec2iface.EC2API
 	// A client for IAM.
 	IAM *iam.IAM
 	// openShiftClient is the client of the existing OpenShift cluster.
