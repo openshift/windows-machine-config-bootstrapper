@@ -307,6 +307,19 @@ func (a *AwsProvider) DestroyWindowsVM(instanceID string) error {
 	return nil
 }
 
+// IsVMRunning checks if the VM is in running state currently and then returns failure
+func (a *AwsProvider) IsVMRunning(instanceID string) error {
+	// Check if the instance exists, if not no need to wait return immediately
+	instance, err := a.GetInstance(instanceID)
+	if err != nil {
+		return fmt.Errorf("instance retrieval failed with: %v", err)
+	}
+	if *instance.State.Name != ec2.InstanceStateNameRunning {
+		return fmt.Errorf("instance is in %s state", *instance.State.Name)
+	}
+	return nil
+}
+
 // waitUntilPasswordDataIsAvailable waits till the ec2 password data is available.
 // AWS sdk's WaitUntilPasswordDataAvailable is returning inspite of password data being available.
 // So, building this function as a wrapper around AWS sdk's GetPasswordData method with constant back-off
@@ -316,6 +329,9 @@ func (a *AwsProvider) waitUntilPasswordDataIsAvailable(instanceID string) (*ec2.
 		currTime := time.Since(startTime)
 		if currTime >= awsPasswordDataTimeOut {
 			return nil, fmt.Errorf("timed out waiting for password to be available")
+		}
+		if err := a.IsVMRunning(instanceID); err != nil {
+			return nil, err
 		}
 		// Get the ec2 passworddata output.
 		pwdData, err := a.getPasswordDataOutput(instanceID)
