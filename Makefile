@@ -1,4 +1,4 @@
-all: build build-tools build-wmcb-unit-test build-wmcb-e2e-test verify-all
+all: build build-tools build-wmcb-unit-test build-wmcb-e2e-test test-unit-wni verify-all
 
 PACKAGE=github.com/openshift/windows-machine-config-bootstrapper
 MAIN_PACKAGE=$(PACKAGE)/cmd/bootstrapper
@@ -33,6 +33,10 @@ test-e2e-prepared-node:
 .PHONY: build-tools
 build-tools:
 	cd ./tools/windows-node-installer && $(GO_BUILD_ARGS) go build -o wni $(TOOLS_DIR)
+
+.PHONY: test-unit-wni
+test-unit-wni:
+	cd ./tools/windows-node-installer && $(GO_BUILD_ARGS) go test  $(TOOLS_DIR)/pkg/...  -v -count=1
 
 .PHONY: test-e2e-tools
 test-e2e-tools:

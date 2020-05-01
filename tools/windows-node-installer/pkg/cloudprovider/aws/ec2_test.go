@@ -5,14 +5,59 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"github.com/aws/aws-sdk-go/service/ec2"
+	"github.com/aws/aws-sdk-go/service/ec2/ec2iface"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )
 
+type mockEC2Client struct {
+	ec2iface.EC2API
+}
+
+type Instance struct {
+	name         string
+	passwordData string
+	state        string
+}
+
 var (
-	awsProvider = AwsProvider{}
+	mockClient         = &mockEC2Client{}
+	awsProvider        = AwsProvider{EC2: mockClient}
+	runningInstance    = Instance{name: "RunningInstance", passwordData: "abc123", state: ec2.InstanceStateNameRunning}
+	terminatedInstance = Instance{name: "terminatedInstance", state: ec2.InstanceStateNameTerminated}
 )
+
+func (m *mockEC2Client) GetPasswordData(instanceDataInput *ec2.GetPasswordDataInput) (*ec2.GetPasswordDataOutput, error) {
+	instanceId := *instanceDataInput.InstanceId
+	if instanceId == runningInstance.name {
+		return &ec2.GetPasswordDataOutput{
+			InstanceId:   &runningInstance.name,
+			PasswordData: &runningInstance.passwordData,
+		}, nil
+	}
+	return nil, nil
+}
+
+func (m *mockEC2Client) DescribeInstances(instanceInput *ec2.DescribeInstancesInput) (*ec2.DescribeInstancesOutput, error) {
+	if len(instanceInput.InstanceIds) > 0 {
+		return nil, fmt.Errorf("expected only one instance to be available for testing")
+	}
+	instanceId := *instanceInput.InstanceIds[0]
+	if instanceId == runningInstance.name {
+		return &ec2.DescribeInstancesOutput{
+			Reservations: []*ec2.Reservation{{Instances: []*ec2.Instance{{InstanceId: &instanceId, State: &ec2.InstanceState{Name: &runningInstance.state}}}}},
+		}, nil
+	}
+	if instanceId == terminatedInstance.name {
+		return &ec2.DescribeInstancesOutput{
+			Reservations: []*ec2.Reservation{{Instances: []*ec2.Instance{{InstanceId: &instanceId, State: &ec2.InstanceState{Name: &terminatedInstance.state}}}}},
+		}, nil
+	}
+	return nil, nil
+}
 
 // generateKeyPair generates a new key pair
 func generateKeyPair() (*rsa.PrivateKey, *rsa.PublicKey) {
@@ -89,7 +134,7 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			expected: []*ec2.IpPermission{
 				getAllPortRule(vpcCidr),
 				getOtherPortRules(WINRM_PORT, myIP),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 		},
@@ -101,7 +146,7 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			},
 			expected: []*ec2.IpPermission{
 				getAllPortRule(vpcCidr),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 		},
@@ -110,7 +155,7 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			name: "Complete input from current IP",
 			in: []*ec2.IpPermission{
 				getOtherPortRules(WINRM_PORT, myIP),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 			expected: []*ec2.IpPermission{
@@ -126,7 +171,7 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			},
 			expected: []*ec2.IpPermission{
 				getOtherPortRules(WINRM_PORT, myIP),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 		},
@@ -136,12 +181,12 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 			in: []*ec2.IpPermission{
 				getAllPortRule(vpcCidr),
 				getOtherPortRules(WINRM_PORT, otherIP),
-				getOtherPortRules(sshPort, otherIP),
+				getOtherPortRules(types.SshPort, otherIP),
 				getOtherPortRules(rdpPort, otherIP),
 			},
 			expected: []*ec2.IpPermission{
 				getOtherPortRules(WINRM_PORT, myIP),
-				getOtherPortRules(sshPort, myIP),
+				getOtherPortRules(types.SshPort, myIP),
 				getOtherPortRules(rdpPort, myIP),
 			},
 		},
@@ -150,5 +195,39 @@ func TestGetRulesForSgUpdate(t *testing.T) {
 	for _, tt := range testIO {
 		actual := awsProvider.getRulesForSgUpdate(myIP, tt.in, vpcCidr)
 		assert.ElementsMatch(t, tt.expected, actual, tt.name, "awsProvider.getRulesForSgUpdate(), actual values do not match expected")
+	}
+}
+
+func TestAwsProvider_waitUntilPasswordDataIsAvailable(t *testing.T) {
+	tests := []struct {
+		name       string
+		instanceID string
+		want       *ec2.GetPasswordDataOutput
+		wantErr    bool
+	}{
+		{
+			// We should get password only for running instance
+			name:       "Running Instance",
+			instanceID: runningInstance.name,
+			wantErr:    false,
+			want: &ec2.GetPasswordDataOutput{
+				InstanceId:   &runningInstance.name,
+				PasswordData: &runningInstance.passwordData,
+			},
+		},
+		{
+			name:       "Terminated Instance",
+			instanceID: terminatedInstance.name,
+			wantErr:    true,
+			want:       nil,
+		},
+	}
+	for _, tt := range tests {
+		got, err := awsProvider.waitUntilPasswordDataIsAvailable(tt.instanceID)
+		if (err != nil) != tt.wantErr {
+			assert.Error(t, err)
+			return
+		}
+		assert.Equal(t, got, tt.want)
 	}
 }
