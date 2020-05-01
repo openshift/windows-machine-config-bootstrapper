@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -49,9 +50,6 @@ var (
 	artifactDir string
 	// privateKeyPath is the path to the key that will be used to retrieve the password of each Windows VM
 	privateKeyPath string
-	// clusterAddress is the address of the OpenShift cluster e.g. "foo.fah.com".
-	// This should not include "https://api-" or a port
-	ClusterAddress string
 )
 
 // TestFramework holds the info to run the test suite.
@@ -72,6 +70,9 @@ type TestFramework struct {
 	latestRelease *github.RepositoryRelease
 	// LatestCniPluginsVersion is the latest 0.8.x version of CNI Plugins
 	LatestCniPluginsVersion string
+	// clusterAddress is the address of the OpenShift cluster e.g. "foo.fah.com".
+	// This should not include "https://api-" or a port.
+	ClusterAddress string
 }
 
 // Creds is used for parsing the vmCreds command line argument
@@ -121,10 +122,6 @@ func initCIvars() error {
 	if privateKeyPath == "" {
 		return fmt.Errorf("KUBE_SSH_KEY_PATH environment variable not set")
 	}
-	ClusterAddress = os.Getenv("CLUSTER_ADDR")
-	if ClusterAddress == "" {
-		return fmt.Errorf("CLUSTER_ADDR environment variable not set")
-	}
 	return nil
 }
 
@@ -138,13 +135,15 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 		}
 		f.noTeardown = true
 	}
-	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
-	// the Intel 82599 network driver
-	instanceType := "m5a.large"
+
 	if err := initCIvars(); err != nil {
 		return fmt.Errorf("unable to initialize CI variables: %v", err)
 	}
+
 	f.WinVMs = make([]TestWindowsVM, vmCount)
+	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
+	// the Intel 82599 network driver
+	instanceType := "m5a.large"
 	// TODO: make them run in parallel: https://issues.redhat.com/browse/WINC-178
 	for i := 0; i < vmCount; i++ {
 		var err error
@@ -170,6 +169,9 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 	}
 	if err := f.getOpenShiftOperatorClient(config); err != nil {
 		return fmt.Errorf("unable to get OpenShift operator client: %v", err)
+	}
+	if err := f.getClusterAddress(config); err != nil {
+		return fmt.Errorf("unable to get cluster address: %v", err)
 	}
 	if err := f.getClusterVersion(); err != nil {
 		return fmt.Errorf("unable to get OpenShift cluster version: %v", err)
@@ -212,6 +214,29 @@ func (f *TestFramework) getOpenShiftOperatorClient(config *restclient.Config) er
 		return fmt.Errorf("could not create operator clientset: %v", err)
 	}
 	f.OSOperatorClient = operatorClient
+	return nil
+}
+
+// getClusterAddress returns the cluster address associated with the API server endpoint of the cluster the tests are
+// are running against. For example: the kubernetes API server endpoint https://api.abc.devcluster.openshift.com:6443
+// gets converted to abc.devcluster.openshift.com
+func (f *TestFramework) getClusterAddress(config *restclient.Config) error {
+	if config.Host == "" {
+		return fmt.Errorf("API server has empty host name")
+	}
+
+	clusterEndPoint, err := url.Parse(config.Host)
+	if err != nil {
+		return fmt.Errorf("unable to parse the API server endpoint: %v", err)
+	}
+
+	hostName := clusterEndPoint.Hostname()
+	if !strings.HasPrefix(hostName, "api.") {
+		return fmt.Errorf("API server has invalid format: expected hostname to start with `api.`")
+	}
+
+	// Replace `api.` with empty string for the first occurrence.
+	f.ClusterAddress = strings.Replace(hostName, "api.", "", 1)
 	return nil
 }
 

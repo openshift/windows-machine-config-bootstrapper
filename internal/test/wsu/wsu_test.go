@@ -109,7 +109,7 @@ cluster_address=%s
 ansible_port=5986
 ansible_connection=winrm
 ansible_winrm_server_cert_validation=ignore
-`, e2ef.ClusterAddress)
+`, framework.ClusterAddress)
 	_, err = hostFile.WriteString(hostFileContents)
 	return hostFile.Name(), err
 }
