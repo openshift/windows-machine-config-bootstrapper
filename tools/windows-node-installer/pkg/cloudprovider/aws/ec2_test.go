@@ -225,7 +225,8 @@ func TestAwsProvider_waitUntilPasswordDataIsAvailable(t *testing.T) {
 	for _, tt := range tests {
 		got, err := awsProvider.waitUntilPasswordDataIsAvailable(tt.instanceID)
 		if (err != nil) != tt.wantErr {
-			assert.NoError(t, err, tt.wantErr)
+			assert.Error(t, err)
+			return
 		}
 		assert.Equal(t, got, tt.want)
 	}
