@@ -212,7 +212,7 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 	}
 
 	// Download the worker ignition to C:\Windows\Tenp\ using the script that ignores the server cert
-	_, _, err = vm.Run(wgetIgnoreCertCmd+" -server https://api-int."+e2ef.ClusterAddress+":22623/config/worker"+" -output "+winTemp+"worker.ign", true)
+	_, _, err = vm.Run(wgetIgnoreCertCmd+" -server https://api-int."+framework.ClusterAddress+":22623/config/worker"+" -output "+winTemp+"worker.ign", true)
 	if err != nil {
 		return fmt.Errorf("unable to download worker.ign: %v", err)
 	}
