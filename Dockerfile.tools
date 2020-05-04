@@ -23,6 +23,11 @@ RUN pip2 install ansible pywinrm
 # Make Ansible happy with arbitrary UID/GID in OpenShift.
 RUN chmod g=u /etc/passwd /etc/group
 
+# Seems ansible-playbook doesn't work with ansible.cfg
+RUN mkdir -p /.ansible
+RUN chmod 777 -R /.ansible
+
+
 # Allow building the WMCB and creation of /go/.cache directory
 RUN chmod -R g=u+w /go
 

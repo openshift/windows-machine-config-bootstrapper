@@ -28,9 +28,6 @@ TEST_DIR=$WMCO_ROOT/internal/test/wsu
 # Make gopath if doesnt exist
 mkdir -p $GOPATH
 
-# Seems ansible-playbook doesn't work with ansible.cfg
-mkdir -p /.ansible
-chmod 777 -R /.ansible
 
 # If current user cannot be found add it to /etc/passwd. This is the case when this is run by an OpenShift cluster,
 # as OpenShift uses an arbitrarily assigned user ID to run the container.
