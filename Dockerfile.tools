@@ -30,6 +30,6 @@ RUN chmod -R g=u+w /go
 ENV GOCACHE="/go/.cache"
 ENV PATH="${PATH}:/usr/local/go/bin"
 ENV GOPATH="/go"
-ENV DEFAULT_LOCAL_TMP="/tmp"
+ENV ANSIBLE_LOCAL_TEMP="/tmp"
 
 ENTRYPOINT [ "/bin/bash" ]
