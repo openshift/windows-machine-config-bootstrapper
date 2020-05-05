@@ -47,7 +47,7 @@ const (
 	// unitExecutable is the remote location of the WMCB unit test binary
 	unitExecutable = remoteDir + "wmcb_unit_test.exe"
 	// hybridOverlayName is the name of the hybrid overlay executable
-	hybridOverlayName = "hybrid-overlay.exe"
+	hybridOverlayName = "hybrid-overlay-node.exe"
 	// hybridOverExecutable is the remote location of the hybrid overlay binary
 	hybridOverlayExecutable = remoteDir + hybridOverlayName
 	// cniPluginsBaseURL is the base URL of the CNI Plugins location
@@ -321,15 +321,15 @@ func (vm *wmcbVM) initializeHybridOverlayBinary() error {
 
 // handleHybridOverlay ensures that the hybrid overlay is running on the node
 func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
-	// Check if the hybrid-overlay is running
-	_, stderr, err := vm.Run("Get-Process -Name \"hybrid-overlay\"", true)
+	// Check if the hybrid-overlay-node is running
+	_, stderr, err := vm.Run("Get-Process -Name \"hybrid-overlay-node\"", true)
 
-	// stderr being empty implies that an hybrid-overlay was running. This is to help with local development.
+	// stderr being empty implies that an hybrid-overlay-node was running. This is to help with local development.
 	if err == nil || stderr == "" {
 		return nil
 	}
 
-	// Wait until the node object has the hybrid overlay subnet annotation. Otherwise the hybrid-overlay will fail to
+	// Wait until the node object has the hybrid overlay subnet annotation. Otherwise the hybrid-overlay-node will fail to
 	// start
 	if err = waitForHybridOverlayAnnotation(nodeName); err != nil {
 		return fmt.Errorf("error waiting for hybrid overlay node annotation: %v", err)
@@ -340,7 +340,7 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 		return fmt.Errorf("unable to create remote directory %s: %v\n%s", kLog, err, stderr)
 	}
 
-	// Start the hybrid-overlay in the background over ssh. We cannot use vm.Run() and by extension WinRM.Run() here as
+	// Start the hybrid-overlay-node in the background over ssh. We cannot use vm.Run() and by extension WinRM.Run() here as
 	// we observed WinRM.Run() returning before the commands completes execution. The reason for that is unclear and
 	// requires further investigation.
 	go vm.RunOverSSH(hybridOverlayExecutable+" --node "+nodeName+
@@ -356,7 +356,7 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 		return fmt.Errorf("error waiting for OpenShift HNS networks to be created: %v", err)
 	}
 
-	// Running the hybrid-overlay causes network reconfiguration in the Windows VM which results in the ssh connection
+	// Running the hybrid-overlay-node causes network reconfiguration in the Windows VM which results in the ssh connection
 	// being closed and the client is not smart enough to reconnect. We have observed that the WinRM connection does not
 	// get closed and does not need reinitialization.
 	err = vm.Reinitialize()
@@ -375,8 +375,8 @@ func (vm *wmcbVM) waitForOpenShiftHNSNetworks() error {
 			continue
 		}
 
-		if strings.Contains(stdout, "BaseOpenShiftNetwork") &&
-			strings.Contains(stdout, "OpenShiftNetwork") {
+		if strings.Contains(stdout, "BaseOVNKubernetesHybridOverlayNetwork") &&
+			strings.Contains(stdout, "OVNKubernetesHybridOverlayNetwork") {
 			return nil
 		}
 		time.Sleep(e2ef.RetryInterval)
@@ -387,19 +387,19 @@ func (vm *wmcbVM) waitForOpenShiftHNSNetworks() error {
 	return fmt.Errorf("timeout waiting for OpenShift HNS networks: %v", err)
 }
 
-// waitForHybridOverlayToRun waits for the hybrid-overlay.exe to run until the timeout is reached
+// waitForHybridOverlayToRun waits for the hybrid-overlay-node.exe to run until the timeout is reached
 func (vm *wmcbVM) waitForHybridOverlayToRun() error {
 	var err error
 	for retries := 0; retries < e2ef.RetryCount; retries++ {
-		_, _, err = vm.Run("Get-Process -Name \"hybrid-overlay\"", true)
+		_, _, err = vm.Run("Get-Process -Name \"hybrid-overlay-node\"", true)
 		if err == nil {
 			return nil
 		}
 		time.Sleep(e2ef.RetryInterval)
 	}
 
-	// hybrid-overlay never started running
-	return fmt.Errorf("timeout waiting for hybrid-overlay: %v", err)
+	// hybrid-overlay-node never started running
+	return fmt.Errorf("timeout waiting for hybrid-overlay-node: %v", err)
 }
 
 // approve approves the given CSR if it has not already been approved

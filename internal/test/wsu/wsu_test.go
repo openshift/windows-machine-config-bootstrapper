@@ -39,7 +39,7 @@ var (
 	ubi8Image = "registry.access.redhat.com/ubi8/ubi:latest"
 )
 
-const hybridOverlayDir = "C:\\k\\log\\hybrid-overlay"
+const hybridOverlayDir = "C:\\k\\log\\hybrid-overlay-node"
 const kubeProxyDir = "C:\\k\\log\\kube-proxy"
 
 type wsuFramework struct {
@@ -120,26 +120,12 @@ ansible_winrm_server_cert_validation=ignore
 func TestWSU(t *testing.T) {
 	require.NotEmptyf(t, playbookPath, "WSU_PATH environment variable not set")
 
-	// Run the WSU before applying hybrid overlay patch, expecting it to fail with a verbose error message
-	t.Run("Expect failure when hybrid overlay is not enabled", testWithoutHybridOverlay)
-
-	// Apply the hybrid overlay patch, and run the full VM test suite for each VM
-	err := framework.ApplyHybridOverlayPatch()
-	require.NoError(t, err, "Could not apply hybrid overlay patch")
 	t.Run("VM specific tests", testAllVMs)
 
 	// Run cluster wide tests
 	t.Run("Pending CSRs were approved", testNoPendingCSRs)
 
 	t.Run("Tests across Windows nodes", testAcrossWindowsNodes)
-}
-
-// testWithoutHybridOverlay ensures that the WSU fails early when hybrid overlay is not enabled
-func testWithoutHybridOverlay(t *testing.T) {
-	wsuOut, err := runWSU(framework.WinVMs[0])
-	assert.NotNil(t, err, "Expected WSU to throw an error, but no error was thrown")
-	assert.Contains(t, string(wsuOut), "Cluster not patched for hybrid overlay",
-		"Expected hybrid overlay error and couldn't find one")
 }
 
 // testAllVMs runs all VM specific tests
@@ -255,7 +241,7 @@ func runE2ETestSuite(t *testing.T, vm e2ef.TestWindowsVM, ansibleOutput string) 
 	tempDirPath, err := getAnsibleTempDirPath(ansibleOutput)
 	require.NoError(t, err, "Could not get path of Ansible temp directory")
 
-	binaryFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe", "hybrid-overlay.exe", "kube.tar.gz"}
+	binaryFileList := []string{"kubelet.exe", "worker.ign", "wmcb.exe", "hybrid-overlay-node.exe", "kube.tar.gz"}
 	hybridOverlaylogList := []string{"hybridOverlayStdout.log", "hybridOverlayStderr.log"}
 	kubeProxylogList := []string{"kube-proxy.exe.INFO", "kube-proxy.exe.WARNING"}
 
@@ -465,10 +451,10 @@ func testHybridOverlayAnnotations(t *testing.T, node *v1.Node) {
 func testHNSNetworksCreated(t *testing.T, vm e2ef.TestWindowsVM) {
 	stdout, _, err := vm.Run("Get-HnsNetwork", true)
 	require.NoError(t, err, "Could not run Get-HnsNetwork command")
-	assert.Contains(t, stdout, "Name                   : BaseOpenShiftNetwork",
-		"Could not find BaseOpenShiftNetwork in list of HNS Networks")
-	assert.Contains(t, stdout, "Name                   : OpenShiftNetwork",
-		"Could not find OpenShiftNetwork in list of HNS Networks")
+	assert.Contains(t, stdout, "Name                   : BaseOVNKubernetesHybridOverlayNetwork",
+		"Could not find BaseOVNKubernetesHybridOverlayNetwork in list of HNS Networks")
+	assert.Contains(t, stdout, "Name                   : OVNKubernetesHybridOverlayNetwork",
+		"Could not find OVNKubernetesHybridOverlayNetwork in list of HNS Networks")
 }
 
 // getAffinityForNode returns an affinity which matches the associated node's name
