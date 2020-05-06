@@ -91,7 +91,7 @@ func New(openShiftClient *client.OpenShift, imageID, instanceType, sshKey, crede
 	}
 	session, err := newSession(credentialPath, credentialAccountID, provider.AWS.Region)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("could not create new AWS session: %v", err)
 	}
 	return &AwsProvider{imageID, instanceType, sshKey,
 		ec2.New(session, aws.NewConfig()),
@@ -107,11 +107,10 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 	if _, err := os.Stat(credentialPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("failed to find AWS credentials from path '%v'", credentialPath)
 	}
-	session := awssession.Must(awssession.NewSession(&aws.Config{
+	return awssession.NewSession(&aws.Config{
 		Credentials: credentials.NewSharedCredentials(credentialPath, credentialAccountID),
 		Region:      aws.String(region),
-	}))
-	return session, nil
+	})
 }
 
 // CreateWindowsVM takes in imageId, instanceType, and sshKey name to create a Windows instance under the same VPC as
