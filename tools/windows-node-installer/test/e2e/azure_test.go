@@ -120,6 +120,11 @@ func TestCreateVM(t *testing.T) {
 	t.Run("check if ansible is able to ping on the WinRmHttps port", testAnsiblePing)
 	t.Run("check if container logs port is open in Windows firewall", testAzureInstancesFirewallRule)
 	t.Run("check if SSH connection is available", testAzureSSHConnection)
+
+	err = deleteResources(kubeconfig)
+	if err != nil {
+		t.Logf("error deleting cluster resources %v", err)
+	}
 }
 
 // isNil is a helper functions which checks if the object is a nil pointer or not.
@@ -168,7 +173,14 @@ func setup() error {
 
 // populateAzureInfo populates the fields present in the azureInfo.
 func populateAzureInfo() error {
-	oc, err := client.GetOpenShift(kubeconfig)
+	var oc *client.OpenShift
+	var err error
+	// Use client created by service account if running in CI environment
+	if os.Getenv("OPENSHIFT_CI") == "true" {
+		oc, err = getOpenShiftClientForSA(kubeconfig)
+	} else {
+		oc, err = client.GetOpenShift(kubeconfig)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to initialize OpenShift client with error: %v", err)
 	}

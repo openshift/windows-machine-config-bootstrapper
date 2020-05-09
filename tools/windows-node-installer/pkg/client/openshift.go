@@ -7,6 +7,7 @@ import (
 	"github.com/openshift/api/config/v1"
 	clientset "github.com/openshift/client-go/config/clientset/versioned"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -16,12 +17,21 @@ type OpenShift struct {
 	Client *clientset.Clientset
 }
 
-// GetOpenShift uses kubeconfig to create a client for existing OpenShift cluster and returns it or an error.
+// GetOpenShift creates client for the current OpenShift cluster. If Kubeconfig is provided, it is used to create client,
+// otherwise it uses in-cluster config.
 func GetOpenShift(kubeConfigPath string) (*OpenShift, error) {
 	log.Printf("kubeconfig source: %s", kubeConfigPath)
-	rc, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+	var rc *rest.Config
+	var err error
+
+	if kubeConfigPath == "" {
+		// InClusterConfig uses default service account or service account provided by the pod to obtain config.
+		rc, err = rest.InClusterConfig()
+	} else {
+		rc, err = clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error creating the config object %v", err)
 	}
 
 	oc, err := clientset.NewForConfig(rc)
