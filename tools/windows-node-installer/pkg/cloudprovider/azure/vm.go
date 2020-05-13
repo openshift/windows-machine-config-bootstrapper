@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -129,14 +130,21 @@ type nsgRuleWrapper struct {
 // It takes in kubeconfig of an existing OpenShift cluster and an azure specific credential file.
 // The resourceTrackerDir is where the `windows-node-installer.json` file which contains IDs of created instance and
 // security group will be created.
-func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
-	resourceTrackerDir, imageID, instanceType string) (*AzureProvider, error) {
+func New(openShiftClient *client.OpenShift, credentialPath, resourceTrackerDir, imageID,
+	instanceType string) (*AzureProvider, error) {
+	// Azure SDK requires this env var to be set and pointing to your credential file
+	if err := os.Setenv("AZURE_AUTH_LOCATION", credentialPath); err != nil {
+		return nil, fmt.Errorf("could not set 'AZURE_AUTH_LOCATION' environment variable: %v", err)
+	}
+	fileSettings, err := auth.GetSettingsFromFile()
+	if err != nil {
+		return nil, fmt.Errorf("could not get settings from file %s: %v", credentialPath, err)
+	}
+	subscriptionID := fileSettings.GetSubscriptionID()
+
 	provider, err := openShiftClient.GetCloudProvider()
 	if errorCheck(err) {
 		return nil, err
-	}
-	if subscriptionID == "" {
-		return nil, fmt.Errorf("empty subscriptionID for azure")
 	}
 	infraID, err := openShiftClient.GetInfrastructureID()
 	if err != nil {
