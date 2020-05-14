@@ -859,28 +859,30 @@ func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 		}
 	}
 
-	var vmNic network.Interface
+	var nic *network.Interface
 	if len(az.NicName) > 0 {
-		vmNic, err = az.nicClient.Get(ctx, az.resourceGroupName, az.NicName, "")
-		if errorCheck(err) {
+		retrievedNIC, err := az.nicClient.Get(ctx, az.resourceGroupName, az.NicName, "")
+		if err != nil {
 			return nil, fmt.Errorf("failed to attach user provided nic for the instance: %v", err)
 		}
+		nic = &retrievedNIC
 	} else {
 		nicName := az.generateResourceName("nic", vmRandString)
 		ipConfigName := az.generateResourceName("ipConfig", vmRandString)
 		az.NicName = nicName
-		ptrvmNic, err := az.createNIC(ctx, vnetName, subnetName, nsgName, ipConfigName)
-		vmNic = *(ptrvmNic)
-		if errorCheck(err) {
+		nic, err = az.createNIC(ctx, vnetName, subnetName, nsgName, ipConfigName)
+		if err != nil {
 			return nil, fmt.Errorf("failed to create nic for the instance: %v", err)
 		}
 	}
-	nicID := vmNic.ID
+	if nic.ID == nil {
+		return nil, fmt.Errorf("nic ID is nil")
+	}
 
 	networkProfile = &compute.NetworkProfile{
 		NetworkInterfaces: &[]compute.NetworkInterfaceReference{
 			{
-				ID: nicID,
+				ID: nic.ID,
 				NetworkInterfaceReferenceProperties: &compute.NetworkInterfaceReferenceProperties{
 					Primary: to.BoolPtr(true),
 				},
