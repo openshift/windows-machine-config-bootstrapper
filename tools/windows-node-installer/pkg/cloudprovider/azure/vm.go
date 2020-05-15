@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/profiles/2019-03-01/resources/mgmt/resources"
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-04-01/network"
 	"github.com/Azure/go-autorest/autorest"
@@ -80,6 +81,8 @@ type AzureProvider struct {
 	nsgClient network.SecurityGroupsClient
 	// diskClient to query for disk related operations.
 	diskClient compute.DisksClient
+	// resourcesClient to query resources. Can query all resources
+	resourcesClient resources.Client
 	// a request authorization token to supply for clients
 	authorizer autorest.Authorizer
 	// resourceGroupName of the existing openshift cluster.
@@ -152,6 +155,7 @@ func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
 	nsgClient := getNsgClient(resourceAuthorizer, subscriptionID)
 	diskClient := getDiskClient(resourceAuthorizer, subscriptionID)
 	rulesClient := getRulesClient(resourceAuthorizer, subscriptionID)
+	resourcesClient := getResourcesClient(resourceAuthorizer, subscriptionID)
 
 	requiredRules, err := constructRequiredRules(rulesClient, resourceGroupName)
 	if err != nil {
@@ -161,7 +165,7 @@ func New(openShiftClient *client.OpenShift, credentialPath, subscriptionID,
 	var IpName, NicName, NsgName string
 
 	return &AzureProvider{vnetClient, vmClient, ipClient,
-		subnetClient, nicClient, nsgClient, diskClient, resourceAuthorizer,
+		subnetClient, nicClient, nsgClient, diskClient, resourcesClient, resourceAuthorizer,
 		resourceGroupName, subscriptionID, infraID, IpName, NicName, NsgName,
 		imageID, instanceType, resourceTrackerDir, requiredRules}, nil
 }
@@ -241,6 +245,13 @@ func getDiskClient(authorizer autorest.Authorizer, subscriptionID string) comput
 	diskClient := compute.NewDisksClient(subscriptionID)
 	diskClient.Authorizer = authorizer
 	return diskClient
+}
+
+// getResourcesClient gets the resources client by passing the authorizer token.
+func getResourcesClient(authorizer autorest.Authorizer, subscriptionID string) resources.Client {
+	resourcesClient := resources.NewClient(subscriptionID)
+	resourcesClient.Authorizer = authorizer
+	return resourcesClient
 }
 
 // errorCheck checks if there exists an error and returns a bool response
@@ -373,6 +384,13 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 		fmt.Errorf("failed to get ip address: %v", err)
 	}
 
+	// In Azure, for egress as well as for load balancer service to work on OpenShift, the
+	// Windows VM is expected to be placed behind the worker nodes' load balancer.
+	workerBackendAddressPools, err := az.getWorkerBackendAddressPools(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get worker node backend pool id: %v", err)
+	}
+
 	nicParams := network.Interface{
 		Name:     to.StringPtr(az.NicName),
 		Location: to.StringPtr(nodeLocation),
@@ -381,16 +399,10 @@ func (az *AzureProvider) createNIC(ctx context.Context, vnetName, subnetName, ns
 				{
 					Name: to.StringPtr(ipConfigName),
 					InterfaceIPConfigurationPropertiesFormat: &network.InterfaceIPConfigurationPropertiesFormat{
-						Subnet:                    &subnet,
-						PrivateIPAllocationMethod: network.Dynamic,
-						PublicIPAddress:           &ip,
-						// In Azure, for egress as well as for Load balancer service to work, the
-						// windows vm is expected to be placed behind the worker nodes' Load balancer.
-						LoadBalancerBackendAddressPools: &[]network.BackendAddressPool{
-							{
-								ID: az.getWorkerBackendPoolID(),
-							},
-						},
+						Subnet:                          &subnet,
+						PrivateIPAllocationMethod:       network.Dynamic,
+						PublicIPAddress:                 &ip,
+						LoadBalancerBackendAddressPools: &workerBackendAddressPools,
 					},
 				},
 			},
@@ -481,13 +493,145 @@ func (az *AzureProvider) constructStorageProfile(imageId string) (storageProfile
 	return storageProfile
 }
 
-// getWorkerBackendPoolID gets the backend pool id of the worker node loadbalancer
-func (az *AzureProvider) getWorkerBackendPoolID() *string {
-	// We assume that BackendPoolID for worker vm follows the following format
-	// /subscriptions/$SUBSCRIPTID/resourceGroups/$INFRAID-rg/providers/Microsoft.Network/loadBalancers/$INFRAID/backendAddressPools/$INFRAID
-	var wbpi = fmt.Sprintf("/subscriptions/%s/resourceGroups/%[2]s-rg/providers/"+
-		"Microsoft.Network/loadBalancers/%[2]s/backendAddressPools/%[2]s", az.subscriptionID, az.infraID)
-	return &wbpi
+// getWorkerBackendAddressPools gets the backend address pools of the worker node loadbalancer
+func (az *AzureProvider) getWorkerBackendAddressPools(ctx context.Context) ([]network.BackendAddressPool, error) {
+	// Create a filter to get a resource of type virtualMachine which contains 'worker' in its name
+	filter := "resourceType eq 'Microsoft.Compute/virtualMachines' and substringof('worker', name) and " +
+		"resourceGroup eq '" + az.resourceGroupName + "'"
+	// number of resources to retrieve
+	// https://learnk8s.io/kubernetes-node-size
+	// Kubernetes can technically accommodate 5000 nodes, considering that for optimal performance we limit it at 500 worker nodes
+	top := int32(500)
+	// Use getResource() function to get all the workerVMs by filtering VMs which have 'worker' in their name
+	// In the vmClient, they need full vmName. We can use list() but list would return all the VMs in the
+	// resource group, we will then have to filter it to get the worker VMs using go code iterating through
+	// all the VM names. getResource() does all that work for us. We just need to use the output in that case.
+	vmResources, err := az.getResource(ctx, filter, top)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get worker VMs: %v", err)
+	}
+	if vmResources == nil {
+		return nil, fmt.Errorf("failed to get worker VMs resource")
+	}
+
+	// keep track of workerVM load balancer
+	// using string as we are assuming all the worker VMs are behind a single load balancer
+	var backendAddressPool string
+
+	// Iterate over all the VM resources and get the worker backend pools attached to all the resources.
+	for _, vmResource := range vmResources {
+		if vmResource.ID == nil {
+			return nil, fmt.Errorf("id for VM resource cannot be nil")
+		}
+		vmName := extractResourceName(*vmResource.ID)
+		// get the backend address pool
+		workerVMBackendAddressPool, err := az.getVMBackendAddressPool(ctx, vmName)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get backend address pools for vm %s", vmName)
+		}
+		if backendAddressPool == "" {
+			backendAddressPool = workerVMBackendAddressPool
+		} else if backendAddressPool != workerVMBackendAddressPool {
+			return nil, fmt.Errorf("multiple backend address pools for worker nodes is not supported")
+		}
+	}
+
+	// create an array of the backend address pools that are attached to worker nodes
+	// which will then be applied to the Windows node
+	lbBackendPoolAddressIDs := []network.BackendAddressPool{
+		{
+			ID: &backendAddressPool,
+		},
+	}
+
+	return lbBackendPoolAddressIDs, nil
+}
+
+// getVMBackendAddressPool gets the backend address pool associated with the VM
+// we are assuming that all the worker VMs have only one backend address pool associated.
+func (az *AzureProvider) getVMBackendAddressPool(ctx context.Context, vmName string) (string, error) {
+
+	err, nicName := az.getNICname(ctx, vmName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get NIC name %v", err)
+	}
+
+	_, interfaceIPConfigs, err := az.getInfoFromNIC(ctx, nicName)
+	if err != nil {
+		return "", fmt.Errorf("failed to get ip configuration for NIC %s: %v", nicName, err)
+	}
+
+	// get the 1st IP config attached to the worker node
+	ipConf := interfaceIPConfigs[0]
+	if ipConf.InterfaceIPConfigurationPropertiesFormat == nil {
+		return "", fmt.Errorf("ip configuration properties for VM %s is nil", vmName)
+	}
+	ipConfigProp := *ipConf.InterfaceIPConfigurationPropertiesFormat
+	if ipConfigProp.LoadBalancerBackendAddressPools == nil {
+		return "", fmt.Errorf("load balancer backend address pools for VM %s cannot be nil", vmName)
+	}
+	backendPools := *ipConfigProp.LoadBalancerBackendAddressPools
+	if backendPools == nil {
+		return "", fmt.Errorf("backend address pool id for %s cannot be nil", vmName)
+	}
+	if len(backendPools) < 1 {
+		return "", fmt.Errorf("backend address pools for %s cannot be 0", vmName)
+	}
+	if len(backendPools) > 1 {
+		return "", fmt.Errorf("multiple backend address pools for %s are currently not supported", vmName)
+	}
+	// get the backendAddressPools attached to the IP config
+	backendAddressPool := backendPools[0]
+
+	return *backendAddressPool.ID, nil
+}
+
+// getResource gets a resource, the generic way.
+func (az *AzureProvider) getResource(ctx context.Context, filter string, num int32) ([]resources.GenericResource, error) {
+	list, err := az.resourcesClient.List(
+		ctx,
+		filter,
+		"",
+		&num,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resources for filter %s: %v", filter, err)
+	}
+	return list.Values(), nil
+}
+
+// getInfoFromNIC gets the interface ip configuration from NIC name by calling the azure api
+func (az *AzureProvider) getInfoFromNIC(ctx context.Context, nicName string) (network.Interface, []network.InterfaceIPConfiguration, error) {
+	interfaceStruct, err := az.nicClient.Get(ctx, az.resourceGroupName, nicName, "")
+	if err != nil {
+		return network.Interface{}, []network.InterfaceIPConfiguration{},
+			fmt.Errorf("cannot fetch the network interface data of NIC %s: %v", nicName, err)
+	}
+
+	if interfaceStruct.InterfacePropertiesFormat == nil {
+		return network.Interface{}, []network.InterfaceIPConfiguration{},
+			fmt.Errorf("ip configuration for NIC %s cannot be nil", nicName)
+	}
+	interfacePropFormat := *interfaceStruct.InterfacePropertiesFormat
+
+	if interfacePropFormat.IPConfigurations == nil {
+		return network.Interface{}, []network.InterfaceIPConfiguration{},
+			fmt.Errorf("ip configuration for NIC %s cannot be nil", nicName)
+	}
+	interfaceIPConfigs := *interfacePropFormat.IPConfigurations
+
+	if len(interfaceIPConfigs) < 1 {
+		return network.Interface{}, []network.InterfaceIPConfiguration{},
+			fmt.Errorf("ip configuration properties for NIC %s cannot be 0", nicName)
+	}
+	// we assume that all worker nodes have only one IP config.
+	// if the worker nodes have more than one IP config, throw an error
+	if len(interfaceIPConfigs) > 1 {
+		return network.Interface{}, []network.InterfaceIPConfiguration{},
+			fmt.Errorf(" NIC %s has multiple ip configurations. This is not supported by WNI", nicName)
+	}
+
+	return interfaceStruct, interfaceIPConfigs, nil
 }
 
 // randomPasswordString generates random string with restrictions of given length.
@@ -910,6 +1054,30 @@ func (az *AzureProvider) getPrivateIP(ctx context.Context) (string, error) {
 	return *privateIp, nil
 }
 
+// disassociateIP disassociates public IP with the ipConfig.
+// This is needed to delete the public IP address as public IP address cannot be deleted without detaching it from
+// the ipConfig.
+func (az *AzureProvider) disassociateIP(ctx context.Context, nicName string) error {
+	interfaceStruct, interfaceIPConfigs, err := az.getInfoFromNIC(ctx, nicName)
+	if err != nil {
+		return fmt.Errorf("failed to get ip configuration for NIC %s: %v", nicName, err)
+	}
+	// remove the ip address association by setting it as 'nil'
+	interfaceIPConfigs[0].PublicIPAddress = nil
+
+	// nicClient.CreateOrUpdate() needs update 'parameter' of type network.interface
+	// here we are sending the edited interface struct with public ip address set to nil
+	future, err := az.nicClient.CreateOrUpdate(ctx, az.resourceGroupName, az.NicName, interfaceStruct)
+	if err != nil {
+		return fmt.Errorf("failed to disassociate/detach the Public IP address from nic %s: %v ", nicName, err)
+	}
+	err = future.WaitForCompletionRef(ctx, az.nicClient.Client)
+	if err != nil {
+		return fmt.Errorf("failed to disassociate/detach the Public IP address from nic %s: %v ", nicName, err)
+	}
+	return nil
+}
+
 // destroyIP deletes the IP address by taking it's name as argument.
 func (az *AzureProvider) destroyIP(ctx context.Context, ipName string) (err error) {
 	_, err = az.ipClient.Delete(ctx, az.resourceGroupName, ipName)
@@ -1011,6 +1179,11 @@ func (az *AzureProvider) DestroyWindowsVM(vmName string) error {
 	err = az.destroyInstance(ctx, vmName)
 	if err != nil {
 		log.Printf("error destroying the instance %s: %v", vmName, err)
+	}
+
+	err = az.disassociateIP(ctx, nicName)
+	if err != nil {
+		log.Printf("error disassociating the Public IP of instance %s: %v", vmName, err)
 	}
 
 	err = az.destroyNIC(ctx, nicName)

@@ -3,7 +3,7 @@
   vars:
     project_root: "{{ playbook_dir }}/../../../.."
     wmcb_exe: "wmcb.exe"
-    hybrid_overlay_exe : "hybrid-overlay.exe"
+    hybrid_overlay_exe : "hybrid-overlay-node.exe"
 
   tasks:
     - name: Check if cluster is using ovn-kubernetes
@@ -164,7 +164,7 @@
                 dest: "{{ tmp_dir.path }}/wmcb.exe"
                 checksum: "sha256:{{ wmcb_sha.stdout }}"
 
-        # Get url to download latest hybrid-overlay for the OpenShift cluster version
+        # Get url to download latest hybrid-overlay-node for the OpenShift cluster version
         - name: Get hybrid overlay url
           shell: |
             echo '{{ release.stdout }}' | \
@@ -174,7 +174,7 @@
           failed_when: hybrid_overlay_download_url.stdout == ""
 
         # We'll get the SHA associated with the hybrid_overlay.exe in the body of the release tag.
-        - name: Get the SHA for hybrid-overlay binary. We assume that body of WMCB release has the info.
+        - name: Get the SHA for hybrid-overlay-node binary. We assume that body of WMCB release has the info.
           shell: |
             echo '{{ release.stdout }}' | \
             jq -r .body | \
@@ -261,12 +261,12 @@
     - name: Get hybrid overlay exe
       win_get_url:
         url: "{{ hostvars['localhost']['hybrid_overlay_download_url']['stdout'] }}"
-        dest: "{{ win_temp_dir.path }}\\hybrid-overlay.exe"
+        dest: "{{ win_temp_dir.path }}\\hybrid-overlay-node.exe"
         follow_redirects: all
 
     # TODO: Remove this, win_get_url already has checksum, we can use it.
     - name: Check hybrid overlay SHA256
-      win_shell: "certutil -hashfile {{ win_temp_dir.path }}\\hybrid-overlay.exe sha256"
+      win_shell: "certutil -hashfile {{ win_temp_dir.path }}\\hybrid-overlay-node.exe sha256"
       register: hybrid_sha256
       failed_when: "hybrid_sha256.stdout_lines[1] != hostvars['localhost']['hybrid_overlay_sha']['stdout']"
 
@@ -277,7 +277,7 @@
     - name: Check if bootstrap was successful
       fail:
         msg: "Bootstrapper error"
-      when: '"Bootstrapping completed successfully" not in bootstrap_out.stderr'
+      when: '"Bootstrapping completed successfully" not in bootstrap_out.stdout'
 
     # Making a best effort to approve CSRs. Not failing until the actual `get node` call, in case the CSRs were approved elsewhere
     - name: Approve CSRs
@@ -348,32 +348,32 @@
       when: node_name.stdout_lines | length == 1 and checklabels.rc == 1
 
     - name: Check if the hybrid overlay is running
-      win_shell: "Get-Process -Name \"hybrid-overlay\""
+      win_shell: "Get-Process -Name \"hybrid-overlay-node\""
       register: get_process
       failed_when:
         - 'get_process.stderr != ""'
         - '"Cannot find a process with the name" not in get_process.stderr'
 
     - name: Stop the hybrid overlay if it is running
-      win_shell: "Stop-Process -Name \"hybrid-overlay\""
+      win_shell: "Stop-Process -Name \"hybrid-overlay-node\""
       when: 'get_process.stderr == ""'
 
     # The bootstrapper runs in one of the tasks above and makes C:\\k\\log directory created before hand
-    # Creating a hybrid-overlay log directory to store hybrid-overlay specific logs
-    - name: check if hybrid-overlay directory already exists
+    # Creating a hybrid-overlay-node log directory to store hybrid-overlay-node specific logs
+    - name: check if hybrid-overlay-node directory already exists
       win_stat:
-        path: "{{ log_dir }}\\hybrid-overlay"
+        path: "{{ log_dir }}\\hybrid-overlay-node"
       register: hybridOverlay_dir
 
-    - name: Create a hybrid-overlay directory to store hybrid-overlay logs
+    - name: Create a hybrid-overlay-node directory to store hybrid-overlay-node logs
       win_file:
-        path: "{{ log_dir }}\\hybrid-overlay"
+        path: "{{ log_dir }}\\hybrid-overlay-node"
         state: directory
       when: hybridOverlay_dir.stat.exists == false
 
-      # All the logs for hybrid-overlay are directed to the error log by default, this may change in future for segregation.
+      # All the logs for hybrid-overlay-node are directed to the error log by default, this may change in future for segregation.
     - name: Start the hybrid overlay
-      win_shell: "Start-Process -NoNewWindow -FilePath \"{{  win_temp_dir.path }}\\hybrid-overlay.exe\" -ArgumentList \"--node  {{ node_name.stdout }} --k8s-kubeconfig c:\\k\\kubeconfig\" -RedirectStandardOutput {{log_dir}}\\hybrid-overlay\\hybridOverlayStdout.log -RedirectStandardError {{log_dir}}\\hybrid-overlay\\hybridOverlayStderr.log"
+      win_shell: "Start-Process -NoNewWindow -FilePath \"{{  win_temp_dir.path }}\\hybrid-overlay-node.exe\" -ArgumentList \"--node  {{ node_name.stdout }} --k8s-kubeconfig c:\\k\\kubeconfig\" -RedirectStandardOutput {{log_dir}}\\hybrid-overlay-node\\hybridOverlayStdout.log -RedirectStandardError {{log_dir}}\\hybrid-overlay-node\\hybridOverlayStderr.log"
       async: 60
       poll: 0
       register: async_results
@@ -428,7 +428,7 @@
     - name: Check if CNI configuration was successful
       fail:
         msg: "CNI Configuration error"
-      when: '"CNI configuration completed successfully" not in bootstrap_out.stderr'
+      when: '"CNI configuration completed successfully" not in bootstrap_out.stdout'
 
     - name: Ensure kube-proxy Windows Service is not running
       win_service:
@@ -447,7 +447,7 @@
         dest: "{{ win_temp_dir.path }}\\hns.psm1"
 
     - name: Get source-vip
-      win_shell: 'Import-Module {{ win_temp_dir.path }}\\hns.psm1; $net = (Get-HnsNetwork | where { $_.Name -eq "OpenShiftNetwork" }); $endpoint = New-HnsEndpoint -NetworkId $net.ID -Name VIPEndpoint; Attach-HNSHostEndpoint -EndpointID $endpoint.ID -CompartmentID 1; (Get-NetIPConfiguration -AllCompartments -All -Detailed | where { $_.NetAdapter.LinkLayerAddress -eq $endpoint.MacAddress }).IPV4Address.IPAddress.Trim()'
+      win_shell: 'Import-Module {{ win_temp_dir.path }}\\hns.psm1; $net = (Get-HnsNetwork | where { $_.Name -eq "OVNKubernetesHybridOverlayNetwork" }); $endpoint = New-HnsEndpoint -NetworkId $net.ID -Name VIPEndpoint; Attach-HNSHostEndpoint -EndpointID $endpoint.ID -CompartmentID 1; (Get-NetIPConfiguration -AllCompartments -All -Detailed | where { $_.NetAdapter.LinkLayerAddress -eq $endpoint.MacAddress }).IPV4Address.IPAddress.Trim()'
       register: source_vip
 
     # The bootstrapper runs in one of the above tasks and makes C:\\k\\log directory created before hand
@@ -466,7 +466,7 @@
     - name: Start kube-proxy Windows Service
       win_service:
         name: "kube-proxy"
-        path: "C:\\k\\kube-proxy.exe --windows-service --v=4 --proxy-mode=kernelspace --feature-gates=WinOverlay=true --hostname-override={{ node_name.stdout }} --kubeconfig=c:\\k\\kubeconfig --cluster-cidr={{ ovn_host_subnet.stdout }} --log-dir={{log_dir}}\\kube-proxy\\ --logtostderr=false --network-name=OpenShiftNetwork --source-vip={{ source_vip.stdout | trim }} --enable-dsr=false"
+        path: "C:\\k\\kube-proxy.exe --windows-service --v=4 --proxy-mode=kernelspace --feature-gates=WinOverlay=true --hostname-override={{ node_name.stdout }} --kubeconfig=c:\\k\\kubeconfig --cluster-cidr={{ ovn_host_subnet.stdout }} --log-dir={{log_dir}}\\kube-proxy\\ --logtostderr=false --network-name=OVNKubernetesHybridOverlayNetwork --source-vip={{ source_vip.stdout | trim }} --enable-dsr=false"
         state: started
         start_mode: auto
         display_name: "kube-proxy"

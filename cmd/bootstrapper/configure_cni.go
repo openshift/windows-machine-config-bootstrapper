@@ -66,7 +66,8 @@ func runConfigureCNICmd(cmd *cobra.Command, args []string) {
 		log.Error(err, "could not configure CNI")
 		os.Exit(1)
 	}
-	log.Info("CNI configuration completed successfully")
+	// Send success message to StdOut for WSU to ascertain that CNI configuration was successful
+	os.Stdout.WriteString("CNI configuration completed successfully")
 
 	err = wmcb.Disconnect()
 	if err != nil {

@@ -46,7 +46,10 @@ type Cloud interface {
 func CloudProviderFactory(kubeconfigPath, credentialPath, credentialAccountID, resourceTrackerDir,
 	imageID, instanceType, sshKey, privateKeyPath string) (Cloud, error) {
 	// File, dir, credential account sanity checks.
-	kubeconfigPath, err := makeValidAbsPath(kubeconfigPath)
+	var err error
+	if kubeconfigPath != "" {
+		kubeconfigPath, err = makeValidAbsPath(kubeconfigPath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("error resolving path for kubeconfig file, %v", err)
 	}

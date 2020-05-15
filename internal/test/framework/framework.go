@@ -16,11 +16,9 @@ import (
 	"github.com/google/go-github/v29/github"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1 "github.com/openshift/client-go/operator/clientset/versioned/typed/operator/v1"
-	"github.com/openshift/windows-machine-config-bootstrapper/internal/test"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -70,6 +68,8 @@ type TestFramework struct {
 	latestRelease *github.RepositoryRelease
 	// LatestCniPluginsVersion is the latest 0.8.x version of CNI Plugins
 	LatestCniPluginsVersion string
+	// K8sVersion is the current version of Kuberenetes
+	K8sVersion string
 	// clusterAddress is the address of the OpenShift cluster e.g. "foo.fah.com".
 	// This should not include "https://api-" or a port.
 	ClusterAddress string
@@ -246,11 +246,12 @@ func (f *TestFramework) getClusterAddress(config *restclient.Config) error {
 func (f *TestFramework) getClusterVersion() error {
 	versionInfo, err := f.OSConfigClient.Discovery().ServerVersion()
 	if err != nil {
-		return err
+		return fmt.Errorf("error while retrieving k8s version : %v", err)
 	}
-
+	//set k8s version in the TestFrameWork
+	f.K8sVersion = versionInfo.GitVersion
 	// Convert kubernetes version to major.minor format. v1.17.0 -> 1.17
-	k8sVersion := strings.TrimLeft(versionInfo.GitVersion, "v")
+	k8sVersion := strings.TrimLeft(f.K8sVersion, "v")
 	k8sSemver := strings.Split(k8sVersion, ".")
 	k8sMinorVersion, err := strconv.Atoi(k8sSemver[1])
 	if err != nil {
@@ -445,29 +446,8 @@ func (f *TestFramework) RetrieveArtifacts() {
 	}
 }
 
-// ApplyHybridOverlayPatch will enable the hybrid overlay on the cluster
-func (f *TestFramework) ApplyHybridOverlayPatch() error {
-	jsonPatch := []byte(`{"spec":{"defaultNetwork":{"ovnKubernetesConfig":{"hybridOverlayConfig":` +
-		`{"hybridClusterNetwork":[{"cidr":"10.132.0.0/14","hostPrefix":23}]}}}}}`)
-
-	_, err := f.OSOperatorClient.Networks().Patch("cluster", k8stypes.MergePatchType, jsonPatch)
-	if err != nil {
-		return fmt.Errorf("could not apply patch %s to cluster network: %s", string(jsonPatch), err)
-	}
-
-	// Wait until the hybrid overlay changes are complete
-	if err = f.waitUntilHybridOverlayReady(); err != nil {
-		return fmt.Errorf("error waiting for the hybrid overlay changes to be complete: %s", err)
-	}
-	return nil
-}
-
 // waitUntilHybridOverlayReady returns once OVN is ready again, after applying the hybrid overlay patch.
 func (f *TestFramework) waitUntilHybridOverlayReady() error {
-	if err := f.waitUntilNodesAnnotated(); err != nil {
-		return fmt.Errorf("error waiting for nodes to be annotated: %s", err)
-	}
-
 	// This is being done after we wait for the master nodes, as we need to make sure the patch is being acted on,
 	// and we are not checking the pods before they begin to restart with the hybrid overlay changes
 	if err := f.waitUntilOVNPodsReady(); err != nil {
@@ -507,36 +487,6 @@ func (f *TestFramework) waitUntilOVNPodsReady() error {
 	}
 	return fmt.Errorf("timed out waiting for pods in namespace \"openshift-ovn-kubernetes\" to be ready")
 
-}
-
-// waitUntilNodesAnnotated returns when either all nodes have had the proper annotations applied to them,
-// or reaches a timeout limit.
-func (f *TestFramework) waitUntilNodesAnnotated() error {
-	for i := 0; i < RetryCount; i++ {
-		nodes, err := f.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{})
-		if err != nil {
-			return fmt.Errorf("could not retrieve list of nodes: %s", err)
-		}
-
-		allAnnotated := true
-		for _, node := range nodes.Items {
-			_, ok := node.Annotations[test.HybridOverlayGatewayMAC]
-			if !ok {
-				allAnnotated = false
-				break
-			}
-			_, ok = node.Annotations[test.HybridOverlaySubnet]
-			if !ok {
-				allAnnotated = false
-				break
-			}
-		}
-		if allAnnotated {
-			return nil
-		}
-		time.Sleep(RetryInterval)
-	}
-	return fmt.Errorf("timed out waiting for master nodes to be annotated with " + test.HybridOverlayGatewayMAC)
 }
 
 // TearDown destroys the resources created by the Setup function

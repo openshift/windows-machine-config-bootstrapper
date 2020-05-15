@@ -10,12 +10,15 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 
+	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-04-01/network"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
@@ -71,8 +74,18 @@ type requiredRule struct {
 type azureProvider struct {
 	// resourceGroupName of the Windows node
 	resourceGroupName string
+	// subscriptionID of the corresponding azure service principal.
+	subscriptionID string
+	// infraID is the name of existing openshift infrastructure.
+	infraID string
 	// nsgClient to check if winRmHttps port is opened or not.
 	nsgClient network.SecurityGroupsClient
+	// vmClient to query for instance related operations.
+	vmClient compute.VirtualMachinesClient
+	// nicClient to query for nic related operations.
+	nicClient network.InterfacesClient
+	// Loadbalancer Backend Address Pool client
+	lbbapClient network.LoadBalancerBackendAddressPoolsClient
 	// requiredRules is the set of SG rules that need to be created or deleted
 	requiredRules map[string]*requiredRule
 }
@@ -102,10 +115,16 @@ var (
 func TestCreateVM(t *testing.T) {
 	err := setup()
 	require.NoErrorf(t, err, "failed at the setup with error: %v", err)
+	t.Run("check if Windows VM LB is same as Worker LB", testIfWindowsNodeIsBehindWorkerLB)
 	t.Run("check if required security rules are present", testRequiredRules)
 	t.Run("check if ansible is able to ping on the WinRmHttps port", testAnsiblePing)
 	t.Run("check if container logs port is open in Windows firewall", testAzureInstancesFirewallRule)
 	t.Run("check if SSH connection is available", testAzureSSHConnection)
+
+	err = deleteResources(kubeconfig)
+	if err != nil {
+		t.Logf("error deleting cluster resources %v", err)
+	}
 }
 
 // isNil is a helper functions which checks if the object is a nil pointer or not.
@@ -154,7 +173,14 @@ func setup() error {
 
 // populateAzureInfo populates the fields present in the azureInfo.
 func populateAzureInfo() error {
-	oc, err := client.GetOpenShift(kubeconfig)
+	var oc *client.OpenShift
+	var err error
+	// Use client created by service account if running in CI environment
+	if os.Getenv("OPENSHIFT_CI") == "true" {
+		oc, err = getOpenShiftClientForSA(kubeconfig)
+	} else {
+		oc, err = client.GetOpenShift(kubeconfig)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to initialize OpenShift client with error: %v", err)
 	}
@@ -175,6 +201,13 @@ func populateAzureInfo() error {
 	if subscriptionId == "" {
 		return fmt.Errorf("failed to get the subscriptionId from AZURE_AUTH_LOCATION: %s", azureCredentials)
 	}
+	azureInfo.subscriptionID = subscriptionId
+
+	infraID, err := oc.GetInfrastructureID()
+	if err != nil {
+		return fmt.Errorf("failed to get the infraID from OpenShift client: %v", err)
+	}
+	azureInfo.infraID = infraID
 
 	// instantiate network security group client.
 	azureInfo.nsgClient = network.NewSecurityGroupsClient(subscriptionId)
@@ -185,6 +218,18 @@ func populateAzureInfo() error {
 		return fmt.Errorf("failed to get azure authorization token with error: %v", err)
 	}
 	azureInfo.nsgClient.Authorizer = resourceAuthorizer
+
+	// initiate the virtual machine client
+	vmClient := getVMClient(resourceAuthorizer, subscriptionId)
+	azureInfo.vmClient = vmClient
+
+	// initiate the network interface card client
+	nicClient := getNicClient(resourceAuthorizer, subscriptionId)
+	azureInfo.nicClient = nicClient
+
+	// initiate the loadbalancer backend address pool client
+	lbbapClient := getLBBAPClient(resourceAuthorizer, subscriptionId)
+	azureInfo.lbbapClient = lbbapClient
 
 	requiredRules, err := constructRequiredRules()
 	if err != nil {
@@ -239,6 +284,50 @@ func readInstallerInfo() (err error) {
 	}
 	instanceIDs = installerInfo.InstanceIDs
 	return nil
+}
+
+// getVMClient gets the Virtual Machine Client by passing the authorizer token.
+func getVMClient(authorizer autorest.Authorizer, subscriptionID string) compute.VirtualMachinesClient {
+	vmClient := compute.NewVirtualMachinesClient(subscriptionID)
+	vmClient.Authorizer = authorizer
+	return vmClient
+}
+
+// getNicClient gets the NIC Client by passing the authorizer token.
+func getNicClient(authorizer autorest.Authorizer, subscriptionID string) network.InterfacesClient {
+	nicClient := network.NewInterfacesClient(subscriptionID)
+	nicClient.Authorizer = authorizer
+	return nicClient
+}
+
+// getLBBAPClient gets the Loadbalancer Backend Address Pool Client by passing the authorizer token
+func getLBBAPClient(authorizer autorest.Authorizer, subscriptionID string) network.LoadBalancerBackendAddressPoolsClient {
+	lbbapClient := network.NewLoadBalancerBackendAddressPoolsClient(subscriptionID)
+	lbbapClient.Authorizer = authorizer
+	return lbbapClient
+}
+
+// getNICname returns nicName by taking instance name as an argument.
+func (az *azureProvider) getNICname(ctx context.Context, vmName string) (err error, nicName string) {
+	vmStruct, err := az.vmClient.Get(ctx, az.resourceGroupName, vmName, "instanceView")
+	if err != nil {
+		return fmt.Errorf("cannot fetch the instance data of %s: %v", vmName, err), ""
+	}
+	networkProfile := vmStruct.VirtualMachineProperties.NetworkProfile
+	networkInterface := (*networkProfile.NetworkInterfaces)[0]
+	nicID := *networkInterface.ID
+	nicName = extractResourceName(nicID)
+	return nil, nicName
+}
+
+// extractResourceName captures the resource name omitting the other details.
+// for ex: /subscriptions/.../resourcegroups/ExampleResourceGroup?api-version=2016-02-01/vnetName/somesamplevnetName
+// we need to extract the vnetName from the above input.
+func extractResourceName(rawresource string) (name string) {
+	resultList := strings.Split(rawresource, "/")
+	arrayLength := len(resultList)
+	name = resultList[arrayLength-1]
+	return
 }
 
 // areRequiredRulesPresent returns true if all the required rules are present in the SecurityRule slice
@@ -398,4 +487,95 @@ func testAzureSSHConnection(t *testing.T) {
 	require.NoErrorf(t, err, "failed to create SSH session")
 	err = session.Run("dir")
 	require.NoErrorf(t, err, "failed to communicate vis SSH")
+}
+
+// testIfWindowsNodeIsBehindWorkerLB tests if the windows VM is behind the worker node load balancer
+// we are checking if all our windows VM's ip config is associated with the backend address pool
+// associated with the workerVMs. This backend address pool has ipConfigs of all worker VMs and windows VMs
+func testIfWindowsNodeIsBehindWorkerLB(t *testing.T) {
+	ctx := context.Background()
+
+	// keep track of all errors encountered during execution
+	var errorSlice []string
+
+	// create a set to keep track of all the ip configurations associated with the backend address pool.
+	// backend address pool has multiple ip configs attached including all worker nodes and all windowsVMs
+	// Go does not have Sets by default but we will be imitating a Set in Go using map[interface{}]interface{} as a
+	// container for our data since it is the closest to set
+	// using set for o(1) lookup
+	// we are using an empty struct in place of bool as struct takes 0 byte whereas bool takes 1 byte
+	// https://dave.cheney.net/2014/03/25/the-empty-struct
+	ipCSet := make(map[string]struct{})
+	// filler value for set
+	var exists = struct{}{}
+
+	// We assume that BackendPoolID for worker vm follows the following format
+	// /subscriptions/$SUBSCRIPTID/resourceGroups/$INFRAID-rg/providers/Microsoft.Network/loadBalancers/$INFRAID/backendAddressPools/$INFRAID
+	// We assume that loadbalancer and backendAddressPools both have $INFRAID as name
+	bapInfo, err := azureInfo.lbbapClient.Get(ctx, azureInfo.resourceGroupName, azureInfo.infraID, azureInfo.infraID)
+	require.NoError(t, err, "failed to get backendAddressPool information")
+	require.NotNil(t, bapInfo.BackendIPConfigurations, "failed to get backend address pool configuration")
+
+	backendIPC := *bapInfo.BackendIPConfigurations
+	require.NotEmpty(t, backendIPC, "empty backend address pool configuration for %s", *bapInfo.ID)
+
+	// get all the ip configurations associated with the backend address pool
+	for _, ipC := range backendIPC {
+		require.NotNil(t, ipC.ID, "ip configuration id for backend address pool %s cannot be nil", *bapInfo.ID)
+		ipCSet[extractResourceName(*ipC.ID)] = exists
+	}
+
+	// check if all the VMs are present in the backend address pool associated with the worker node.
+	for _, vmName := range instanceIDs {
+		err, nicName := azureInfo.getNICname(ctx, vmName)
+		if err != nil {
+			errorSlice = append(errorSlice, fmt.Sprintf("failed to get NIC name for VM %s: %v", vmName, err))
+			continue // cannot execute rest of the loop on error
+		}
+		interfaceStruct, err := azureInfo.nicClient.Get(ctx, azureInfo.resourceGroupName, nicName, "")
+		if err != nil {
+			errorSlice = append(errorSlice, fmt.Sprintf("cannot fetch the network interface data of %s: %v", vmName, err))
+			continue // cannot execute rest of the loop on error
+		}
+		if interfaceStruct.InterfacePropertiesFormat == nil {
+			err := fmt.Sprintf("interface properties cannot be nil for VM %s", vmName)
+			errorSlice = append(errorSlice, err)
+			continue // cannot execute rest of the loop on error
+		}
+		interfacePropFormat := *(interfaceStruct.InterfacePropertiesFormat)
+		if interfacePropFormat.IPConfigurations == nil {
+			err := fmt.Sprintf("ip configurations cannot be nil for VM %s", vmName)
+			errorSlice = append(errorSlice, err)
+			continue // cannot execute rest of the loop on error
+		}
+		interfaceIPConfigs := *(interfacePropFormat.IPConfigurations)
+		if len(interfaceIPConfigs) < 1 {
+			err := fmt.Sprintf("ip configuration properties cannot be 0 for VM %s", vmName)
+			errorSlice = append(errorSlice, err)
+			continue // cannot execute rest of the loop on error
+		}
+		// we assume that the windows VM node have only one IP config attached.
+		if len(interfaceIPConfigs) > 1 {
+			err := fmt.Sprintf("multiple interface ip configs are not supported for VM %s", vmName)
+			errorSlice = append(errorSlice, err)
+			continue // cannot execute rest of the loop on error
+		}
+		ipConfig := *(interfaceIPConfigs[0].ID)
+		if ipConfig == "" {
+			err := fmt.Sprintf("ip configuration not set for VM %s", vmName)
+			errorSlice = append(errorSlice, err)
+			continue // cannot execute rest of the loop on error
+		}
+		ipConfigName := extractResourceName(ipConfig)
+		// check if windows VM's ipConfig is present in the set.
+		// This means that windows VM is associated with the backend pool
+		if _, ok := ipCSet[ipConfigName]; !ok {
+			err := fmt.Sprintf("ip configuration for VM %s not present in BackendAddressPool %s", vmName, *bapInfo.ID)
+			errorSlice = append(errorSlice, err)
+		}
+	}
+
+	// check if length of error slice is 0. if not print all errors
+	// checking length=0 in place of require.Empty() as require.Empty() prints entire array without formatting.
+	require.Equal(t, 0, len(errorSlice), "test failed with errors \n%s", strings.Join(errorSlice, "\n"))
 }
