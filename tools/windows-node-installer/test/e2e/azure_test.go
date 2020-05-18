@@ -126,11 +126,16 @@ func getAzureCloudProvider() (cloudprovider.Cloud, error) {
 	return cloud, nil
 }
 
-// TestCreateVM is used to the test the following after a successful run of "wni azure create"
+// TestAzure runs all WNI tests for Azure clusters
+func TestAzure(t *testing.T) {
+	t.Run("VM creation", testCreateVM)
+}
+
+// testCreateVM is used to the test the following after a successful run of "wni azure create"
 // 1. check if required rules are present
 // 2. ansible ping check to confirm that windows node is correctly
 //    configured to execute the remote ansible commands.
-func TestCreateVM(t *testing.T) {
+func testCreateVM(t *testing.T) {
 	cloud, err := getAzureCloudProvider()
 	require.NoError(t, err, "error getting azure cloud provider")
 	vm, err := cloud.CreateWindowsVM()

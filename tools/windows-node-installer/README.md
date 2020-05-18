@@ -110,5 +110,5 @@ To run the e2e change the directory to the `tools\windows-node-installer` of thi
 export ARTIFACT_DIR=$(pwd)
 export KUBECONFIG=<your kubeconfig location>
 export AZURE_AUTH_LOCATION=<your osServicePrincipal.json location>
-go test -run=TestCreateVM ./test/e2e/... -v
+go test -run=TestAzure ./test/e2e/... -v
 ```
