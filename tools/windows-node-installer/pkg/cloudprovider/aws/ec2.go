@@ -467,6 +467,10 @@ func (a *AwsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkI
 func (a *AwsProvider) createInstance(imageID, instanceType, sshKey string,
 	networkInterface *ec2.InstanceNetworkInterfaceSpecification, iamProfile *ec2.IamInstanceProfileSpecification, userDataInput string) (
 	*ec2.Instance, error) {
+	tagSpec, err := a.createOpenShiftTagSpecification()
+	if err != nil {
+		return nil, fmt.Errorf("error creating tag specification %v", err)
+	}
 	runResult, err := a.EC2.RunInstances(&ec2.RunInstancesInput{
 		ImageId:            aws.String(imageID),
 		InstanceType:       aws.String(instanceType),
@@ -476,6 +480,7 @@ func (a *AwsProvider) createInstance(imageID, instanceType, sshKey string,
 		NetworkInterfaces:  []*ec2.InstanceNetworkInterfaceSpecification{networkInterface},
 		IamInstanceProfile: iamProfile,
 		UserData:           aws.String(base64.StdEncoding.EncodeToString([]byte(userDataInput))),
+		TagSpecifications:  tagSpec,
 	})
 	if err != nil {
 		return nil, err
@@ -486,6 +491,46 @@ func (a *AwsProvider) createInstance(imageID, instanceType, sshKey string,
 		return nil, fmt.Errorf("failed to create an instance")
 	}
 	return runResult.Instances[0], nil
+}
+
+// createOpenShiftTagSpecification creates TagSpecification object to add OpenShift tag while
+// launching an instance.
+func (a *AwsProvider) createOpenShiftTagSpecification() ([]*ec2.TagSpecification, error) {
+	infraID, err := a.GetInfraID()
+	if err != nil {
+		return nil, fmt.Errorf("error getting infrastructure ID for the OpenShift cluster, %v", err)
+	}
+	tags := map[string]string{
+		// Add OpenShift tag, so that
+		// - The kubelet can communicate with cloud provider
+		// - TearDown & Reaper job in OpenShift CI can delete the virtual machine as part of cluster
+		infraIDTagKeyPrefix + infraID: infraIDTagValue}
+
+	ec2Tags, err := createTagList(tags)
+	if err != nil {
+		return nil, fmt.Errorf("error creating %v tags, %v", tags, err)
+	}
+
+	tagSpec := &ec2.TagSpecification{
+		ResourceType: aws.String(ec2.ResourceTypeInstance),
+		Tags:         ec2Tags,
+	}
+
+	return []*ec2.TagSpecification{tagSpec}, nil
+}
+
+// createTagList is a generic function to create ec2.Tag object list given
+// a map of required tags
+func createTagList(tags map[string]string) ([]*ec2.Tag, error) {
+	var ec2Tags []*ec2.Tag
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("no tags specified")
+	}
+	for key, value := range tags {
+		ec2Tags = append(ec2Tags, &ec2.Tag{Key: aws.String(key), Value: aws.String(value)})
+	}
+	return ec2Tags, nil
+
 }
 
 // getLatestWindowsAMI returns the imageid of the latest released "Windows Server with Containers" image
@@ -739,21 +784,13 @@ func (a *AwsProvider) createInstanceNameTag(instance *ec2.Instance, infraID stri
 		return "", err
 	}
 	instanceName := strings.Join([]string{infraID, "windows", "worker", zone, rand.String(4)}, "-")
+	tags, err := createTagList(map[string]string{"Name": instanceName})
+	if err != nil {
+		return "", fmt.Errorf("error creating %v tags, %v", tags, err)
+	}
 	_, err = a.EC2.CreateTags(&ec2.CreateTagsInput{
 		Resources: []*string{instance.InstanceId},
-		Tags: []*ec2.Tag{
-			{
-				Key:   aws.String("Name"),
-				Value: aws.String(instanceName),
-			},
-			// Add OpenShift tag, so that
-			// - The kubelet can communicate with cloud provider
-			// - TearDown & Reaper job in OpenShift CI can delete the virtual machine as part of cluster
-			{
-				Key:   aws.String(infraIDTagKeyPrefix + infraID),
-				Value: aws.String(infraIDTagValue),
-			},
-		},
+		Tags:      tags,
 	})
 	if err != nil {
 		return "", err
