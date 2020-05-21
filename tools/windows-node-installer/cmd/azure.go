@@ -2,9 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-
-	"github.com/Azure/go-autorest/autorest/azure/auth"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider/azure"
 	"github.com/spf13/cobra"
@@ -63,17 +60,6 @@ func requiredAZFlags(azureCmd *cobra.Command) error {
 	return nil
 }
 
-// setEnvVariable returns the subscriptionID from the credential file.
-func setEnvVariable(filePath string) (subscriptionID string, err error) {
-	os.Setenv("AZURE_AUTH_LOCATION", filePath)
-	getFileSettings, err := auth.GetSettingsFromFile()
-	if err != nil {
-		return "", err
-	}
-	subscriptionID = getFileSettings.GetSubscriptionID()
-	return
-}
-
 // azCreateCmd defines `create` command and creates a Windows instance using parameters from the persistent flags to
 // fill up fields in azCreateFlagInfo.
 func azCreateCmd() *cobra.Command {
@@ -85,13 +71,6 @@ func azCreateCmd() *cobra.Command {
 			"The created instance would be used as a worker node for the OpenShift Cluster.",
 		TraverseChildren: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if azCreateFlagInfo.subscriptionID == "" {
-				subscriptionID, err := setEnvVariable(azCreateFlagInfo.credentialPath)
-				azCreateFlagInfo.subscriptionID = subscriptionID
-				if err != nil {
-					return fmt.Errorf("eror getting subscription ID, %v", err)
-				}
-			}
 			// Provide the azCreateFlagInfo.credentialAccountID as a default
 			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, azCreateFlagInfo.credentialPath,
 				azCreateFlagInfo.subscriptionID, rootInfo.resourceTrackerDir,
@@ -155,13 +134,6 @@ func azDestroyCmd() *cobra.Command {
 			"The security groups still associated with any existing instances will not be deleted.",
 
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if azCreateFlagInfo.subscriptionID == "" {
-				subscriptionID, err := setEnvVariable(azCreateFlagInfo.credentialPath)
-				azCreateFlagInfo.subscriptionID = subscriptionID
-				if err != nil {
-					return fmt.Errorf("eror getting subscription ID, %v", err)
-				}
-			}
 			cloud, err := cloudprovider.CloudProviderFactory(rootInfo.kubeconfigPath, azCreateFlagInfo.credentialPath,
 				azCreateFlagInfo.subscriptionID, rootInfo.resourceTrackerDir,
 				azCreateFlagInfo.imageID, azCreateFlagInfo.instanceType, "", "")

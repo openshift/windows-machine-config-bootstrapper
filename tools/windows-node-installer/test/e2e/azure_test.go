@@ -3,7 +3,6 @@ package e2e
 import (
 	"context"
 	"fmt"
-	"golang.org/x/crypto/ssh"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -13,19 +12,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/to"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-03-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2019-04-01/network"
+	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/azure/auth"
+	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/client"
+	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider"
 	wniAzure "github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider/azure"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
+	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -55,6 +56,10 @@ const (
 	sshRulePriority = 603
 	// sshRuleName is the security group rule name for the RDP rule
 	sshRuleName = "SSH"
+	// azureImageID is the image which we will create an instance with
+	azureImageID = "MicrosoftWindowsServer:WindowsServer:2019-Datacenter:latest"
+	// azureInstanceType is the instance type we will create an instance with
+	azureInstanceType = "Standard_D2s_v3"
 )
 
 type requiredRule struct {
@@ -107,20 +112,49 @@ var (
 	credentials *types.Credentials
 )
 
-// TestCreateVM is used to the test the following after a successful run of "wni azure create"
+// getAzureCloudProvider returns an azure cloud provider
+func getAzureCloudProvider() (cloudprovider.Cloud, error) {
+	cloud, err := cloudprovider.CloudProviderFactory(kubeconfig, azureCredentials, "", artifactDir, azureImageID,
+		azureInstanceType, sshKey, privateKeyPath)
+	if err != nil {
+		return nil, errors.Wrap(err, "error creating cloud provider")
+	}
+	_, ok := cloud.(*wniAzure.AzureProvider)
+	if !ok {
+		return nil, fmt.Errorf("did not get an AzureProvider from cloud factory")
+	}
+	return cloud, nil
+}
+
+// TestAzure runs all WNI tests for Azure clusters
+func TestAzure(t *testing.T) {
+	t.Run("VM creation", testCreateVM)
+}
+
+// testCreateVM is used to the test the following after a successful run of "wni azure create"
 // 1. check if required rules are present
 // 2. ansible ping check to confirm that windows node is correctly
 //    configured to execute the remote ansible commands.
-// TODO: This is not actually testing the Windows VM creation. Change this function.
-func TestCreateVM(t *testing.T) {
-	err := setup()
-	require.NoErrorf(t, err, "failed at the setup with error: %v", err)
+func testCreateVM(t *testing.T) {
+	cloud, err := getAzureCloudProvider()
+	require.NoError(t, err, "error getting azure cloud provider")
+	vm, err := cloud.CreateWindowsVM()
+	require.NoError(t, err, "error creating Windows VM")
+
+	// TODO: This needs to be removed and we should be using the vm returned by CreateWindowsVM() to test
+	//       https://issues.redhat.com/browse/WINC-405
+	err = populateFieldsToTest()
+	require.NoError(t, err, "error loading instance info into AzureInfo")
+
 	t.Run("check if Windows VM LB is same as Worker LB", testIfWindowsNodeIsBehindWorkerLB)
 	t.Run("check if required security rules are present", testRequiredRules)
 	t.Run("check if ansible is able to ping on the WinRmHttps port", testAnsiblePing)
 	t.Run("check if container logs port is open in Windows firewall", testAzureInstancesFirewallRule)
 	t.Run("check if SSH connection is available", testAzureSSHConnection)
 
+	if err = cloud.DestroyWindowsVM(vm.GetCredentials().GetInstanceId()); err != nil {
+		t.Logf("error destroying Windows VM with id %s: %v", vm.GetCredentials().GetInstanceId(), err)
+	}
 	err = deleteResources(kubeconfig)
 	if err != nil {
 		t.Logf("error deleting cluster resources %v", err)
@@ -151,11 +185,11 @@ func constructRequiredRules() (map[string]*requiredRule,
 	return requiredRules, nil
 }
 
-// setup does these prerequisite tests before running the tests.
+// populateFieldsToTest does these prerequisites before running the tests.
 // 1. populate fields into the azureInfo
 // 2. populate global variables instanceIDs and secGroupsIDs
 // 3. get credential object for the instance created.
-func setup() error {
+func populateFieldsToTest() error {
 	err := populateAzureInfo()
 	if err != nil {
 		return fmt.Errorf("failed to populate Azure Info with error: %v", err)

@@ -16,21 +16,14 @@ import (
 )
 
 var (
-	// Get kubeconfig, AWS credentials, and artifact dir from environment variable set by the OpenShift CI operator.
-	kubeconfig     = os.Getenv("KUBECONFIG")
-	awscredentials = os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
-	artifactDir    = os.Getenv("ARTIFACT_DIR")
-	privateKeyPath = os.Getenv("KUBE_SSH_KEY_PATH")
-
-	// imageID is the image that will be fed to the WNI for the tests. This is being set to empty, as we wish for it
-	// to use the latest Windows image
-	imageID      = ""
-	instanceType = "m4.large"
-	sshKey       = "libra"
-
 	// awsProvider is setup as a variable for both creating, destroying,
 	// and tear down Windows instance in case test fails in the middle.
 	awsProvider = &awscp.AwsProvider{}
+
+	// awsCredentials is set by OpenShift CI
+	awsCredentials = os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
+	// instanceType is the AWS specific instance type to create the VM with
+	instanceType = "m4.large"
 
 	// Set global variables for instance object, instance, security group,
 	// and infrastructure IDs so that once they are created,
@@ -131,7 +124,7 @@ func setupAWSCloudProvider() error {
 		return err
 	}
 
-	provider, err := awscp.New(oc, imageID, instanceType, sshKey, awscredentials, "default", resourceTrackerFilePath, privateKeyPath)
+	provider, err := awscp.New(oc, imageID, instanceType, sshKey, awsCredentials, "default", resourceTrackerFilePath, privateKeyPath)
 	if err != nil {
 		return fmt.Errorf("error obtaining aws interface object: %v", err)
 	}
