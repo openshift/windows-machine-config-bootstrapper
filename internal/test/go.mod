@@ -19,7 +19,7 @@ require (
 	github.com/imdario/mergo v0.3.8 // indirect
 	github.com/json-iterator/go v1.1.9 // indirect
 	github.com/openshift/client-go v0.0.0-00010101000000-000000000000
-	github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200304171500-1009dc222b8c
+	github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer v0.0.0-20200521181434-c9423833fb65
 	github.com/pkg/sftp v1.11.0
 	github.com/stretchr/testify v1.4.0
 	golang.org/x/crypto v0.0.0-20191122220453-ac88ee75c92c // indirect
