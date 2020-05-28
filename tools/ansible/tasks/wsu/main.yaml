@@ -22,7 +22,7 @@
 
     # Expected value of kubernetes_version in the form of 'v1.17.2'
     - name: Get kubernetes version
-      shell: "oc version -o json | jq -r '.serverVersion.gitVersion'"
+      shell: "oc version -o json | jq -r '.serverVersion.gitVersion' | cut -d '+' -f1"
       register: kubernetes_version
       failed_when: kubernetes_version.stdout == ""
 
@@ -46,7 +46,7 @@
       shell: |
         curl -s "{{ changelog.stdout }}" | \
         grep -A 1 "{{ kubernetes_version.stdout }}" | \
-        grep -A 1 node-windows | tail -n 1 | sed -e 's/.*<code>\(.*\)<\/code>.*/\1/'
+        grep -A 1 node-windows | tail -n 1 | sed -e 's/.*<code>\(.*\)<\/code>.*/\1/'| sed -e 's/.*<td>\(.*\)<\/td>.*/\1/'
       register: kube_node_sha
       failed_when: kube_node_sha.stdout == ""
 
