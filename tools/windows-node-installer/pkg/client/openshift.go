@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -68,7 +69,7 @@ func (o *OpenShift) GetCloudProvider() (*v1.PlatformStatus, error) {
 
 // getInfrastructure returns the information of current Infrastructure referred by the OpenShift client or an error.
 func (o *OpenShift) getInfrastructure() (*v1.Infrastructure, error) {
-	infra, err := o.Client.ConfigV1().Infrastructures().Get("cluster", metav1.GetOptions{})
+	infra, err := o.Client.ConfigV1().Infrastructures().Get(context.TODO(), "cluster", metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
