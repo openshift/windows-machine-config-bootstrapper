@@ -179,6 +179,8 @@ Export the `kubeconfig` so that oc can communicate with the cluster:
 $ export KUBECONFIG=$(pwd)/<cluster_directory>/auth/kubeconfig
 ```
 
+**Note**: Only using the absolute path is supported.
+
 Make sure you can interact with the cluster: 
 
 ```sh
