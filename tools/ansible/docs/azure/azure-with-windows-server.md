@@ -205,7 +205,7 @@ node.
 On the Linux host, deploy the pods:
 
 ```sh
-$ oc create -f https://gist.githubusercontent.com/suhanime/683ee7b5a2f55c11e3a26a4223170582/raw/d89 3db98944bf615fccfe73e6e4fb19549a362a5/WinWebServer.yaml -n default
+$ oc create -f https://gist.githubusercontent.com/suhanime/683ee7b5a2f55c11e3a26a4223170582/raw/d893db98944bf615fccfe73e6e4fb19549a362a5/WinWebServer.yaml -n default
 ```
 
 Once the deployment has been created, you can check the status of the pods:
@@ -386,7 +386,7 @@ You can now see a Windows screen display.
 Open a PowerShell window and execute the following commands:
 
 ```pwsh
-> $url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureR emotingForAnsible.ps1"
+> $url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
 $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
 (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
 powershell.exe -ExecutionPolicy ByPass -File $file
