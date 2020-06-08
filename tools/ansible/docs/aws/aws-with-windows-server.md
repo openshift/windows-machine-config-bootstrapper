@@ -200,8 +200,7 @@ On the Linux host, deploy the pods:
 
 ```sh
 $ oc create -f
-https://gist.githubusercontent.com/suhanime/683ee7b5a2f55c11e3a26a4223170582/raw/
-d893db98944bf615fccfe73e6e4fb19549a362a5/WinWebServer.yaml -n default
+https://gist.githubusercontent.com/suhanime/683ee7b5a2f55c11e3a26a4223170582/raw/d893db98944bf615fccfe73e6e4fb19549a362a5/WinWebServer.yaml -n default
 ```
 
 Once the deployment has been created, we can check the status of the pods:
