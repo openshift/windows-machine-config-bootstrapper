@@ -176,12 +176,12 @@ winworker-obm7a                             Ready    worker   2m11s   v1.17.1
 ```
 
 #### API rate limit exceeded error when running WSU
-
-The WSU playbook uses GitHub API to fetch releases for WMCB. You might encounter an
-API rate limit exceeded error while running WSU playbook in `TASK [Get release]`.
-The issue occurs due to GitHub rate-limiting unauthenticated requests at 60
-requests per hour. As a workaround, wait for the rate-limit to reset (at most 1
-hour) before running the playbook again.
+WSU playbook uses GitHub API to fetch releases for WMCB. You might encounter an
+API rate limit exceeded error while running WSU playbook in `TASK [Get release]`
+and `TASK [Get latest 0.8.x cni plugins version]`. The issue occurs due to
+GitHub rate-limiting unauthenticated requests at 60 requests per hour. As a
+workaround, wait for the rate-limit to reset (at most 1 hour) before running the
+playbook again.
 
 ## Test Windows workload
 
@@ -205,7 +205,7 @@ node.
 On the Linux host, deploy the pods:
 
 ```sh
-$ oc create -f https://gist.githubusercontent.com/suhanime/683ee7b5a2f55c11e3a26a4223170582/raw/d89 3db98944bf615fccfe73e6e4fb19549a362a5/WinWebServer.yaml -n default
+$ oc create -f https://gist.githubusercontent.com/suhanime/683ee7b5a2f55c11e3a26a4223170582/raw/d893db98944bf615fccfe73e6e4fb19549a362a5/WinWebServer.yaml -n default
 ```
 
 Once the deployment has been created, you can check the status of the pods:
@@ -386,7 +386,7 @@ You can now see a Windows screen display.
 Open a PowerShell window and execute the following commands:
 
 ```pwsh
-> $url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureR emotingForAnsible.ps1"
+> $url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
 $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
 (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
 powershell.exe -ExecutionPolicy ByPass -File $file

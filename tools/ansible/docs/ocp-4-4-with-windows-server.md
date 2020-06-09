@@ -179,6 +179,8 @@ Export the `kubeconfig` so that oc can communicate with the cluster:
 $ export KUBECONFIG=$(pwd)/<cluster_directory>/auth/kubeconfig
 ```
 
+**Note**: Only using the absolute path is supported.
+
 Make sure you can interact with the cluster: 
 
 ```sh
@@ -344,10 +346,11 @@ winworker-obm7a                             Ready    worker   2m11s   v1.17.1
 #### API rate limit exceeded error when running WSU
 
 The WSU playbook uses GitHub API to fetch releases for WMCB. You might encounter an
-API rate limit exceeded error while running the WSU playbook in `TASK [Get release]`.
-The issue occurs due to GitHub rate-limiting unauthenticated requests at 60
-requests per hour. As a workaround, wait for the rate-limit to reset (at most 1
-hour) before running the playbook again.
+API rate limit exceeded error while running the WSU playbook in `TASK [Get release]`
+and `TASK [Get latest 0.8.x cni plugins version]`. The issue occurs due to GitHub
+rate-limiting unauthenticated requests at 60 requests per hour. As a workaround,
+wait for the rate-limit to reset (at most 1 hour) before running the playbook
+again.
 
 ## Test Windows workload
 
@@ -371,7 +374,7 @@ to set up and RDP into your Windows node.
 On the Linux host, deploy the pods:
 
 ```sh
-$ oc create -f https://gist.githubusercontent.com/suhanime/683ee7b5a2f55c11e3a26a4223170582/raw/d89 3db98944bf615fccfe73e6e4fb19549a362a5/WinWebServer.yaml -n default
+$ oc create -f https://gist.githubusercontent.com/suhanime/683ee7b5a2f55c11e3a26a4223170582/raw/d893db98944bf615fccfe73e6e4fb19549a362a5/WinWebServer.yaml -n default
 ```
 
 Once the deployment has been created, check the status of the pods:
