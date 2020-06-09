@@ -900,6 +900,13 @@ func (az *AzureProvider) constructNetworkProfile(ctx context.Context,
 	return networkProfile, nil
 }
 
+// CreateWindowsVMWithPrivateSubnet creates a WindowsVM within private subnet.
+// TODO: As of now, this is a dummy implementation. If we don't move to the machine-api quickly come back and implement
+// this
+func (az *AzureProvider) CreateWindowsVMWithPrivateSubnet() (windowsVM types.WindowsVM, err error) {
+	return nil, nil
+}
+
 // CreateWindowsVM takes in imageId, instanceType and sshKey name to create Windows instance under the same
 // resourceGroupName as the existing OpenShift. The returned Windows VM object from this method will provide access
 // to the instance via Winrm, SSH
