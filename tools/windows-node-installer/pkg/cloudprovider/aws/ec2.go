@@ -24,6 +24,7 @@ import (
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/client"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
+	"golang.org/x/crypto/ssh"
 	"k8s.io/apimachinery/pkg/util/rand"
 )
 
@@ -136,6 +137,46 @@ func (a *AwsProvider) CreateWindowsVM() (windowsVM types.WindowsVM, err error) {
 	return a.createWindowsVM(false)
 }
 
+// retrievePrivateKey retrieves private key in format required for generating
+// public key using the privateKeyPath
+func (a *AwsProvider) retrievePrivateKey() (*rsa.PrivateKey, error) {
+	privateKeyBytes, err := ioutil.ReadFile(a.privateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find private key from path: %v with: %v", a.privateKeyPath, err)
+	}
+
+	privateKeyBlock, _ := pem.Decode(privateKeyBytes)
+	if privateKeyBlock == nil {
+		return nil, fmt.Errorf("failed to decode retrieved private key: %v", a.privateKeyPath)
+	}
+
+	var parsedKey interface{}
+	if parsedKey, err = x509.ParsePKCS1PrivateKey(privateKeyBlock.Bytes); err != nil {
+		return nil, fmt.Errorf("failed to parse private key with: %v", err)
+	}
+
+	privateKey, ok := parsedKey.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("failed to cast private key as rsa key type: %v", err)
+	}
+	return privateKey, nil
+}
+
+// generatePublicKey generates a public key and returns it in the ssh-rsa..
+// string format using the retrieved private key
+func (a *AwsProvider) generatePublicKey() (string, error) {
+	privateKey, err := a.retrievePrivateKey()
+	if err != nil {
+		return "", fmt.Errorf("failed to retrieve private key in rsa format: %v", err)
+	}
+	publicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate public key: %v", err)
+	}
+	pubKeyBytes := ssh.MarshalAuthorizedKey(publicKey)
+	return string(pubKeyBytes[:]), nil
+}
+
 // createWindowsVM is a helper which creates the WindowsVM. It takes usePrivateSubnet as argument
 // to decide if the the created VM has to be associated with public or private subnet
 func (a *AwsProvider) createWindowsVM(usePrivateSubnet bool) (windowsVM types.WindowsVM, err error) {
@@ -162,20 +203,40 @@ func (a *AwsProvider) createWindowsVM(usePrivateSubnet bool) (windowsVM types.Wi
 		return nil, fmt.Errorf("failed to get cluster worker IAM, %v", err)
 	}
 
-	// PowerShell script to setup WinRM for Ansible, installing OpenSSH server and open firewall
-	// port number 10250 on the Windows node created
-	userDataWinrm := `<powershell>
-        $url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
-        $file = "$env:temp\ConfigureRemotingForAnsible.ps1"
-        (New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
-        & $file
-        Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
-        New-NetFirewallRule -DisplayName "` + types.FirewallRuleName + `"
-        -Direction Inbound -Action Allow -Protocol TCP -LocalPort ` + types.ContainerLogsPort + ` -EdgeTraversalPolicy Allow
-        </powershell>
-        <persist>true</persist>`
+	publicKey, err := a.generatePublicKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate public key using private key: %v", err)
+	}
 
-	instance, err := a.createInstance(a.imageID, a.instanceType, a.sshKey, networkInterface, workerIAM, userDataWinrm)
+	// PowerShell script to setup WinRM for Ansible, installing OpenSSH server, configuring
+	// public key authentication and open firewall port number 10250 on the Windows node created
+	userData := `<powershell>
+	$url = "https://raw.githubusercontent.com/ansible/ansible/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
+	$file = "$env:temp\ConfigureRemotingForAnsible.ps1"
+	(New-Object -TypeName System.Net.WebClient).DownloadFile($url,  $file)
+	& $file
+	Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+	New-NetFirewallRule -DisplayName "` + types.FirewallRuleName + `"
+	-Direction Inbound -Action Allow -Protocol TCP -LocalPort ` + types.ContainerLogsPort + ` -EdgeTraversalPolicy Allow
+	Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+	Install-Module -Force OpenSSHUtils -Scope AllUsers
+	Set-Service -Name ssh-agent -StartupType ‘Automatic’
+	Set-Service -Name sshd -StartupType ‘Automatic’
+	Start-Service ssh-agent
+	Start-Service sshd
+	$pubKeyConf = (Get-Content -path C:\ProgramData\ssh\sshd_config) -replace '#PubkeyAuthentication yes','PubkeyAuthentication yes'
+	$pubKeyConf | Set-Content -Path C:\ProgramData\ssh\sshd_config
+ 	$passwordConf = (Get-Content -path C:\ProgramData\ssh\sshd_config) -replace '#PasswordAuthentication yes','PasswordAuthentication yes'
+	$passwordConf | Set-Content -Path C:\ProgramData\ssh\sshd_config
+	$pubKeyLocationConf = (Get-Content -path C:\ProgramData\ssh\sshd_config) -replace 'Match Group administrators','#Match Group administrators'
+	$pubKeyLocationConf | Set-Content -Path C:\ProgramData\ssh\sshd_config
+	Restart-Service sshd
+	New-item -Path $env:USERPROFILE -Name .ssh -ItemType Directory -force
+	echo "` + publicKey + `"| Out-File $env:USERPROFILE\.ssh\authorized_keys -Encoding ascii
+	</powershell>
+	<persist>true</persist>`
+
+	instance, err := a.createInstance(a.imageID, a.instanceType, a.sshKey, networkInterface, workerIAM, userData)
 
 	if err != nil {
 		return nil, err
@@ -234,10 +295,8 @@ func (a *AwsProvider) createWindowsVM(usePrivateSubnet bool) (windowsVM types.Wi
 	// in the list of services
 	// TODO: Parse the output of the `Get-Service sshd, ssh-agent` on the Windows node to check if the windows nodes
 	// has those services present
-	time.Sleep(time.Minute)
-	if err := w.ConfigureOpenSSHServer(); err != nil {
-		return w, fmt.Errorf("failed to configure OpenSSHServer on the Windows VM: %v", err)
-	}
+	time.Sleep(2 * time.Minute)
+
 	if err := w.GetSSHClient(); err != nil {
 		return w, fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
 	}
