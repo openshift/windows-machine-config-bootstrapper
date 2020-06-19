@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io/ioutil"
@@ -61,10 +62,10 @@ func setRbacConfig(cfg *rest.Config) error {
 
 		case *corev1.Namespace:
 			// get the required namespace
-			_, err := core.Namespaces().Get(projectName, metav1.GetOptions{})
+			_, err := core.Namespaces().Get(context.TODO(), projectName, metav1.GetOptions{})
 			if err != nil {
 				// create namespace
-				_, err := core.Namespaces().Create(o)
+				_, err := core.Namespaces().Create(context.TODO(), o, metav1.CreateOptions{})
 				if err != nil {
 					return fmt.Errorf("error creating  namespace: %v", err)
 				}
@@ -73,10 +74,10 @@ func setRbacConfig(cfg *rest.Config) error {
 
 		case *rbac.ClusterRole:
 			// get the required cluster role
-			_, err := rbacConfig.ClusterRoles().Get(resourceName, metav1.GetOptions{})
+			_, err := rbacConfig.ClusterRoles().Get(context.TODO(), resourceName, metav1.GetOptions{})
 			if err != nil {
 				// create cluster role
-				_, err := rbacConfig.ClusterRoles().Create(o)
+				_, err := rbacConfig.ClusterRoles().Create(context.TODO(), o, metav1.CreateOptions{})
 				if err != nil {
 					return fmt.Errorf("error creating cluster role: %v", err)
 				}
@@ -85,10 +86,10 @@ func setRbacConfig(cfg *rest.Config) error {
 
 		case *rbac.Role:
 			// get the required role
-			_, err := rbacConfig.Roles(projectName).Get(resourceName, metav1.GetOptions{})
+			_, err := rbacConfig.Roles(projectName).Get(context.TODO(), resourceName, metav1.GetOptions{})
 			if err != nil {
 				// create role in the namespace
-				_, err := rbacConfig.Roles(projectName).Create(o)
+				_, err := rbacConfig.Roles(projectName).Create(context.TODO(), o, metav1.CreateOptions{})
 				if err != nil {
 					return fmt.Errorf("error creating  role: %v", err)
 				}
@@ -97,10 +98,10 @@ func setRbacConfig(cfg *rest.Config) error {
 
 		case *corev1.ServiceAccount:
 			// get the required service account
-			_, err := core.ServiceAccounts(projectName).Get(resourceName, metav1.GetOptions{})
+			_, err := core.ServiceAccounts(projectName).Get(context.TODO(), resourceName, metav1.GetOptions{})
 			if err != nil {
 				// create service account
-				_, err := core.ServiceAccounts(projectName).Create(o)
+				_, err := core.ServiceAccounts(projectName).Create(context.TODO(), o, metav1.CreateOptions{})
 				if err != nil {
 					return fmt.Errorf("error creating  role: %v", err)
 				}
@@ -109,10 +110,10 @@ func setRbacConfig(cfg *rest.Config) error {
 
 		case *rbac.RoleBinding:
 			// get the required role binding
-			_, err := rbacConfig.RoleBindings(projectName).Get(resourceName, metav1.GetOptions{})
+			_, err := rbacConfig.RoleBindings(projectName).Get(context.TODO(), resourceName, metav1.GetOptions{})
 			if err != nil {
 				// create role binding
-				_, err := rbacConfig.RoleBindings(projectName).Create(o)
+				_, err := rbacConfig.RoleBindings(projectName).Create(context.TODO(), o, metav1.CreateOptions{})
 				if err != nil {
 					return fmt.Errorf("error creating  role binding %v", err)
 				}
@@ -120,10 +121,10 @@ func setRbacConfig(cfg *rest.Config) error {
 			}
 		case *rbac.ClusterRoleBinding:
 			// get the required cluster role binding
-			_, err := rbacConfig.ClusterRoleBindings().Get(resourceName, metav1.GetOptions{})
+			_, err := rbacConfig.ClusterRoleBindings().Get(context.TODO(), resourceName, metav1.GetOptions{})
 			if err != nil {
 				// create cluster role binding
-				_, err := rbacConfig.ClusterRoleBindings().Create(o)
+				_, err := rbacConfig.ClusterRoleBindings().Create(context.TODO(), o, metav1.CreateOptions{})
 				if err != nil {
 					return fmt.Errorf("error creating  cluster role binding %v", err)
 				}
@@ -144,7 +145,7 @@ func getServiceAccountToken(cfg *rest.Config) (string, error) {
 		return "", fmt.Errorf("error getting config for core resources: %v", err)
 	}
 	// get service account
-	sa, err := core.ServiceAccounts(projectName).Get(resourceName, metav1.GetOptions{})
+	sa, err := core.ServiceAccounts(projectName).Get(context.TODO(), resourceName, metav1.GetOptions{})
 	if err != nil {
 		return "", fmt.Errorf("error getting the service account : %v", err)
 	}
@@ -156,7 +157,7 @@ func getServiceAccountToken(cfg *rest.Config) (string, error) {
 		}
 	}
 	// get secret object using secret name value
-	secret, err := core.Secrets(projectName).Get(tokenSecret, metav1.GetOptions{})
+	secret, err := core.Secrets(projectName).Get(context.TODO(), tokenSecret, metav1.GetOptions{})
 	if err != nil {
 		return "", fmt.Errorf("error getting secret for the service account %v", err)
 	}
@@ -215,27 +216,27 @@ func deleteResources(kubeconfig string) error {
 	core, _ := coreclient.NewForConfig(cfg)
 
 	// delete role binding
-	if err := rbacConfig.RoleBindings(projectName).Delete(resourceName, &metav1.DeleteOptions{}); err != nil {
+	if err := rbacConfig.RoleBindings(projectName).Delete(context.TODO(), resourceName, metav1.DeleteOptions{}); err != nil {
 		return fmt.Errorf("error deleting role binding")
 	}
 	// delete cluster role binding
-	if err := rbacConfig.ClusterRoleBindings().Delete(resourceName, &metav1.DeleteOptions{}); err != nil {
+	if err := rbacConfig.ClusterRoleBindings().Delete(context.TODO(), resourceName, metav1.DeleteOptions{}); err != nil {
 		return fmt.Errorf("error deleting cluster role binding")
 	}
 	// delete service account
-	if err := core.ServiceAccounts(projectName).Delete(resourceName, &metav1.DeleteOptions{}); err != nil {
+	if err := core.ServiceAccounts(projectName).Delete(context.TODO(), resourceName, metav1.DeleteOptions{}); err != nil {
 		return fmt.Errorf("error deleting service account")
 	}
 	// delete roles
-	if err := rbacConfig.Roles(projectName).Delete(resourceName, &metav1.DeleteOptions{}); err != nil {
+	if err := rbacConfig.Roles(projectName).Delete(context.TODO(), resourceName, metav1.DeleteOptions{}); err != nil {
 		return fmt.Errorf("error deleting role")
 	}
 	// delete cluster role
-	if err := rbacConfig.ClusterRoles().Delete(resourceName, &metav1.DeleteOptions{}); err != nil {
+	if err := rbacConfig.ClusterRoles().Delete(context.TODO(), resourceName, metav1.DeleteOptions{}); err != nil {
 		return fmt.Errorf("error deleting cluster roles")
 	}
 	// delete namespace
-	if err := core.Namespaces().Delete(resourceName, &metav1.DeleteOptions{}); err != nil {
+	if err := core.Namespaces().Delete(context.TODO(), resourceName, metav1.DeleteOptions{}); err != nil {
 		return fmt.Errorf("error deleting namespace")
 	}
 	log.Print("successfully deleted all resources")

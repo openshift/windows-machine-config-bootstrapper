@@ -3,11 +3,11 @@ module github.com/openshift/windows-machine-config-bootstrapper/tools/windows-no
 go 1.13
 
 replace (
-	github.com/openshift/api => github.com/openshift/api v0.0.0-20200205145930-e9d93e317dd1 // OpenShift 4.3
-	github.com/openshift/client-go => github.com/openshift/client-go v0.0.0-20191125132246-f6563a70e19a // OpenShift 4.3
-	k8s.io/api => k8s.io/api v0.16.7
-	k8s.io/apimachinery => k8s.io/apimachinery v0.16.7
-	k8s.io/client-go => k8s.io/client-go v0.16.7
+	github.com/openshift/api => github.com/openshift/api v0.0.0-20200422081840-fdd1b0c14c88 // OpenShift 4.5
+	github.com/openshift/client-go => github.com/openshift/client-go v0.0.0-20200422192633-6f6c07fc2a70 // OpenShift 4.5
+	k8s.io/api => k8s.io/api v0.18.2
+	k8s.io/apimachinery => k8s.io/apimachinery v0.18.2
+	k8s.io/client-go => k8s.io/client-go v0.18.2
 )
 
 require (
@@ -21,15 +21,14 @@ require (
 	github.com/coreos/go-systemd v0.0.0-20190321100706-95778dfbb74e // indirect
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f // indirect
 	github.com/masterzen/winrm v0.0.0-20190308153735-1d17eaf15943
-	github.com/openshift/api v0.0.0-00010101000000-000000000000
-	github.com/openshift/client-go v0.0.0-00010101000000-000000000000
+	github.com/openshift/api v0.0.0-20200422081840-fdd1b0c14c88
+	github.com/openshift/client-go v0.0.0-20200422192633-6f6c07fc2a70
 	github.com/pkg/errors v0.8.1
 	github.com/pkg/sftp v1.11.0
 	github.com/spf13/cobra v0.0.5
 	github.com/stretchr/testify v1.4.0
-	golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550
-	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553 // indirect
-	k8s.io/api v0.16.7
-	k8s.io/apimachinery v0.17.3
-	k8s.io/client-go v0.0.0-00010101000000-000000000000
+	golang.org/x/crypto v0.0.0-20200220183623-bac4c82f6975
+	k8s.io/api v0.18.3
+	k8s.io/apimachinery v0.18.3
+	k8s.io/client-go v0.18.2
 )
