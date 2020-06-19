@@ -113,6 +113,12 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 	})
 }
 
+// CreateWindowsVMWithPrivateSubnet creates a WindowsVM within a private subnet of the OpenShift cluster. A public
+// IP will not be associated with the WindowsVM created by this method.
+func (a *AwsProvider) CreateWindowsVMWithPrivateSubnet() (windowsVM types.WindowsVM, err error) {
+	return a.createWindowsVM(true)
+}
+
 // CreateWindowsVM takes in imageId, instanceType, and sshKey name to create a Windows instance under the same VPC as
 // the existing OpenShift cluster with the following:
 // - attaches existing cloud-specific cluster worker security group and IAM to gain the same access as the linux
@@ -127,6 +133,12 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // On success, the function outputs RDP access information in the commandline interface. It also returns the
 // the Windows VM Object to interact with using SSH, Winrm etc.
 func (a *AwsProvider) CreateWindowsVM() (windowsVM types.WindowsVM, err error) {
+	return a.createWindowsVM(false)
+}
+
+// createWindowsVM is a helper which creates the WindowsVM. It takes usePrivateSubnet as argument
+// to decide if the the created VM has to be associated with public or private subnet
+func (a *AwsProvider) createWindowsVM(usePrivateSubnet bool) (windowsVM types.WindowsVM, err error) {
 	w := &types.Windows{}
 	// If no AMI was provided, use the latest Windows AMI
 	if a.imageID == "" {
@@ -141,7 +153,7 @@ func (a *AwsProvider) CreateWindowsVM() (windowsVM types.WindowsVM, err error) {
 	if err != nil {
 		return nil, err
 	}
-	networkInterface, err := a.getNetworkInterface(infraID)
+	networkInterface, err := a.getNetworkInterface(infraID, usePrivateSubnet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get network interface, %v", err)
 	}
@@ -180,10 +192,13 @@ func (a *AwsProvider) CreateWindowsVM() (windowsVM types.WindowsVM, err error) {
 		log.Printf("failed to assign name for instance: %s, %v", instanceID, err)
 	}
 
-	// Get the public IP
-	publicIPAddress, err := a.GetPublicIP(instanceID)
-	if err != nil {
-		return nil, err
+	var publicIPAddress string
+	if !usePrivateSubnet {
+		// Get the public IP
+		publicIPAddress, err = a.GetPublicIP(instanceID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// get the private IP
@@ -200,8 +215,15 @@ func (a *AwsProvider) CreateWindowsVM() (windowsVM types.WindowsVM, err error) {
 
 	// Build new credentials structure to be used by other actors. The actor is responsible for checking if
 	// the credentials are being generated properly. This method won't guarantee the existence of credentials
-	// if the VM is spun up
-	credentials := types.NewCredentials(instanceID, publicIPAddress, decryptedPassword, winUser)
+	// if the VM is spun up.
+	// Credentials can have both public or private IP Addresses.
+	ipAddress := ""
+	if usePrivateSubnet {
+		ipAddress = privateIPAddress
+	} else {
+		ipAddress = publicIPAddress
+	}
+	credentials := types.NewCredentials(instanceID, ipAddress, decryptedPassword, winUser)
 	w.Credentials = credentials
 
 	// Setup Winrm and SSH client so that we can interact with the Windows Object we created
@@ -435,7 +457,7 @@ func (a *AwsProvider) DestroyWindowsVMs() error {
 // getNetworkInterface is a wrapper function that includes all networking related work including getting OpenShift
 // cluster's VPC and its worker security group, a public subnet within the VPC, and a Windows security group.
 // It returns a valid ec2 network interface or an error.
-func (a *AwsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkInterfaceSpecification, error) {
+func (a *AwsProvider) getNetworkInterface(infraID string, usePrivateSubnet bool) (*ec2.InstanceNetworkInterfaceSpecification, error) {
 	vpc, err := a.getInfrastructureVPC(infraID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VPC, %v", err)
@@ -444,7 +466,7 @@ func (a *AwsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkI
 	if err != nil {
 		return nil, fmt.Errorf("failed to get cluster worker security group, %v", err)
 	}
-	publicSubnetID, err := a.getPublicSubnetId(infraID, vpc)
+	subnetID, err := a.getSubnetID(infraID, vpc, usePrivateSubnet)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get a Public subnet, %v", err)
 	}
@@ -453,11 +475,11 @@ func (a *AwsProvider) getNetworkInterface(infraID string) (*ec2.InstanceNetworkI
 		return nil, fmt.Errorf("failed to create Windows worker security group, %v", err)
 	}
 	return &ec2.InstanceNetworkInterfaceSpecification{
-		AssociatePublicIpAddress: aws.Bool(true),
+		AssociatePublicIpAddress: aws.Bool(!usePrivateSubnet),
 		DeleteOnTermination:      aws.Bool(true),
 		DeviceIndex:              aws.Int64(0),
 		Groups:                   aws.StringSlice([]string{workerSG, sgID}),
-		SubnetId:                 aws.String(publicSubnetID),
+		SubnetId:                 aws.String(subnetID),
 	}, nil
 }
 
@@ -832,9 +854,9 @@ func (a *AwsProvider) GetVPCByInfrastructure(infraID string) (*ec2.Vpc, error) {
 	return res.Vpcs[0], nil
 }
 
-// getPublicSubnetId tries to find a public subnet under the VPC and returns subnet id or an error.
-// These subnets belongs to the OpenShift cluster.
-func (a *AwsProvider) getPublicSubnetId(infraID string, vpc *ec2.Vpc) (string, error) {
+// getSubnetID tries to find a subnet under the VPC and returns subnet ID or an error.
+// These subnets belongs to the OpenShift cluster. It can be either public or private
+func (a *AwsProvider) getSubnetID(infraID string, vpc *ec2.Vpc, usePrivateSubnet bool) (string, error) {
 	// search subnet by the vpcid owned by the vpcID
 	subnets, err := a.EC2.DescribeSubnets(&ec2.DescribeSubnetsInput{
 		Filters: []*ec2.Filter{
@@ -870,13 +892,19 @@ func (a *AwsProvider) getPublicSubnetId(infraID string, vpc *ec2.Vpc) (string, e
 		return "", fmt.Errorf("no instance offerings returned for %s", a.instanceType)
 	}
 
-	// Finding public subnet within the vpc.
-	foundPublicSubnet := false
+	// Finding required subnet within the vpc.
+	foundSubnet := false
+	requiredSubnet := ""
+	if usePrivateSubnet {
+		requiredSubnet = "-private-"
+	} else {
+		requiredSubnet = "-public-"
+	}
 	for _, subnet := range subnets.Subnets {
 		for _, tag := range subnet.Tags {
 			// TODO: find public subnet by checking igw gateway in routing.
-			if *tag.Key == "Name" && strings.Contains(*tag.Value, infraID+"-public-") {
-				foundPublicSubnet = true
+			if *tag.Key == "Name" && strings.Contains(*tag.Value, infraID+requiredSubnet) {
+				foundSubnet = true
 				// Ensure that the instance type we want is supported in the zone that the subnet is in
 				for _, instanceOffering := range offerings.ReservedInstancesOfferings {
 					if instanceOffering.AvailabilityZone == nil {
@@ -890,9 +918,9 @@ func (a *AwsProvider) getPublicSubnetId(infraID string, vpc *ec2.Vpc) (string, e
 		}
 	}
 
-	err = fmt.Errorf("could not find a public subnet in VPC: %v", *vpc.VpcId)
-	if !foundPublicSubnet {
-		err = fmt.Errorf("could not find a public subnet in a zone that supports %s instance type",
+	err = fmt.Errorf("could not find the required subnet in VPC: %v", *vpc.VpcId)
+	if !foundSubnet {
+		err = fmt.Errorf("could not find the required subnet in a zone that supports %s instance type",
 			a.instanceType)
 	}
 	return "", err

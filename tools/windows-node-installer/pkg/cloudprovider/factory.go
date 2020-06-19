@@ -19,6 +19,8 @@ import (
 type Cloud interface {
 	// CreateWindowsVM creates a Windows VM for a given cloud provider
 	CreateWindowsVM() (types.WindowsVM, error)
+	// CreateWindowsVMWithPrivateSubnet creates a Windows VM for a given cloud provider in a private subnet
+	CreateWindowsVMWithPrivateSubnet() (windowsVM types.WindowsVM, err error)
 	// DestroyWindowsVMs uses 'windows-node-installer.json' file that contains IDs of created instance and
 	// security group and deletes them.
 	// Example 'windows-node-installer.json' file:
