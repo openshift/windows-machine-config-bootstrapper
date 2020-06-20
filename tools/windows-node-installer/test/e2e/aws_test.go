@@ -3,6 +3,7 @@ package e2e
 import (
 	"fmt"
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/client"
+	"io/ioutil"
 	"os"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/resource"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 var (
@@ -73,6 +75,7 @@ func testCreateWindowsInstance(t *testing.T) {
 	t.Run("test instance is attache a Windows security group", testInstanceIsAssociatedWithWindowsWorkerSg)
 	t.Run("test instance is associated with cluster worker's IAM", testInstanceIsAssociatedWithClusterWorkerIAM)
 	t.Run("test container logs port is open in Windows firewall", testInstanceFirewallRule)
+	t.Run("test if public key authenticated SSH connection is available", testAwsSSHConnection)
 }
 
 // testDestroyWindowsInstance tests the deletion of a Windows instance and checks if the created instance and Windows
@@ -464,4 +467,41 @@ func testInstallerJsonFileIsDeleted(t *testing.T) {
 	// the windows-node-installer.json should be removed after resource is deleted.
 	_, err := resource.ReadInstallerInfo(artifactDir)
 	assert.Error(t, err, "error deleting windows-node-installer.json file")
+}
+
+// testAwsSSHConnection creates a SSH client and tests SSH connection to Windows VM
+// using public key authentication
+func testAwsSSHConnection(t *testing.T) {
+	pubKeyAuth, err := newPubKeyAuth(privateKeyPath)
+	require.NoErrorf(t, err, "failed to generate public key pair for the private key: %v",
+		privateKeyPath)
+
+	config := &ssh.ClientConfig{
+		User: windowsVM.GetCredentials().GetUserName(),
+		Auth: []ssh.AuthMethod{
+			pubKeyAuth,
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+	}
+	sshClient, err := ssh.Dial("tcp", windowsVM.GetCredentials().GetIPAddress()+":22", config)
+	require.NoErrorf(t, err, "failed to connect via SSH")
+	session, err := sshClient.NewSession()
+	require.NoErrorf(t, err, "failed to create SSH session")
+	err = session.Run("dir")
+	assert.NoError(t, err, "failed to communicate via SSH")
+}
+
+// newPubKeyAuth parses the private key file to return an AuthMethod
+// that uses the given key pairs in creating ssh config
+func newPubKeyAuth(privateKeyPath string) (ssh.AuthMethod, error) {
+	privateKey, err := ioutil.ReadFile(privateKeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find private key from path: %v with: %v", privateKeyPath, err)
+	}
+
+	parsedKey, err := ssh.ParsePrivateKey(privateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key with: %v", err)
+	}
+	return ssh.PublicKeys(parsedKey), nil
 }
