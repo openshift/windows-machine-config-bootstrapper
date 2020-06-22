@@ -155,11 +155,15 @@ rqLuyNO+hCh/ZclPL+UiGJH1dlQ=
 	}
 }
 
-// TestPrepKubeletConfForWindows tests that we are changing the kubelet configuration in a way that allows it to run on windows
-func TestPrepKubeletConfForWindows(t *testing.T) {
+// TestCreateKubeletConf tests that we are creating the kubelet configuration in a way that allows it to run on windows
+func TestCreateKubeletConf(t *testing.T) {
 	type args struct {
 		in []byte
 	}
+	instDir := `C:\k`
+	err := os.MkdirAll(instDir, 0755)
+	require.NoError(t, err, "error creating install directory")
+
 	tests := []struct {
 		name string
 		args args
@@ -167,14 +171,13 @@ func TestPrepKubeletConfForWindows(t *testing.T) {
 	}{
 		{
 			name: "Base case",
-			args: args{in: []byte(`{"kind":"KubeletConfiguration","apiVersion":"kubelet.config.k8s.io/v1beta1","staticPodPath":"/etc/kubernetes/manifests","syncFrequency":"0s","fileCheckFrequency":"0s","httpCheckFrequency":"0s","rotateCertificates":true,"serverTLSBootstrap":true,"authentication":{"x509":{"clientCAFile":"/etc/kubernetes/kubelet-ca.crt"},"webhook":{"cacheTTL":"0s"},"anonymous":{"enabled":false}},"authorization":{"webhook":{"cacheAuthorizedTTL":"0s","cacheUnauthorizedTTL":"0s"}},"clusterDomain":"cluster.local","clusterDNS":["172.30.0.10"],"streamingConnectionIdleTimeout":"0s","nodeStatusUpdateFrequency":"0s","nodeStatusReportFrequency":"0s","imageMinimumGCAge":"0s","volumeStatsAggPeriod":"0s","cgroupDriver":"systemd","cpuManagerReconcilePeriod":"0s","runtimeRequestTimeout":"10m0s","maxPods":250,"serializeImagePulls":false,"evictionPressureTransitionPeriod":"0s","featureGates":{"ExperimentalCriticalPodAnnotation":true,"LocalStorageCapacityIsolation":false,"RotateKubeletServerCertificate":true,"SupportPodPidsLimit":true},"containerLogMaxSize":"50Mi","systemReserved":{"cpu":"500m","memory":"500Mi"}}`)},
-			want: []byte(`{"kind":"KubeletConfiguration","apiVersion":"kubelet.config.k8s.io/v1beta1","staticPodPath":"/etc/kubernetes/manifests","syncFrequency":"0s","fileCheckFrequency":"0s","httpCheckFrequency":"0s","rotateCertificates":true,"serverTLSBootstrap":true,"authentication":{"x509":{"clientCAFile":"C:\\k\\kubelet-ca.crt"},"webhook":{"cacheTTL":"0s"},"anonymous":{"enabled":false}},"authorization":{"webhook":{"cacheAuthorizedTTL":"0s","cacheUnauthorizedTTL":"0s"}},"clusterDomain":"cluster.local","clusterDNS":["172.30.0.10"],"streamingConnectionIdleTimeout":"0s","nodeStatusUpdateFrequency":"0s","nodeStatusReportFrequency":"0s","imageMinimumGCAge":"0s","volumeStatsAggPeriod":"0s","cgroupsPerQOS":false,"cgroupDriver":"cgroupfs","cpuManagerReconcilePeriod":"0s","runtimeRequestTimeout":"10m0s","maxPods":250,"serializeImagePulls":false,"evictionPressureTransitionPeriod":"0s","featureGates":{"ExperimentalCriticalPodAnnotation":true,"LocalStorageCapacityIsolation":false,"RotateKubeletServerCertificate":true,"SupportPodPidsLimit":true},"containerLogMaxSize":"50Mi","systemReserved":{"cpu":"500m","memory":"500Mi"},"enforceNodeAllocatable":[]}`),
+			want: []byte(`{"kind":"KubeletConfiguration","apiVersion":"kubelet.config.k8s.io/v1beta1","rotateCertificates":true,"serverTLSBootstrap":true,"authentication":{"x509":{"clientCAFile":"C:\\k\\kubelet-ca.crt "},"anonymous":{"enabled":false}},"clusterDomain":"cluster.local","clusterDNS":["172.30.0.10"],"cgroupsPerQOS":false,"runtimeRequestTimeout":"10m0s","maxPods":250,"kubeAPIQPS":50,"kubeAPIBurst":100,"serializeImagePulls":false,"featureGates":{"LegacyNodeRoleBehavior":false,"NodeDisruptionExclusion":true,"RotateKubeletServerCertificate":true,"SCTPSupport":true,"ServiceNodeExclusion":true,"SupportPodPidsLimit":true},"containerLogMaxSize":"50Mi","systemReserved":{"cpu":"500m","ephemeral-storage":"1Gi","memory":"1Gi"},"enforceNodeAllocatable":[]}`),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bs := winNodeBootstrapper{installDir: `C:\k`}
-			got, err := prepKubeletConfForWindows(&bs, tt.args.in)
+			bs := winNodeBootstrapper{installDir: instDir}
+			got, err := bs.createKubeletConf()
 			assert.NoError(t, err)
 			assert.Equalf(t, tt.want, got, "got = %v, want %v", string(got), string(tt.want))
 		})
