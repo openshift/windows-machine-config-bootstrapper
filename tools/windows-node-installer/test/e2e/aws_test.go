@@ -107,7 +107,7 @@ func awsSetup() error {
 func setupAWSCloudProvider() error {
 	var oc *client.OpenShift
 	var err error
-	// The e2e test uses Microsoft Windows Server 2019 Base with Containers image, m4.large type, and libra ssh key.
+	// The e2e test uses Microsoft Windows Server 2019 Base with Containers image, m4.large type, and openshift-dev ssh key.
 	// Use client created by service account if running in CI environment. Set OPENSHIFT_CI environment variable as "true"
 	// if you want to run tests with CI permissions locally.
 	if os.Getenv("OPENSHIFT_CI") == "true" {
