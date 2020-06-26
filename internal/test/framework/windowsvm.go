@@ -15,7 +15,7 @@ import (
 
 const (
 	// sshKey is the key that will be used to access created Windows VMs
-	sshKey = "libra"
+	sshKey = "openshift-dev"
 )
 
 // cloudProvider holds the information related to cloud provider

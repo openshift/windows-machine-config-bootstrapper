@@ -36,7 +36,7 @@ var (
 	// imageID is the image that will be fed to the WNI for the tests. This is being set to empty, as we wish for it
 	// to use the latest Windows image
 	imageID = ""
-	sshKey  = "libra"
+	sshKey  = "openshift-dev"
 )
 
 // setupWinRMClient initializes the winRM client and executes commands on the windows node
