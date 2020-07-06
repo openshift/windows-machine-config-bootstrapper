@@ -233,8 +233,11 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 		return fmt.Errorf("unable to copy kubelet.exe to %s", winTemp)
 	}
 
+	// The 0.35.0 maps to ignition spec v2. This should be modified when we switch to v3
+	ignitionUserAgentSpec := "Ignition/0.35.0"
 	// Download the worker ignition to C:\Windows\Tenp\ using the script that ignores the server cert
-	_, _, err = vm.Run(wgetIgnoreCertCmd+" -server https://api-int."+framework.ClusterAddress+":22623/config/worker"+" -output "+winTemp+"worker.ign", true)
+	_, _, err = vm.Run(wgetIgnoreCertCmd+" -server https://api-int."+framework.ClusterAddress+":22623/config/worker"+
+		" -output "+winTemp+"worker.ign"+" -useragent "+ignitionUserAgentSpec, true)
 	if err != nil {
 		return fmt.Errorf("unable to download worker.ign: %v", err)
 	}
