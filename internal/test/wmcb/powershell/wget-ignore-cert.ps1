@@ -1,7 +1,8 @@
 # Script that downloads a file from the server to the output location ignoring the server certificate
 param (
     [Parameter(Mandatory=$true)][string]$server,
-    [Parameter(Mandatory=$true)][string]$output
+    [Parameter(Mandatory=$true)][string]$output,
+    [Parameter(Mandatory=$true)][string]$useragent
 )
 
 if (-not("dummy" -as [type])) {
@@ -23,4 +24,4 @@ public static class Dummy {
 }
 [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [dummy]::GetDelegate()
 
-wget $server -o $output
+wget -UserAgent $useragent $server -o $output

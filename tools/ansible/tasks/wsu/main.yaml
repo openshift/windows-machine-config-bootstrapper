@@ -256,6 +256,7 @@
       win_get_url:
         url: "https://api-int.{{ cluster_address }}:22623/config/worker"
         dest: "{{ win_temp_dir.path }}\\worker.ign"
+        http_agent: "Ignition/0.35.0"
         validate_certs: no
 
     - name: Get hybrid overlay exe
