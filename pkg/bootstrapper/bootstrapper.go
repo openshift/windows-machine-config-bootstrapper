@@ -1,9 +1,6 @@
 package bootstrapper
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"fmt"
 	ignitionv2 "github.com/coreos/ignition/config/v2_2"
 	"github.com/vincent-petithory/dataurl"
@@ -14,12 +11,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"text/template"
 	"time"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/util/yaml"
-	kubeletConfig "k8s.io/kubelet/config/v1beta1"
 
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -211,51 +204,49 @@ type fileTranslation struct {
 	translationFunc
 }
 
-// prepKubeletConfForWindows adds all Windows specific configuration options we need to the kubelet configuration
-// specifically, we change the cgroup driver, CA path, resolv.conf path, and enforce node allocatable.
-func prepKubeletConfForWindows(wmcb *winNodeBootstrapper, initialConfig []byte) ([]byte, error) {
-	var out []byte
-	// Here we parse the initial configuration, which was yaml, into a KubeletConfiguration struct
-	b := bufio.NewReader(bytes.NewReader(initialConfig))
-	r := yaml.NewYAMLReader(b)
-	doc, err := r.Read()
-	if err != nil {
-		return out, err
-	}
-	scheme := runtime.NewScheme()
-	err = kubeletConfig.AddToScheme(scheme)
-	if err != nil {
-		return out, err
-	}
-	d := serializer.NewCodecFactory(scheme).UniversalDeserializer()
-	config := kubeletConfig.KubeletConfiguration{}
-	_, _, err = d.Decode(doc, nil, &config)
-	if err != nil {
-		return out, fmt.Errorf("could not decode yaml: %s\n%s", initialConfig, err)
-	}
+// kubeletConf defines fields of kubelet.conf file that are defined by WMCB variables
+type kubeletConf struct {
+	// ClientCAFile specifies location to client certificate
+	ClientCAFile string
+}
 
-	// Here we edit the config's fields so we can run the kubelet on Windows
-	config.CgroupDriver = "cgroupfs"
-	config.ResolverConfig = ""
-	cgroupsPerQOS := false
-	config.CgroupsPerQOS = &cgroupsPerQOS
-	config.Authentication.X509.ClientCAFile = filepath.Join(wmcb.installDir, "kubelet-ca.crt")
+// createKubeletConf creates config file for kubelet, with Windows specific configuration
+// Add values in kubelet_config.json files, for additional static fields.
+// Add fields in kubeletConf struct for variable fields
+func (wmcb *winNodeBootstrapper) createKubeletConf() ([]byte, error) {
+	// get config file content using bindata.go
+	content, err := Asset("templates/kubelet_config.json")
 
-	// We need to set EnforceNodeAllocatable with an empty slice, "enforceNodeAllocatable:[]"
-	// the json tags have the field set as `omitempty`, and the field defaults to enforceNodeAllocatable:["pods"]
-	// so we need empty the slice after marshalling
-	// Putting a placeholder value here to be removed later in the function
-	config.EnforceNodeAllocatable = []string{"THIS_MUST_BE_EMPTY"}
-
-	// Turn the config into a json marshalled []byte
-	out, err = json.Marshal(config)
 	if err != nil {
-		return out, err
+		return nil, fmt.Errorf("error reading kubelet config template: %v", err)
+	}
+	kubeletConfTmpl := template.New("kubeletconf")
+
+	// Parse the template
+	kubeletConfTmpl, err = kubeletConfTmpl.Parse(string(content))
+	if err != nil {
+		return nil, err
+	}
+	// Fill up the config file, using kubeletConf struct
+	variableFields := kubeletConf{
+		ClientCAFile: strings.Join(append(strings.Split(wmcb.installDir, `\`), `kubelet-ca.crt`), `\\`),
+	}
+	// Create kubelet.conf file
+	kubeletConfPath := filepath.Join(wmcb.installDir, "kubelet.conf")
+	kubeletConfFile, err := os.Create(kubeletConfPath)
+	if err != nil {
+		return nil, fmt.Errorf("error creating %s: %v", kubeletConfPath, err)
+	}
+	err = kubeletConfTmpl.Execute(kubeletConfFile, variableFields)
+	if err != nil {
+		return nil, fmt.Errorf("error writing data to %v file: %v", kubeletConfPath, err)
 	}
 
-	// replacing EnforceNodeAllocatable with an empty slice,
-	outString := strings.Replace(string(out), "\"THIS_MUST_BE_EMPTY\"", "", -1)
-	return []byte(outString), err
+	kubeletConfData, err := ioutil.ReadFile(kubeletConfFile.Name())
+	if err != nil {
+		return nil, fmt.Errorf("error reading data from %v file: %v", kubeletConfPath, err)
+	}
+	return kubeletConfData, nil
 }
 
 // translateFile decodes an ignition "Storage.Files.Contents.Source" field and transforms it via the function provided.
@@ -348,10 +339,6 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 // initializeKubeletFiles initializes the files required by the kubelet
 func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 	filesToTranslate := map[string]fileTranslation{
-		"/etc/kubernetes/kubelet.conf": {
-			dest:            wmcb.kubeletConfPath,
-			translationFunc: prepKubeletConfForWindows,
-		},
 		"/etc/kubernetes/kubeconfig": {
 			dest: filepath.Join(wmcb.installDir, "bootstrap-kubeconfig"),
 		},
@@ -374,6 +361,12 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 	if err != nil {
 		return fmt.Errorf("could not make install directory: %s", err)
 	}
+
+	_, err = wmcb.createKubeletConf()
+	if err != nil {
+		return fmt.Errorf("error creating kubelet configuration %v", err)
+	}
+
 	if wmcb.initialKubeletPath != "" {
 		err = copyFile(wmcb.initialKubeletPath, filepath.Join(wmcb.installDir, "kubelet.exe"))
 		if err != nil {

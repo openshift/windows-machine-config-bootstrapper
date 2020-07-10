@@ -14,6 +14,7 @@ require (
 	github.com/ajeddeloh/go-json v0.0.0-20170920214419-6a2fe990e083 // indirect
 	github.com/coreos/go-systemd v0.0.0-20190321100706-95778dfbb74e // indirect
 	github.com/coreos/ignition v0.33.0
+	github.com/go-bindata/go-bindata v3.1.2+incompatible
 	github.com/go-logr/zapr v0.1.0
 	github.com/gogo/protobuf v1.2.1 // indirect
 	github.com/spf13/cobra v0.0.5

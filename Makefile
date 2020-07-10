@@ -16,15 +16,15 @@ ifeq ($(GOFLAGS), -mod=vendor)
 endif
 
 .PHONY: build
-build:
+build: bindata
 	$(GO_BUILD_ARGS) GOOS=windows go build -o wmcb.exe  $(MAIN_PACKAGE)
 
 .PHONY: build-wmcb-unit-test
-build-wmcb-unit-test:
+build-wmcb-unit-test: bindata
 	$(GO_BUILD_ARGS) GOOS=windows GOFLAGS=-v go test -c ./pkg/... -o wmcb_unit_test.exe
 
 .PHONY: build-wmcb-e2e-test
-build-wmcb-e2e-test:
+build-wmcb-e2e-test: bindata
 	$(GO_BUILD_ARGS) GOOS=windows GOFLAGS=-v go test -c ./test/e2e... -o wmcb_e2e_test.exe
 
 test-e2e-prepared-node:
@@ -58,3 +58,6 @@ run-wsu-ci-e2e-test:
 # TODO: Add other verifications
 verify-all:
 	hack/verify-gofmt.sh
+
+bindata:
+	hack/generate-conf-files.sh

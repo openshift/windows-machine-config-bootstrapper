@@ -22,6 +22,7 @@ find_files() {
         -o -wholename './target' \
         -o -wholename './.git' \
         -o -wholename '*/vendor/*' \
+        -o -wholename './pkg/bootstrapper/bindata.go' \
       \) -prune \
     \) -name '*.go'
 }
