@@ -231,7 +231,19 @@ func (w *Windows) GetSSHClient() error {
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	sshClient, err := ssh.Dial("tcp", w.Credentials.GetIPAddress()+":22", config)
+	var err error
+	var sshClient *ssh.Client
+	// Retry if we are unable to create a client as the VM could still be executing the steps in its user data. We
+	// cannot reuse the entries in the retry package as they are too granular.
+	for retries := 0; retries < 10; retries++ {
+		sshClient, err = ssh.Dial("tcp", w.Credentials.GetIPAddress()+":22", config)
+		if err == nil {
+			break
+		}
+		log.Printf("warning - SSH dial %s error: %v", w.Credentials.GetIPAddress(), err)
+		time.Sleep(1 * time.Minute)
+	}
+
 	if err != nil {
 		return fmt.Errorf("failed to dial to ssh server: %s", err)
 	}

@@ -291,11 +291,6 @@ func (a *AwsProvider) createWindowsVM(usePrivateSubnet bool) (windowsVM types.Wi
 	if err := w.SetupWinRMClient(); err != nil {
 		return nil, fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
 	}
-	// Wait for some time before starting configuring of ssh server. This is to let sshd service be available
-	// in the list of services
-	// TODO: Parse the output of the `Get-Service sshd, ssh-agent` on the Windows node to check if the windows nodes
-	// has those services present
-	time.Sleep(2 * time.Minute)
 
 	if err := w.GetSSHClient(); err != nil {
 		return w, fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
