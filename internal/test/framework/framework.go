@@ -36,7 +36,7 @@ const (
 	awsUsername = "Administrator"
 	// remoteLogPath is the directory where all the log files related to components that we need are generated on the
 	// Windows VM
-	remoteLogPath = "C:\\k\\log\\"
+	remoteLogPath = "C:\\var\\log\\"
 )
 
 var (

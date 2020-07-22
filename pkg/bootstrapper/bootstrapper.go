@@ -159,7 +159,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		kubeletConfPath:    filepath.Join(k8sInstallDir, "kubelet.conf"),
 		ignitionFilePath:   ignitionFile,
 		installDir:         k8sInstallDir,
-		logDir:             filepath.Join(k8sInstallDir, "log"),
+		logDir:             "C:\\var\\log\\kubelet",
 		initialKubeletPath: kubeletPath,
 		svcMgr:             svcMgr,
 		kubeletArgs:        make(map[string]string),
