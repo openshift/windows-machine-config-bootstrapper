@@ -250,6 +250,9 @@ func (f *TestFramework) getClusterVersion() error {
 	}
 	//set k8s version in the TestFrameWork
 	f.K8sVersion = versionInfo.GitVersion
+	// trim everything after minor version, historically has been separated by either '+' or '-'
+	f.K8sVersion = strings.Split(f.K8sVersion, "-")[0]
+	f.K8sVersion = strings.Split(f.K8sVersion, "+")[0]
 	// Convert kubernetes version to major.minor format. v1.17.0 -> 1.17
 	k8sVersion := strings.TrimLeft(f.K8sVersion, "v")
 	k8sSemver := strings.Split(k8sVersion, ".")
