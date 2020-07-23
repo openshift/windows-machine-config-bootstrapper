@@ -20,9 +20,10 @@
         msg: "Cluster not patched for hybrid overlay"
       when: "hybrid_query.stdout == ''"
 
-    # Expected value of kubernetes_version in the form of 'v1.17.2'
+    # Expected value of kubernetes_version in the form of 'v1.17.2', oc version has historically had the patch number
+    # separated by either '-' or '+' so split on both.
     - name: Get kubernetes version
-      shell: "oc version -o json | jq -r '.serverVersion.gitVersion' | cut -d '+' -f1"
+      shell: "oc version -o json | jq -r '.serverVersion.gitVersion' | cut -d '+' -f1 | cut -d '-' -f1"
       register: kubernetes_version
       failed_when: kubernetes_version.stdout == ""
 
