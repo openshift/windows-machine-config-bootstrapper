@@ -1,6 +1,7 @@
 package wmcb
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -429,7 +430,7 @@ func approve(csr *certificates.CertificateSigningRequest) error {
 	// Approve the CSR
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		// Ensure we get the current version
-		csr, err := framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().Get(
+		csr, err := framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().Get(context.TODO(),
 			csr.GetName(), metav1.GetOptions{})
 		if err != nil {
 			return err
@@ -443,7 +444,8 @@ func approve(csr *certificates.CertificateSigningRequest) error {
 			LastUpdateTime: metav1.Now(),
 		})
 
-		_, err = framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().UpdateApproval(csr)
+		_, err = framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().UpdateApproval(context.TODO(),
+			csr, metav1.UpdateOptions{})
 		return err
 	})
 }
@@ -453,7 +455,8 @@ func findCSR(requestor string) (*certificates.CertificateSigningRequest, error) 
 	var foundCSR *certificates.CertificateSigningRequest
 	// Find the CSR
 	for retries := 0; retries < e2ef.RetryCount; retries++ {
-		csrs, err := framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().List(metav1.ListOptions{})
+		csrs, err := framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().List(context.TODO(),
+			metav1.ListOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("unable to get CSR list: %v", err)
 		}
@@ -547,7 +550,7 @@ func createCNIConf(ovnHostSubnet string) (string, error) {
 // getServiceNetworkCIDR returns the service network CIDR from the cluster network object
 func getServiceNetworkCIDR() (string, error) {
 	// Get the cluster network object so that we can find the service network CIDR
-	networkCR, err := framework.OSConfigClient.ConfigV1().Networks().Get("cluster", metav1.GetOptions{})
+	networkCR, err := framework.OSConfigClient.ConfigV1().Networks().Get(context.TODO(), "cluster", metav1.GetOptions{})
 	if err != nil {
 		return "", fmt.Errorf("error getting cluster network object: %v", err)
 	}
@@ -610,7 +613,7 @@ func generateCNIConf(ovnHostSubnet, serviceNetworkCIDR string) (string, error) {
 // timeout is reached
 func waitForHybridOverlayAnnotation(nodeName string) error {
 	for retries := 0; retries < e2ef.RetryCount; retries++ {
-		node, err := framework.K8sclientset.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+		node, err := framework.K8sclientset.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 		if err != nil {
 			return fmt.Errorf("error getting node %s: %v", nodeName, err)
 		}
@@ -641,10 +644,12 @@ func hasWindowsTaint(winNodes []v1.Node) bool {
 func testWMCBCluster(t *testing.T) {
 	// TODO: Fix this test for multiple VMs
 	client := framework.K8sclientset
-	winNodes, err := client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: "kubernetes.io/os=windows"})
+	winNodes, err := client.CoreV1().Nodes().List(context.TODO(),
+		metav1.ListOptions{LabelSelector: "kubernetes.io/os=windows"})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
 	assert.Equal(t, hasWindowsTaint(winNodes.Items), true, "expected Windows Taint to be present on the Windows Node")
-	winNodes, err = client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
+	winNodes, err = client.CoreV1().Nodes().List(context.TODO(),
+		metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
 	assert.Lenf(t, winNodes.Items, 1, "expected one node to have node label but found: %v", len(winNodes.Items))
 }

@@ -1,6 +1,7 @@
 package wsu
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -326,7 +327,7 @@ func testCNIConfig(t *testing.T, node *v1.Node, vm e2ef.TestWindowsVM, ansibleTe
 	assert.Contains(t, cniConfigFileContents, hostSubnet, "CNI config does not contain host subnet")
 
 	// Check if the service CIDR matches our expected value
-	networkCR, err := framework.OSConfigClient.ConfigV1().Networks().Get("cluster", metav1.GetOptions{})
+	networkCR, err := framework.OSConfigClient.ConfigV1().Networks().Get(context.TODO(), "cluster", metav1.GetOptions{})
 	require.NoError(t, err, "Error querying network object")
 	serviceNetworks := networkCR.Spec.ServiceNetwork
 	// The serviceNetwork should be a singleton slice as of now, let's try accessing the first element in it.
@@ -414,7 +415,8 @@ func testNodeReady(t *testing.T, createdNode *v1.Node) {
 
 // testNoPendingCSRs tests that there are no pending CSRs on the cluster
 func testNoPendingCSRs(t *testing.T) {
-	csrs, err := framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().List(metav1.ListOptions{})
+	csrs, err := framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().List(context.TODO(),
+		metav1.ListOptions{})
 	assert.NoError(t, err, "could not get CSR list")
 	for _, csr := range csrs.Items {
 		// CSR's with an empty condition list are pending
@@ -480,8 +482,8 @@ func getAffinityForNode(node *v1.Node) (*v1.Affinity, error) {
 
 // getPodEvents gets all events for any pod with the input in its name. Used for debugging purposes
 func getPodEvents(name string) ([]v1.Event, error) {
-	eventList, err := framework.K8sclientset.CoreV1().Events(v1.NamespaceDefault).List(metav1.ListOptions{
-		FieldSelector: "involvedObject.kind=Pod"})
+	eventList, err := framework.K8sclientset.CoreV1().Events(v1.NamespaceDefault).List(context.TODO(),
+		metav1.ListOptions{FieldSelector: "involvedObject.kind=Pod"})
 	if err != nil {
 		return []v1.Event{}, err
 	}
@@ -605,7 +607,8 @@ func waitUntilJobSucceeds(name string) error {
 	var job *batchv1.Job
 	var err error
 	for i := 0; i < e2ef.RetryCount; i++ {
-		job, err = framework.K8sclientset.BatchV1().Jobs(v1.NamespaceDefault).Get(name, metav1.GetOptions{})
+		job, err = framework.K8sclientset.BatchV1().Jobs(v1.NamespaceDefault).Get(context.TODO(), name,
+			metav1.GetOptions{})
 		if err != nil {
 			return err
 		}
@@ -627,7 +630,7 @@ func waitUntilDeploymentScaled(name string) error {
 	var deployment *appsv1.Deployment
 	var err error
 	for i := 0; i < e2ef.RetryCount; i++ {
-		deployment, err = framework.K8sclientset.AppsV1().Deployments(v1.NamespaceDefault).Get(name,
+		deployment, err = framework.K8sclientset.AppsV1().Deployments(v1.NamespaceDefault).Get(context.TODO(), name,
 			metav1.GetOptions{})
 		if err != nil {
 			return err
@@ -645,8 +648,8 @@ func waitUntilDeploymentScaled(name string) error {
 // selector, the function will return an error
 func getPodIP(selector metav1.LabelSelector) (string, error) {
 	selectorString := labels.Set(selector.MatchLabels).String()
-	podList, err := framework.K8sclientset.CoreV1().Pods(v1.NamespaceDefault).List(metav1.ListOptions{
-		LabelSelector: selectorString})
+	podList, err := framework.K8sclientset.CoreV1().Pods(v1.NamespaceDefault).List(context.TODO(),
+		metav1.ListOptions{LabelSelector: selectorString})
 	if err != nil {
 		return "", err
 	}
@@ -697,7 +700,7 @@ func createJob(name, image string, command []string, selector map[string]string,
 	}
 
 	// Create job
-	job, err := jobsClient.Create(job)
+	job, err := jobsClient.Create(context.TODO(), job, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -707,7 +710,7 @@ func createJob(name, image string, command []string, selector map[string]string,
 // deleteJob deletes the job with the given name
 func deleteJob(name string) error {
 	jobsClient := framework.K8sclientset.BatchV1().Jobs(v1.NamespaceDefault)
-	return jobsClient.Delete(name, &metav1.DeleteOptions{})
+	return jobsClient.Delete(context.TODO(), name, metav1.DeleteOptions{})
 }
 
 // createWindowsServerDeployment creates a deployment with a Windows Server 2019 container
@@ -762,7 +765,7 @@ func createWindowsServerDeployment(name string, command []string, affinity *v1.A
 	}
 
 	// Create Deployment
-	deploy, err := deploymentsClient.Create(deployment)
+	deploy, err := deploymentsClient.Create(context.TODO(), deployment, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -772,7 +775,7 @@ func createWindowsServerDeployment(name string, command []string, affinity *v1.A
 // deleteDeployment deletes the deployment with the given name
 func deleteDeployment(name string) error {
 	deploymentsClient := framework.K8sclientset.AppsV1().Deployments(v1.NamespaceDefault)
-	return deploymentsClient.Delete(name, &metav1.DeleteOptions{})
+	return deploymentsClient.Delete(context.TODO(), name, metav1.DeleteOptions{})
 }
 
 // pullDockerImage pulls the designated image on the remote host
@@ -840,7 +843,8 @@ func createLoadBalancer(name string, selector metav1.LabelSelector) (*v1.Service
 			},
 			Selector: selector.MatchLabels,
 		}}
-	return framework.K8sclientset.CoreV1().Services(v1.NamespaceDefault).Create(svcSpec)
+	return framework.K8sclientset.CoreV1().Services(v1.NamespaceDefault).Create(context.TODO(), svcSpec,
+		metav1.CreateOptions{})
 }
 
 // waitForLoadBalancerIngress waits until the load balancer has an external hostname ready
@@ -848,7 +852,7 @@ func waitForLoadBalancerIngress(name string) (*v1.Service, error) {
 	var svc *v1.Service
 	var err error
 	for i := 0; i < e2ef.RetryCount; i++ {
-		svc, err = framework.K8sclientset.CoreV1().Services(v1.NamespaceDefault).Get(name,
+		svc, err = framework.K8sclientset.CoreV1().Services(v1.NamespaceDefault).Get(context.TODO(), name,
 			metav1.GetOptions{})
 		if err != nil {
 			return nil, err
@@ -864,5 +868,5 @@ func waitForLoadBalancerIngress(name string) (*v1.Service, error) {
 // deleteService deletes the service with the given name
 func deleteService(name string) error {
 	svcClient := framework.K8sclientset.CoreV1().Services(v1.NamespaceDefault)
-	return svcClient.Delete(name, &metav1.DeleteOptions{})
+	return svcClient.Delete(context.TODO(), name, metav1.DeleteOptions{})
 }
