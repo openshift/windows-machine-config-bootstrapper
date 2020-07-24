@@ -519,7 +519,7 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 		kubeletCmd := "c:\\k\\kubelet.exe --config=c:\\k\\kubelet.conf" +
 			"--bootstrap-kubeconfig=c:\\k\\bootstrap-kubeconfig --kubeconfig=c:\\k\\kubeconfig " +
 			"--pod-infra-container-image=mcr.microsoft.com/k8s/core/pause:1.2.0 --cert-dir=c:/var/lib/kubelet/pki/ " +
-			"--windows-service --logtostderr=false --log-file=c:\\k\\log\\kubelet.log " +
+			"--windows-service --logtostderr=false --log-file=c:\\var\\log\\kubelet\\kubelet.log " +
 			"--register-with-taints=os=Windows:NoSchedule --cloud-provider=aws --v=3"
 
 		err := cniTest.cni.updateKubeletArgs(&kubeletCmd)
@@ -531,7 +531,7 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 		kubeletCmd := "c:\\k\\kubelet.exe --config=c:\\k\\kubelet.conf" +
 			"--bootstrap-kubeconfig=c:\\k\\bootstrap-kubeconfig --kubeconfig=c:\\k\\kubeconfig " +
 			"--pod-infra-container-image=mcr.microsoft.com/k8s/core/pause:1.2.0 --cert-dir=c:/var/lib/kubelet/pki/ " +
-			"--windows-service --logtostderr=false --log-file=c:\\k\\log\\kubelet.log " +
+			"--windows-service --logtostderr=false --log-file=c:\\var\\log\\kubelet\\kubelet.log " +
 			"--register-with-taints=os=Windows:NoSchedule --cloud-provider=aws --v=3 " +
 			"--resolv-conf=d:\\k\\etc\\resolv.conf--network-plugin=xyz --cni-bin-dir=d:\\k\\cni " +
 			"--cni-conf-dir=d:\\k\\cni\\config\\cni.conf"

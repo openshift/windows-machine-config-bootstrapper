@@ -39,8 +39,8 @@ var (
 	ubi8Image = "registry.access.redhat.com/ubi8/ubi:latest"
 )
 
-const hybridOverlayDir = "C:\\k\\log\\hybrid-overlay-node"
-const kubeProxyDir = "C:\\k\\log\\kube-proxy"
+const hybridOverlayDir = "C:\\var\\log\\hybrid-overlay-node"
+const kubeProxyDir = "C:\\var\\log\\kube-proxy"
 
 type wsuFramework struct {
 	// TestFramework holds the instantiation of test suite being executed

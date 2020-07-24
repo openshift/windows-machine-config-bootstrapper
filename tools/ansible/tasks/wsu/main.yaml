@@ -235,7 +235,7 @@
   vars:
     tmp_path: "{{ playbook_dir }}/tmp"
     ovn_annotation: "{{ 'hostsubnet' if  ( hostvars['localhost']['cluster_version']['stdout']  == '4.3' ) else  'node-subnet' }}"
-    log_dir: "c:\\k\\log"
+    log_dir: "c:\\var\\log"
 
   tasks:
     - name: Create temporary directory
