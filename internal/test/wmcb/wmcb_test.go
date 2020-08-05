@@ -50,8 +50,6 @@ const (
 	hybridOverlayExecutable = remoteDir + hybridOverlayName
 	// cniPluginsBaseURL is the base URL of the CNI Plugins location
 	cniPluginsBaseURL = "https://github.com/containernetworking/plugins/releases/download/"
-	// kubeNodeBaseURL is the base url for kubernetes binaries
-	kubeNodeBaseURL = "https://dl.k8s.io/"
 )
 
 var (
@@ -64,12 +62,8 @@ var (
 	// filesToBeTransferred holds the list of files that needs to be transferred to the Windows VM
 	filesToBeTransferred = flag.String("filesToBeTransferred", "",
 		"Comma separated list of files to be transferred")
-	// hybridOverlayPkgName is the user-defined name of the required hybrid overlay package
-	hybridOverlayPkgName = pkgName("hybridOverlay")
 	// cniPluginPkgName is the user-defined name of the required cni plugins package
 	cniPluginPkgName = pkgName("cniPlugins")
-	// kubeNodePkgName is the user-defined name of the required kube node package
-	kubeNodePkgName = pkgName("kubeNode")
 )
 
 // wmcbVM is a wrapper for the WindowsVM interface that associates it with WMCB specific testing
@@ -96,22 +90,6 @@ func (f *wmcbFramework) initializePackages() error {
 	// Add cniPlugins to the pkgs map
 	pkgs[cniPluginsPkg.getName()] = cniPluginsPkg
 
-	// create pkgInfo struct that implements PkgInfo interface for hybrid overlay and populate it
-	hybridOverlayPkg, err := pkgInfoFactory(hybridOverlayPkgName, "sha256", "", "")
-	if err != nil {
-		return err
-	}
-	// Add hybridOverlay to the pkgs map
-	pkgs[hybridOverlayPkg.getName()] = hybridOverlayPkg
-
-	// create pkgInfo struct that implements PkgInfo interface for hybrid overlay and populate it
-	kubeNodePkg, err := pkgInfoFactory(kubeNodePkgName, "sha512", kubeNodeBaseURL, framework.K8sVersion)
-	if err != nil {
-		return err
-	}
-	// Add kubeNode to the pkgs map
-	pkgs[kubeNodePkg.getName()] = kubeNodePkg
-
 	f.pkgs = pkgs
 	return nil
 }
@@ -132,7 +110,6 @@ func (f *wmcbFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 
 // TestWMCB runs the unit and e2e tests for WMCB on the remote VMs
 func TestWMCB(t *testing.T) {
-	remoteDir := "C:\\Temp"
 	for _, vm := range framework.WinVMs {
 		wVM := &wmcbVM{vm}
 		files := strings.Split(*filesToBeTransferred, ",")
@@ -195,9 +172,6 @@ func (vm *wmcbVM) runTestBootstrapper(t *testing.T) {
 
 // runTestConfigureCNI performs the required setup and runs the configure-cni tests
 func (vm *wmcbVM) runTestConfigureCNI(t *testing.T) {
-	err := vm.initializeHybridOverlayBinary()
-	require.NoError(t, err, "error initializing files required for TestConfigureCNI")
-
 	node, err := framework.GetNode(vm.GetCredentials().GetIPAddress())
 	require.NoError(t, err, "unable to get node object for VM")
 
@@ -221,14 +195,8 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 		return fmt.Errorf("unable to create remote directory %s: %v", remoteDir, err)
 	}
 
-	// Download and extract the kube package on the VM
-	err = vm.remoteDownloadExtract(framework.pkgs[kubeNodePkgName], remoteDir+"kube.tar.gz", remoteDir)
-	if err != nil {
-		return fmt.Errorf("unable to download kube package: %v", err)
-	}
-
 	// Copy kubelet.exe to C:\Windows\Temp\
-	_, _, err = vm.Run("cp "+remoteDir+"kubernetes\\node\\bin\\kubelet.exe "+winTemp, true)
+	_, _, err = vm.Run("cp "+remoteDir+"\\kubelet.exe "+winTemp, true)
 	if err != nil {
 		return fmt.Errorf("unable to copy kubelet.exe to %s", winTemp)
 	}
@@ -318,17 +286,6 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 	err = vm.CopyFile(cniConfigPath, winCNIConfigPath)
 	if err != nil {
 		return fmt.Errorf("error copying %s --> VM %s: %v", cniConfigPath, winCNIConfigPath, err)
-	}
-	return nil
-}
-
-// initializeHybridOverlayBinary creates the files on the Windows node needed for running "configure-cni"
-func (vm *wmcbVM) initializeHybridOverlayBinary() error {
-	hybridOverlayURL, err := framework.GetReleaseArtifactURL(hybridOverlayName)
-
-	err = vm.remoteDownload(framework.pkgs[hybridOverlayPkgName], hybridOverlayExecutable)
-	if err != nil {
-		return fmt.Errorf("unable to download %s on VM: %s", hybridOverlayURL, err)
 	}
 	return nil
 }

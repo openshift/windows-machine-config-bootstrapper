@@ -68,6 +68,13 @@ func (f *wsuFramework) Setup(vmCount int, credentials []*types.Credentials, skip
 		fmt.Errorf("framework setup failed: %v", err)
 		return err
 	}
+	if err := f.GetLatestWMCBRelease(); err != nil {
+		return fmt.Errorf("unable to get latest WMCB release: %v", err)
+	}
+
+	if err := f.GetClusterVersion(); err != nil {
+		return fmt.Errorf("unable to get OpenShift cluster version: %v", err)
+	}
 
 	// Set 'buildWMCB' property of Windows VM
 	// Not ideal to set a generic property in a specific implementation. This is a temporary workaround and will be
