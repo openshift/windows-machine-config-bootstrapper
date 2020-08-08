@@ -173,12 +173,6 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 	if err := f.getClusterAddress(config); err != nil {
 		return fmt.Errorf("unable to get cluster address: %v", err)
 	}
-	if err := f.getClusterVersion(); err != nil {
-		return fmt.Errorf("unable to get OpenShift cluster version: %v", err)
-	}
-	if err := f.getLatestWMCBRelease(); err != nil {
-		return fmt.Errorf("unable to get latest WMCB release: %v", err)
-	}
 	if err := f.getLatestCniPluginsVersion(); err != nil {
 		return fmt.Errorf("unable to get latest 0.8.x version of CNI Plugins: %v", err)
 	}
@@ -240,10 +234,10 @@ func (f *TestFramework) getClusterAddress(config *restclient.Config) error {
 	return nil
 }
 
-// getClusterVersion gets the OpenShift cluster version in major.minor format. This is being done this way, and not with
+// GetClusterVersion gets the OpenShift cluster version in major.minor format. This is being done this way, and not with
 // oc get clusterversion, as OpenShift CI doesn't have the actual version attached to its clusters, instead replacing it
 // with 0.0.1 and information about the release creation date
-func (f *TestFramework) getClusterVersion() error {
+func (f *TestFramework) GetClusterVersion() error {
 	versionInfo, err := f.OSConfigClient.Discovery().ServerVersion()
 	if err != nil {
 		return fmt.Errorf("error while retrieving k8s version : %v", err)
@@ -305,9 +299,9 @@ func (f *TestFramework) getGithubReleases(owner string, repo string) ([]*github.
 	return releases, err
 }
 
-// getLatestWMCBRelease gets the latest github release for the wmcb repo. This release is specific to the cluster
+// GetLatestWMCBRelease gets the latest github release for the WMCB repo. This release is specific to the cluster
 // version
-func (f *TestFramework) getLatestWMCBRelease() error {
+func (f *TestFramework) GetLatestWMCBRelease() error {
 	releases, err := f.getGithubReleases("openshift", "windows-machine-config-bootstrapper")
 	if err != nil {
 		return err
