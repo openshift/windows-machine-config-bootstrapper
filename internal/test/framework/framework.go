@@ -346,7 +346,7 @@ func (f *TestFramework) GetReleaseArtifactSHA(artifactName string) (string, erro
 func (f *TestFramework) GetNode(externalIP string) (*v1.Node, error) {
 	var matchedNode *v1.Node
 
-	nodes, err := f.K8sclientset.CoreV1().Nodes().List(metav1.ListOptions{})
+	nodes, err := f.K8sclientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("could not get list of nodes")
 	}
@@ -458,7 +458,7 @@ func (f *TestFramework) waitUntilHybridOverlayReady() error {
 // timeout limit has been reached.
 func (f *TestFramework) waitUntilOVNPodsReady() error {
 	for i := 0; i < RetryCount; i++ {
-		pods, err := f.K8sclientset.CoreV1().Pods("openshift-ovn-kubernetes").List(metav1.ListOptions{})
+		pods, err := f.K8sclientset.CoreV1().Pods("openshift-ovn-kubernetes").List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			return fmt.Errorf("could not get pods: %s", err)
 		}
