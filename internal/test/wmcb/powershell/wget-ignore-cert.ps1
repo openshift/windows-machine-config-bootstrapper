@@ -24,4 +24,5 @@ public static class Dummy {
 }
 [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [dummy]::GetDelegate()
 
+$ProgressPreference = "SilentlyContinue"
 wget $server -Headers @{'Accept' = $acceptHeader;} -o $output

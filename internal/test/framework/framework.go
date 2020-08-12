@@ -16,12 +16,16 @@ import (
 	"github.com/google/go-github/v29/github"
 	configclient "github.com/openshift/client-go/config/clientset/versioned"
 	operatorv1 "github.com/openshift/client-go/operator/clientset/versioned/typed/operator/v1"
-	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
+	mapi "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
+	machine "github.com/openshift/machine-api-operator/pkg/generated/clientset/versioned/typed/machine/v1beta1"
+	"golang.org/x/crypto/ssh"
 	v1 "k8s.io/api/core/v1"
+	k8sapierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
@@ -31,23 +35,19 @@ const (
 	RetryInterval = 5 * time.Second
 	// WindowsLabel represents the node label that need to be applied to the Windows node created
 	WindowsLabel = "node.openshift.io/os_id=Windows"
-
-	// awsUsername is the default windows username on AWS
-	awsUsername = "Administrator"
 	// remoteLogPath is the directory where all the log files related to components that we need are generated on the
 	// Windows VM
 	remoteLogPath = "C:\\var\\log\\"
+	// PrivateKeyPath contains the path to the private key which is used to access the VMs. This would have been mounted
+	// as a secret by user
+	PrivateKeyPath = "/etc/private-key/private-key.pem"
+	// AWSCredentialsPath contains the path to the AWS credentials to interact with AWS cloud provider.
+	AWSCredentialsPath = "/etc/aws-creds/credentials"
 )
 
 var (
-	// kubeconfig is the location of the kubeconfig for the cluster the test suite will run on
-	kubeconfig string
-	// awsCredentials is the Credentials file for the aws account the cluster will be created with
-	awsCredentials string
 	// artifactDir is the directory CI will read from once the test suite has finished execution
 	artifactDir string
-	// privateKeyPath is the path to the key that will be used to retrieve the password of each Windows VM
-	privateKeyPath string
 )
 
 // TestFramework holds the info to run the test suite.
@@ -73,91 +73,29 @@ type TestFramework struct {
 	// clusterAddress is the address of the OpenShift cluster e.g. "foo.fah.com".
 	// This should not include "https://api-" or a port.
 	ClusterAddress string
-}
-
-// Creds is used for parsing the vmCreds command line argument
-type Creds []*types.Credentials
-
-// Set populates the list of credentials from the vmCreds command line argument
-func (c *Creds) Set(value string) error {
-	if value == "" {
-		return nil
-	}
-
-	splitValue := strings.Split(value, ",")
-	// Credentials consists of three elements, so this has to be
-	if len(splitValue)%3 != 0 {
-		return fmt.Errorf("incomplete VM credentials provided")
-	}
-
-	// TODO: Add input validation if we want to use this in production
-	// TODO: Change username based on cloud provider if this is to be used for clouds other than AWS
-	for i := 0; i < len(splitValue); i += 3 {
-		cred := types.NewCredentials(splitValue[i], splitValue[i+1], splitValue[i+2], awsUsername)
-		*c = append(*c, cred)
-	}
-	return nil
-}
-
-// String returns the string representation of Creds. This is required for Creds to be used with flags.
-func (c *Creds) String() string {
-	return fmt.Sprintf("%v", *c)
-}
-
-// initCIvars gathers the values of the environment variables which configure the test suite
-func initCIvars() error {
-	kubeconfig = os.Getenv("KUBECONFIG")
-	if kubeconfig == "" {
-		return fmt.Errorf("KUBECONFIG environment variable not set")
-	}
-	awsCredentials = os.Getenv("AWS_SHARED_CREDENTIALS_FILE")
-	if awsCredentials == "" {
-		return fmt.Errorf("AWS_SHARED_CREDENTIALS_FILE environment variable not set")
-	}
-	artifactDir = os.Getenv("ARTIFACT_DIR")
-	if awsCredentials == "" {
-		return fmt.Errorf("ARTIFACT_DIR environment variable not set")
-	}
-	privateKeyPath = os.Getenv("KUBE_SSH_KEY_PATH")
-	if privateKeyPath == "" {
-		return fmt.Errorf("KUBE_SSH_KEY_PATH environment variable not set")
-	}
-	return nil
+	// Signer is a signer created from the user's private key
+	Signer ssh.Signer
+	// client for interacting with machine objects
+	machineClient *machine.MachineV1beta1Client
+	// machineSet holds the MachineSet configuration used to destroy MachineSets
+	machineSet *mapi.MachineSet
 }
 
 // Setup creates and initializes a variable amount of Windows VMs. If the array of credentials are passed then it will
 // be used in lieu of creating new VMs. If skipVMsetup is true then it will result in the VM setup not being run. These
 // two options are mainly used during test development.
-func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, skipVMsetup bool) error {
-	if credentials != nil {
-		if len(credentials) != vmCount {
-			return fmt.Errorf("vmCount %d does not match length %d of credentials", vmCount, len(credentials))
-		}
-		f.noTeardown = true
-	}
+func (f *TestFramework) Setup(vmCount int, skipVMSetup bool) error {
+	// register the MachineSet to scheme so as to create machine sets
+	mapi.AddToScheme(scheme.Scheme)
 
-	if err := initCIvars(); err != nil {
-		return fmt.Errorf("unable to initialize CI variables: %v", err)
-	}
+	// initialize the artifacts directory variable
+	artifactDir = os.Getenv("ARTIFACT_DIR")
+	var config *rest.Config
+	var err error
 
-	f.WinVMs = make([]TestWindowsVM, vmCount)
-	// Using an AMD instance type, as the Windows hybrid overlay currently does not work on on machines using
-	// the Intel 82599 network driver
-	instanceType := "m5a.large"
-	// TODO: make them run in parallel: https://issues.redhat.com/browse/WINC-178
-	for i := 0; i < vmCount; i++ {
-		var err error
-		var creds *types.Credentials
-		if credentials != nil {
-			creds = credentials[i]
-		}
-		// Pass an empty imageID so that WNI will use the latest Windows image
-		f.WinVMs[i], err = newWindowsVM("", instanceType, creds, skipVMsetup)
-		if err != nil {
-			return fmt.Errorf("unable to instantiate Windows VM: %v", err)
-		}
-	}
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	// use in-cluster pod permissions
+	config, err = rest.InClusterConfig()
+
 	if err != nil {
 		return fmt.Errorf("unable to build config from kubeconfig: %s", err)
 	}
@@ -175,6 +113,31 @@ func (f *TestFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 	}
 	if err := f.getLatestCniPluginsVersion(); err != nil {
 		return fmt.Errorf("unable to get latest 0.8.x version of CNI Plugins: %v", err)
+	}
+	if err := f.getMachineAPIClient(config); err != nil {
+		return fmt.Errorf("unable to get the Kube API client: %v", err)
+	}
+	if err := f.createSigner(); err != nil {
+		return fmt.Errorf("unable to create ssh signer: %v", err)
+	}
+
+	if err := f.createUserDataSecret(); err != nil {
+		return fmt.Errorf("unable to create user data secret: %v", err)
+	}
+
+	f.WinVMs, err = f.newWindowsMachineSet(vmCount, skipVMSetup)
+	if err != nil {
+		return fmt.Errorf("unable to create windows vm %v", err)
+	}
+	return nil
+}
+
+// getMachineAPIClient setups the kube api client to interact with Kubernetes API servers
+func (f *TestFramework) getMachineAPIClient(config *restclient.Config) error {
+	var err error
+	f.machineClient, err = machine.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("unable to instiantiate the machine api client: %v", err)
 	}
 	return nil
 }
@@ -348,7 +311,7 @@ func (f *TestFramework) GetNode(externalIP string) (*v1.Node, error) {
 
 	nodes, err := f.K8sclientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("could not get list of nodes")
+		return nil, fmt.Errorf("could not get list of nodes: %v", err)
 	}
 	if len(nodes.Items) == 0 {
 		return nil, fmt.Errorf("no nodes found")
@@ -407,13 +370,13 @@ func (f *TestFramework) RetrieveArtifacts() {
 			continue
 		}
 
-		instanceID := vm.GetCredentials().GetInstanceId()
+		instanceID := vm.GetCredentials().InstanceId()
 		if len(instanceID) == 0 {
 			log.Printf("no instance id provided for vm %d", i)
 			continue
 		}
 
-		externalIP := vm.GetCredentials().GetIPAddress()
+		externalIP := vm.GetCredentials().IPAddress()
 		if len(externalIP) == 0 {
 			log.Printf("no external ip address found for the vm with instance ID %s", instanceID)
 			continue
@@ -492,17 +455,10 @@ func (f *TestFramework) TearDown() {
 		return
 	}
 
-	for _, vm := range f.WinVMs {
-		if vm == nil {
-			continue
-		}
-		if err := vm.Destroy(); err != nil {
-			log.Printf("failed tearing down the Windows VM %v with error: %v", vm, err)
-		} else {
-			// WNI will delete all the VMs in windows-node-installer.json so we need this to succeed only once
-			return
-		}
+	if err := f.DestroyMachineSet(); err != nil {
+		log.Printf("failed to delete MachineSets with error: %v", err)
 	}
+	return
 }
 
 // k8sVersionToOpenShiftVersion converts a Kubernetes minor version to an OpenShift version in format
@@ -521,4 +477,83 @@ func k8sVersionToOpenShiftVersion(k8sMinorVersion int) (string, error) {
 	versionIncrements := k8sMinorVersion - baseKubernetesMinorVersion
 	openShiftMinorVersion := strconv.Itoa(versionIncrements + baseOpenShiftMinorVersion)
 	return openshiftMajorVersion + "." + openShiftMinorVersion, nil
+}
+
+// createSigner creates a signer using the private key from the PrivateKeyPath
+func (f *TestFramework) createSigner() error {
+	privateKeyBytes, err := ioutil.ReadFile(PrivateKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to find private key from path: %v, err: %v", PrivateKeyPath, err)
+	}
+
+	signer, err := ssh.ParsePrivateKey(privateKeyBytes)
+	if err != nil {
+		return fmt.Errorf("unable to parse private key: %v, err: %v", err, PrivateKeyPath)
+	}
+	f.Signer = signer
+	return nil
+}
+
+// createUserDataSecret creates a secret 'windows-user-data' in 'openshift-machine-api'
+// namespace. This secret will be used to inject cloud provider user data for creating
+// windows machines
+func (f *TestFramework) createUserDataSecret() error {
+	if f.Signer == nil {
+		return fmt.Errorf("failed to retrieve signer for private key: %v", PrivateKeyPath)
+	}
+
+	pubKeyBytes := ssh.MarshalAuthorizedKey(f.Signer.PublicKey())
+	if pubKeyBytes == nil {
+		return fmt.Errorf("failed to retrieve public key using signer for private key: %v", PrivateKeyPath)
+	}
+
+	// sshd service is started to create the default sshd_config file. This file is modified
+	// for enabling publicKey auth and the service is restarted for the changes to take effect.
+	userDataSecret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "windows-user-data",
+			Namespace: "openshift-machine-api",
+		},
+		Data: map[string][]byte{
+			"userData": []byte(`<powershell>
+			Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+			$firewallRuleName = "ContainerLogsPort"
+			$containerLogsPort = "10250"
+			New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $containerLogsPort -EdgeTraversalPolicy Allow
+			Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
+			Install-Module -Force OpenSSHUtils
+			Set-Service -Name ssh-agent -StartupType ‘Automatic’
+			Set-Service -Name sshd -StartupType ‘Automatic’
+			Start-Service ssh-agent
+			Start-Service sshd
+			$pubKeyConf = (Get-Content -path C:\ProgramData\ssh\sshd_config) -replace '#PubkeyAuthentication yes','PubkeyAuthentication yes'
+			$pubKeyConf | Set-Content -Path C:\ProgramData\ssh\sshd_config
+ 			$passwordConf = (Get-Content -path C:\ProgramData\ssh\sshd_config) -replace '#PasswordAuthentication yes','PasswordAuthentication yes'
+			$passwordConf | Set-Content -Path C:\ProgramData\ssh\sshd_config
+			$authFileConf = (Get-Content -path C:\ProgramData\ssh\sshd_config) -replace 'AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys','#AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys'
+			$authFileConf | Set-Content -Path C:\ProgramData\ssh\sshd_config
+			$pubKeyLocationConf = (Get-Content -path C:\ProgramData\ssh\sshd_config) -replace 'Match Group administrators','#Match Group administrators'
+			$pubKeyLocationConf | Set-Content -Path C:\ProgramData\ssh\sshd_config
+			Restart-Service sshd
+			New-item -Path $env:USERPROFILE -Name .ssh -ItemType Directory -force
+			echo "` + string(pubKeyBytes[:]) + `"| Out-File $env:USERPROFILE\.ssh\authorized_keys -Encoding ascii
+			</powershell>
+			<persist>true</persist>`),
+		},
+	}
+
+	// check if the userDataSecret already exists
+	_, err := f.K8sclientset.CoreV1().Secrets(userDataSecret.Namespace).Get(context.TODO(), userDataSecret.Name, metav1.GetOptions{})
+	if err != nil {
+		if k8sapierrors.IsNotFound(err) {
+			log.Print("Creating a new Secret", "Secret.Namespace", userDataSecret.Namespace, "Secret.Name", userDataSecret.Name)
+			_, err = f.K8sclientset.CoreV1().Secrets(userDataSecret.Namespace).Create(context.TODO(), userDataSecret, metav1.CreateOptions{})
+			if err != nil {
+				return fmt.Errorf("error creating windows user data secret: %v", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("error creating windows user data secret: %v", err)
+	}
+	return nil
 }

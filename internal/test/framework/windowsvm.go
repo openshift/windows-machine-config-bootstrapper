@@ -1,16 +1,19 @@
 package framework
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"log"
-	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
-	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/cloudprovider"
-	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
-	"github.com/pkg/sftp"
+	mapi "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
+	core "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/openshift/windows-machine-config-bootstrapper/internal/test/credentials"
+	"github.com/openshift/windows-machine-config-bootstrapper/internal/test/providers"
+	"github.com/openshift/windows-machine-config-bootstrapper/internal/test/windows"
 )
 
 const (
@@ -21,16 +24,7 @@ const (
 // cloudProvider holds the information related to cloud provider
 // TODO: Move this to proper location which can destroy the VM that got created.
 //		https://issues.redhat.com/browse/WINC-245
-var cloudProvider cloudprovider.Cloud
-
-// testWindowsVM holds the information related to the test Windows VM. This should hold the specialized information
-// related to test suite.
-type testWindowsVM struct {
-	*types.Windows
-	// buildWMCB indicates if WSU should build WMCB and use it
-	// TODO This is a WSU specific property and should be moved to wsu_test -> https://issues.redhat.com/browse/WINC-249
-	buildWMCB bool
-}
+var cloudProvider providers.CloudProvider
 
 // TestWindowsVM is the interface for interacting with a Windows VM in the test framework. This will hold the
 // specialized information related to test suite
@@ -38,155 +32,149 @@ type TestWindowsVM interface {
 	// RetrieveDirectories recursively copies the files and directories from the directory in the remote Windows VM
 	// to the given directory on the local host.
 	RetrieveDirectories(string, string) error
-	// Destroy destroys the Windows VM
-	// TODO: Remove this and move it to framework or other higher level object capable of doing deletions.
-	//		jira: https://issues.redhat.com/browse/WINC-243
-	Destroy() error
-	// BuildWMCB returns the value of buildWMCB. It can be used by WSU to decide if it should build WMCB before using it
-	BuildWMCB() bool
-	// SetBuildWMCB sets the value of buildWMCB. Setting buildWMCB to true would indicate WSU will build WMCB instead of
-	// downloading the latest as per the cluster version. False by default
-	SetBuildWMCB(bool)
-	// Compose the Windows VM we have from WNI
-	types.WindowsVM
+	// Compose the Windows VM we have from MachineSets
+	windows.WindowsVM
 }
 
-// newWindowsVM creates and sets up a Windows VM in the cloud and returns the WindowsVM interface that can be used to
-// interact with the VM. If credentials are passed then it is assumed that VM already exists in the cloud and those
-// credentials will be used to interact with the VM. If no error is returned then it is guaranteed that the VM was
-// created and can be interacted with. If skipSetup is true, then configuration steps are skipped.
-func newWindowsVM(imageID, instanceType string, credentials *types.Credentials, skipSetup bool) (TestWindowsVM, error) {
-	w := &testWindowsVM{}
-	var err error
-
-	cloudProvider, err = cloudprovider.CloudProviderFactory(kubeconfig, awsCredentials, "default", artifactDir,
-		imageID, instanceType, sshKey, privateKeyPath)
+// createMachineSet() gets the generated MachineSet configuration from cloudprovider package and creates a MachineSet
+func (f *TestFramework) createMachineSet() error {
+	cloudProvider, err := providers.NewCloudProvider(sshKey)
 	if err != nil {
-		return nil, fmt.Errorf("error instantiating cloud provider %v", err)
+		return fmt.Errorf("error instantiating cloud provider %v", err)
 	}
+	machineSet, err := cloudProvider.GenerateMachineSet(true, 1)
+	if err != nil {
+		return fmt.Errorf("error generating Windows MachineSet: %v", err)
+	}
+	log.Print("Creating Machine Sets")
+	_, err = f.machineClient.MachineSets("openshift-machine-api").Create(context.TODO(), machineSet, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("error creating MachineSet %v", err)
+	}
+	f.machineSet = machineSet
+	log.Printf("Created Machine Set %v", machineSet.Name)
+	return nil
+}
 
-	if credentials == nil {
-		windowsVM, err := cloudProvider.CreateWindowsVM()
+// getWindowsMachines() waits until all the machines required are in Provisioned state. It returns an array of all
+// the machines created. All the machines are created concurrently.
+func (f *TestFramework) getWindowsMachines(vmCount int, skipVMSetup bool) ([]mapi.Machine, error) {
+	log.Print("Waiting for Machines...")
+	windowsOSLabel := "machine.openshift.io/os-id"
+	var provisionedMachines []mapi.Machine
+	// it takes approximately 12 minutes in the CI for all the machines to appear.
+	timeOut := 12 * time.Minute
+	if skipVMSetup {
+		timeOut = 1 * time.Minute
+	}
+	startTime := time.Now()
+	for i := 0; time.Since(startTime) <= timeOut; i++ {
+		allMachines := &mapi.MachineList{}
+		allMachines, err := f.machineClient.Machines("openshift-machine-api").List(context.TODO(), metav1.ListOptions{LabelSelector: windowsOSLabel})
 		if err != nil {
-			return nil, fmt.Errorf("error creating Windows VM: %v", err)
+			return nil, fmt.Errorf("failed to list machines: %v", err)
 		}
-		// TypeAssert to the WindowsVM struct we want
-		winVM, ok := windowsVM.(*types.Windows)
-		if !ok {
-			return nil, fmt.Errorf("error asserting Windows VM: %v", err)
+		provisionedMachines = []mapi.Machine{}
+
+		phaseProvisioned := "Provisioned"
+
+		for _, machine := range allMachines.Items {
+			instanceStatus := machine.Status
+			if instanceStatus.Phase != nil && *instanceStatus.Phase == phaseProvisioned {
+				provisionedMachines = append(provisionedMachines, machine)
+			}
 		}
-		w.Windows = winVM
+		time.Sleep(5 * time.Second)
+	}
+	if skipVMSetup {
+		if vmCount == 0 {
+			return nil, fmt.Errorf("no Windows VMs found")
+		}
+		return provisionedMachines, nil
+	}
+	if vmCount == len(provisionedMachines) {
+		return provisionedMachines, nil
+	}
+	return nil, fmt.Errorf("expected VM count %d but got %d", vmCount, len(provisionedMachines))
+}
+
+// newWindowsMachineSet creates and sets up Windows VMs in the cloud and returns the WindowsVM interface that can be used to
+// interact with the VM. If no error is returned then it is guaranteed that the VM was
+// created and can be interacted with.
+func (f *TestFramework) newWindowsMachineSet(vmCount int, skipVMSetup bool) ([]TestWindowsVM, error) {
+	w := make([]TestWindowsVM, vmCount)
+	if skipVMSetup {
+		log.Print("Skip VM setup option selected. Not setting up the VMs...")
 	} else {
-		//TODO: Add username as well, as it will change depending on cloud provider
-		if credentials.GetIPAddress() == "" || credentials.GetPassword() == "" {
-			return nil, fmt.Errorf("password or IP address not specified in credentials")
-		}
-		w.Windows = &types.Windows{}
-		w.Credentials = credentials
-	}
-
-	if err := w.SetupWinRMClient(); err != nil {
-		return w, fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
-	}
-	// Wait for some time before starting configuring of ssh server. This is to let sshd service be available
-	// in the list of services
-	// TODO: Parse the output of the `Get-Service sshd, ssh-agent` on the Windows node to check if the windows nodes
-	// has those services present
-	if !skipSetup {
-		time.Sleep(time.Minute)
-		if err := w.ConfigureOpenSSHServer(); err != nil {
-			return w, fmt.Errorf("failed to configure OpenSSHServer on the Windows VM: %v", err)
+		err := f.createMachineSet()
+		if err != nil {
+			return nil, fmt.Errorf("error creating Windows MachineSet: %v", err)
 		}
 	}
-	if err := w.GetSSHClient(); err != nil {
-		return w, fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
+
+	provisionedMachines, err := f.getWindowsMachines(vmCount, skipVMSetup)
+	if err != nil {
+		log.Print("unable to provision MachineSets. Trying to delete created MachineSets")
+		if skipVMSetup {
+			log.Print("skipped VM setup while creation. Not destroying the MachineSets...")
+		} else {
+			msErr := f.DestroyMachineSet()
+			if msErr != nil {
+				log.Printf("destroying MachineSets failed: %v", msErr)
+			}
+		}
+		return nil, err
 	}
 
+	for i, machine := range provisionedMachines {
+		winVM := &windows.Windows{}
+
+		ipAddress := ""
+		for _, address := range machine.Status.Addresses {
+			if address.Type == core.NodeExternalIP {
+				ipAddress = address.Address
+			}
+		}
+		if len(ipAddress) == 0 {
+			return nil, fmt.Errorf("no associated internal ip for machine: %s", machine.Name)
+		}
+
+		// Get the instance ID associated with the Windows machine.
+		providerID := *machine.Spec.ProviderID
+		if len(providerID) == 0 {
+			return nil, fmt.Errorf("no provider id associated with machine")
+		}
+		// Ex: aws:///us-east-1e/i-078285fdadccb2eaa. We always want the last entry which is the instanceID
+		providerTokens := strings.Split(providerID, "/")
+		instanceID := providerTokens[len(providerTokens)-1]
+		if len(instanceID) == 0 {
+			return nil, fmt.Errorf("empty instance id in provider id")
+		}
+		creds := credentials.NewCredentials(instanceID, ipAddress, credentials.Username)
+		winVM.Credentials = creds
+		log.Print("setting up ssh")
+		log.Print("using the mounted private key to access the VMs through ssh")
+		winVM.Credentials.SetSSHKey(f.Signer)
+		if err := winVM.GetSSHClient(); err != nil {
+			return nil, fmt.Errorf("unable to get ssh client for vm %s : %v", instanceID, err)
+		}
+		w[i] = winVM
+	}
 	return w, nil
 }
 
-func (w *testWindowsVM) RetrieveDirectories(remoteDir string, localDir string) error {
-	if w.SSHClient == nil {
-		return fmt.Errorf("cannot retrieve remote directory without a ssh client")
-	}
-
-	// creating a local directory to store the files and directories from remote directory.
-	err := os.MkdirAll(localDir, os.ModePerm)
-	if err != nil {
-		return fmt.Errorf("could not create %s: %v", localDir, err)
-	}
-
-	sftp, err := sftp.NewClient(w.SSHClient)
-	if err != nil {
-		return fmt.Errorf("sftp initialization failed: %v", err)
-	}
-	defer sftp.Close()
-
-	// Get the list of all files in the directory
-	remoteFiles, err := sftp.ReadDir(remoteDir)
-	if err != nil {
-		return fmt.Errorf("error opening remote directory %s: %v", remoteDir, err)
-	}
-
-	for _, remoteFile := range remoteFiles {
-		remotePath := filepath.Join(remoteDir, remoteFile.Name())
-		localPath := filepath.Join(localDir, remoteFile.Name())
-		// check if it is a directory, call itself again
-		if remoteFile.IsDir() {
-			if err = w.RetrieveDirectories(remotePath, localPath); err != nil {
-				log.Printf("error while retrieving %s directory from Windows : %v", remotePath, err)
-			}
-		} else {
-			// logging errors as a best effort to retrieve files from remote directory
-			if err = w.copyFileFrom(sftp, remotePath, localPath); err != nil {
-				log.Printf("error while retrieving %s file from Windows : %v", remotePath, err)
-			}
-		}
-	}
-	return nil
-}
-
-// copyFileFrom copies a file from remote directory to the local directory.
-func (w *testWindowsVM) copyFileFrom(sftp *sftp.Client, remotePath, localPath string) error {
-	localFile, err := os.Create(localPath)
-	if err != nil {
-		return fmt.Errorf("error creating file locally: %v", err)
-	}
-	// TODO: Check if there is some performance implication of multiple Open calls.
-	remoteFile, err := sftp.Open(remotePath)
-	if err != nil {
-		return fmt.Errorf("error while opening remote file on the Windows VM: %v", err)
-	}
-	// logging the errors instead of returning to allow closing of files
-	_, err = io.Copy(localFile, remoteFile)
-	if err != nil {
-		log.Printf("error retrieving file %v from Windows VM: %v", localPath, err)
-	}
-	// flush memory
-	if err = localFile.Sync(); err != nil {
-		log.Printf("error flusing memory: %v", err)
-	}
-	if err := remoteFile.Close(); err != nil {
-		log.Printf("error closing file on the remote host %s", localPath)
-	}
-	if err := localFile.Close(); err != nil {
-		log.Printf("error closing file %s locally", localPath)
-	}
-	return nil
-}
-
-func (w *testWindowsVM) Destroy() error {
-	// There is no VM to destroy
-	if cloudProvider == nil || w.Windows == nil || w.GetCredentials() == nil {
+// DestroyMachineSet() deletes the MachineSet which in turn deletes all the Machines created by the MachineSet
+func (f *TestFramework) DestroyMachineSet() error {
+	log.Print("Destroying MachineSets")
+	if f.machineSet == nil {
+		log.Print("unable to find MachineSet to be deleted, was skip VM setup option selected ?")
+		log.Print("MachineSets/Machines needs to be deleted manually \nNot deleting MachineSets...")
 		return nil
 	}
-	return cloudProvider.DestroyWindowsVMs()
-}
-
-func (w *testWindowsVM) BuildWMCB() bool {
-	return w.buildWMCB
-}
-
-func (w *testWindowsVM) SetBuildWMCB(buildWMCB bool) {
-	w.buildWMCB = buildWMCB
+	err := f.machineClient.MachineSets("openshift-machine-api").Delete(context.TODO(), f.machineSet.Name, metav1.DeleteOptions{})
+	if err != nil {
+		return fmt.Errorf("unable to delete MachineSet %v", err)
+	}
+	log.Print("MachineSets Destroyed")
+	return nil
 }

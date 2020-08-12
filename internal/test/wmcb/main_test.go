@@ -5,8 +5,6 @@ import (
 	"log"
 	"os"
 	"testing"
-
-	e2ef "github.com/openshift/windows-machine-config-bootstrapper/internal/test/framework"
 )
 
 // framework holds the instantiation of test suite being executed. As of now, temp dir is hardcoded.
@@ -19,14 +17,12 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	var vmCreds e2ef.Creds
 	var skipVMSetup bool
 
-	flag.Var(&vmCreds, "vmCreds", "List of VM credentials")
 	flag.BoolVar(&skipVMSetup, "skipVMSetup", false, "Option to disable setup in the VMs")
 	flag.Parse()
 
-	err := framework.Setup(vmCount, vmCreds, skipVMSetup)
+	err := framework.Setup(vmCount, skipVMSetup)
 	if err != nil {
 		framework.TearDown()
 		log.Fatal(err)
