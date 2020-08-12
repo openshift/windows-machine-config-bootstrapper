@@ -1,6 +1,6 @@
 module github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer
 
-go 1.13
+go 1.14
 
 replace (
 	github.com/openshift/api => github.com/openshift/api v0.0.0-20200422081840-fdd1b0c14c88 // OpenShift 4.5

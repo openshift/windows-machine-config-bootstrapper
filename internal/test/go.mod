@@ -1,6 +1,6 @@
 module github.com/openshift/windows-machine-config-bootstrapper/internal/test
 
-go 1.12
+go 1.14
 
 require (
 	github.com/golang/protobuf v1.3.3 // indirect
