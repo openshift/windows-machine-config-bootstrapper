@@ -10,14 +10,16 @@ GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on
 # TODO (suhanime): Pin go versions and lint
 # TODO (suhanime): Enable linting when we don't have unimplemented methods
 
-# The golang 1.13 image used in CI enforces vendoring. Workaround that by unsetting it.
-ifeq ($(GOFLAGS), -mod=vendor)
-	unexport GOFLAGS
+# Set the go mod vendor flags, if it is not set
+GOFLAGS? = $(shell go env GOFLAGS)
+ifneq "$(findstring -mod=vendor,$(GOFLAGS))" "-mod=vendor"
+GOFLAGS ?= -mod=vendor
 endif
 
 .PHONY: build
 build: bindata
-	$(GO_BUILD_ARGS) GOOS=windows go build -o wmcb.exe  $(MAIN_PACKAGE)
+	@echo $(GOFLAGS)
+	$(GO_BUILD_ARGS) GOOS=windows go build ${GOFLAGS} -o wmcb.exe  $(MAIN_PACKAGE)
 
 .PHONY: build-wmcb-unit-test
 build-wmcb-unit-test: bindata
@@ -60,4 +62,4 @@ verify-all:
 	hack/verify-gofmt.sh
 
 bindata:
-	hack/generate-conf-files.sh
+	hack/generate-conf-files.sh ${GOFLAGS}
