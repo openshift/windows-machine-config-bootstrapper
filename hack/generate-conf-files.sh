@@ -6,7 +6,7 @@ set -o pipefail
 WMCO_ROOT=$(dirname ${BASH_SOURCE})/..
 # Use bindata to access data files in wmcb binary
 set -x
-go run github.com/go-bindata/go-bindata/go-bindata\
+go run github.com/go-bindata/go-bindata/v3/go-bindata \
     -pkg "bootstrapper" \
     -nocompress \
     -nometadata \
