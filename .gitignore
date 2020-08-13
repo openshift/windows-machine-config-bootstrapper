@@ -15,9 +15,6 @@
 *.idea/*
 *.vscode/*
 
-# Vendor director
-vendor/
-
 # wni files
 tools/windows-node-installer/wni
 windows-node-installer.json
