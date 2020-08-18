@@ -2,9 +2,6 @@ package bootstrapper
 
 import (
 	"fmt"
-	ignitionv2 "github.com/coreos/ignition/config/v2_2"
-	"github.com/vincent-petithory/dataurl"
-	"golang.org/x/sys/windows/svc"
 	"io"
 	"io/ioutil"
 	"os"
@@ -14,6 +11,10 @@ import (
 	"text/template"
 	"time"
 
+	ignitionCfgv3 "github.com/coreos/ignition/v2/config/v3_1"
+	"github.com/pkg/errors"
+	"github.com/vincent-petithory/dataurl"
+	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
@@ -270,10 +271,10 @@ func (wmcb *winNodeBootstrapper) translateFile(ignitionSource string, fileTransl
 // installation directory
 func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents []byte,
 	filesToTranslate map[string]fileTranslation) error {
-	// Parse configuration file
-	configuration, _, err := ignitionv2.Parse(ignitionFileContents)
-	if err != nil {
-		return err
+	// Parse raw file contents for Ignition spec v3.1 config
+	configuration, report, err := ignitionCfgv3.Parse(ignitionFileContents)
+	if err != nil || report.IsFatal() {
+		return errors.Errorf("failed to parse Ign spec v3.1 config: %v\nReport: %v", err, report)
 	}
 
 	// Find the kubelet systemd service specified in the ignition file and grab the variable arguments
@@ -283,7 +284,11 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 			continue
 		}
 
-		results := cloudProviderRegex.FindStringSubmatch(unit.Contents)
+		if unit.Contents == nil {
+			return fmt.Errorf("could not process %s: Unit is empty", unit.Name)
+		}
+
+		results := cloudProviderRegex.FindStringSubmatch(*unit.Contents)
 		if len(results) == 2 {
 			wmcb.kubeletArgs["cloud-provider"] = results[1]
 		}
@@ -291,7 +296,7 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 		// Check for the presence of "--cloud-config" option and if it is present append the value to
 		// filesToTranslate. This option is only present for Azure and hence we cannot assume it as a file that
 		// requires translation across clouds.
-		results = cloudConfigRegex.FindStringSubmatch(unit.Contents)
+		results = cloudConfigRegex.FindStringSubmatch(*unit.Contents)
 		if len(results) == 2 {
 			cloudConfFilename := filepath.Base(results[1])
 
@@ -308,7 +313,7 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 			wmcb.kubeletArgs[cloudConfigOption] = filepath.Join(wmcb.installDir, cloudConfFilename)
 		}
 
-		results = verbosityRegex.FindStringSubmatch(unit.Contents)
+		results = verbosityRegex.FindStringSubmatch(*unit.Contents)
 		if len(results) == 2 {
 			wmcb.kubeletArgs["v"] = results[1]
 		}
@@ -323,7 +328,11 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 	// and write it to the destination path
 	for _, ignFile := range configuration.Storage.Files {
 		if filePair, ok := filesToTranslate[ignFile.Node.Path]; ok {
-			newContents, err := wmcb.translateFile(ignFile.Contents.Source, filePair.translationFunc)
+			if ignFile.Contents.Source == nil {
+				return fmt.Errorf("could not process %s: File is empty", ignFile.Node.Path)
+			}
+
+			newContents, err := wmcb.translateFile(*ignFile.Contents.Source, filePair.translationFunc)
 			if err != nil {
 				return fmt.Errorf("could not process %s: %s", ignFile.Node.Path, err)
 			}
