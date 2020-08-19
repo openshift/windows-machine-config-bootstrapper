@@ -196,10 +196,10 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 	// Ignition v2.3.0 maps to Ignition config spec v3.1.0.
 	ignitionAcceptHeaderSpec := "application/vnd.coreos.ignition+json`;version=3.1.0"
 	// Download the worker ignition to C:\Windows\Tenp\ using the script that ignores the server cert
-	output, err := vm.Run(wgetIgnoreCertCmd+" -server https://api-int."+framework.ClusterAddress+":22623/config/worker"+
+	output, err := vm.Run(wgetIgnoreCertCmd+" -server https://"+framework.ClusterAddress+":22623/config/worker"+
 		" -output "+winTemp+"worker.ign"+" -acceptHeader "+ignitionAcceptHeaderSpec, true)
 	if err != nil {
-		return fmt.Errorf("unable to download worker.ign: %v : %s", err, output)
+		return fmt.Errorf("unable to download worker.ign: %v\nOutput: %s", err, output)
 	}
 
 	return nil
