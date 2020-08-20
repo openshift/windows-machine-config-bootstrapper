@@ -68,9 +68,6 @@ const (
 	// CNI constants
 	// cniDirName is the directory within the install dir where the CNI binaries are placed
 	cniDirName = "cni"
-	// cniConfigDirName is the directory in the CNI dir where the cni.conf is placed
-	cniConfigDirName = cniDirName + "/config/"
-
 	// kubelet CLI options for CNI
 	// resolvOption is to specify the resolv.conf
 	resolvOption = "--resolv-conf"
@@ -191,7 +188,7 @@ func newCNIOptions(k8sInstallDir, dir, config string) (*cniOptions, error) {
 		dir:           dir,
 		config:        config,
 		binDir:        filepath.Join(k8sInstallDir, cniDirName),
-		confDir:       filepath.Join(k8sInstallDir, cniConfigDirName),
+		confDir:       filepath.Dir(config),
 	}, nil
 }
 
@@ -741,16 +738,19 @@ func (cni *cniOptions) copyFiles() error {
 
 // ensureDirIsPresent ensures that CNI parent and child directories are present on the system
 func (cni *cniOptions) ensureDirIsPresent() error {
-	// By checking for the config directory, we can ensure both parent and child directories are present
-	configDir := filepath.Join(cni.k8sInstallDir, cniConfigDirName)
-	if _, err := os.Stat(configDir); err != nil {
-		if os.IsNotExist(err) {
-			// 0700 == Only user has access
-			if err = os.MkdirAll(configDir, 0700); err != nil {
+	cniDir := filepath.Join(cni.k8sInstallDir, cniDirName)
+	requiredDirectories := []string{cniDir, cni.confDir}
+
+	for _, dir := range requiredDirectories {
+		if _, err := os.Stat(dir); err != nil {
+			if os.IsNotExist(err) {
+				// 0700 == Only user has access
+				if err = os.MkdirAll(dir, 0700); err != nil {
+					return err
+				}
+			} else {
 				return err
 			}
-		} else {
-			return err
 		}
 	}
 	return nil
@@ -857,7 +857,7 @@ func (cni *cniOptions) updateKubeletArgs(kubeletCmd *string) error {
 // arguments. Updating and restarting the kubelet service is outside of its purview.
 func (cni *cniOptions) configure(kubeletCmd *string) error {
 	if err := cni.ensureDirIsPresent(); err != nil {
-		return fmt.Errorf("unable to create CNI directory %s: %v", filepath.Join(cni.dir, cniConfigDirName), err)
+		return fmt.Errorf("unable to create CNI directories: %v", err)
 	}
 
 	if err := cni.copyFiles(); err != nil {

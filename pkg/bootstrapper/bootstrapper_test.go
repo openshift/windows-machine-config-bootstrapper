@@ -449,8 +449,8 @@ func TestCNI(t *testing.T) {
 // testCNIEnsureDirIsPresent tests ensureDirIsPresent creates the CNI directory when a valid install directory is passed
 func testCNIEnsureDirIsPresent(t *testing.T) {
 	err := cniTest.cni.ensureDirIsPresent()
-	assert.NoError(t, err, "error creating CNI config directory %s", cniDirName)
-	assert.DirExists(t, filepath.Join(cniTest.cni.k8sInstallDir, "cni", "config"), "CNI directory was not created")
+	assert.NoError(t, err, "error creating CNI directory")
+	assert.DirExists(t, filepath.Join(cniTest.cni.k8sInstallDir, "cni"), "CNI directory was not created")
 }
 
 // testCheckCNIInputs tests if checkCNIInputs returns the expected errors on passing invalid inputs
@@ -499,8 +499,6 @@ func testCNICopyFiles(t *testing.T) {
 	err := cniTest.cni.copyFiles()
 	assert.NoError(t, err, "unexpected error")
 	assert.FileExists(t, filepath.Join(cniTest.cni.k8sInstallDir, "cni", filepath.Base(cniTest.exe)), "CNI exe was not copied")
-	assert.FileExists(t, filepath.Join(cniTest.cni.k8sInstallDir, "cni", "config", filepath.Base(cniTest.cni.config)),
-		"CNI config file was not copied")
 }
 
 // checkKubeletCmd asserts that the CNI arguments were added correctly
