@@ -11,7 +11,12 @@ import (
 	"text/template"
 	"time"
 
+	ignitionCfgv24tov31 "github.com/coreos/ign-converter/translate/v24tov31"
+	ignitionCfgv2_4 "github.com/coreos/ignition/config/v2_4"
+	ignitionCfgv2_4Types "github.com/coreos/ignition/config/v2_4/types"
+	ignitionCfgError "github.com/coreos/ignition/v2/config/shared/errors"
 	ignitionCfgv3 "github.com/coreos/ignition/v2/config/v3_1"
+	ignitionCfgv3Types "github.com/coreos/ignition/v2/config/v3_1/types"
 	"github.com/pkg/errors"
 	"github.com/vincent-petithory/dataurl"
 	"golang.org/x/sys/windows/svc"
@@ -267,13 +272,41 @@ func (wmcb *winNodeBootstrapper) translateFile(ignitionSource string, fileTransl
 	return newContents, err
 }
 
+// convertIgnition2to3 takes an ignition spec v2.4 config and returns a v3.1 config
+func convertIgnition2to3(ign2config ignitionCfgv2_4Types.Config) (ignitionCfgv3Types.Config, error) {
+	// only support writing to root file system
+	fsMap := map[string]string{
+		"root": "/",
+	}
+	dedupedIgn2config, err := ignitionCfgv24tov31.RemoveDuplicateFilesAndUnits(ign2config)
+	if err != nil {
+		return ignitionCfgv3Types.Config{}, errors.Errorf("unable to deduplicate Ignition spec v2 config: %v", err)
+	}
+	ign3_1config, err := ignitionCfgv24tov31.Translate(dedupedIgn2config, fsMap)
+	if err != nil {
+		return ignitionCfgv3Types.Config{}, errors.Errorf("unable to convert Ignition spec v2 config to v3: %v", err)
+	}
+
+	return ign3_1config, nil
+}
+
 // parseIgnitionFileContents parses the ignition file contents and writes the contents of the described files to the k8s
 // installation directory
 func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents []byte,
 	filesToTranslate map[string]fileTranslation) error {
 	// Parse raw file contents for Ignition spec v3.1 config
 	configuration, report, err := ignitionCfgv3.Parse(ignitionFileContents)
-	if err != nil || report.IsFatal() {
+	if err != nil && err.Error() == ignitionCfgError.ErrUnknownVersion.Error() {
+		// the Ignition config spec v2.4 parser supports parsing all spec versions up to 2.4
+		configV2, reportV2, errV2 := ignitionCfgv2_4.Parse(ignitionFileContents)
+		if errV2 != nil || reportV2.IsFatal() {
+			return errors.Errorf("failed to parse Ign spec v2 config: %v\nReport: %v", errV2, reportV2)
+		}
+		configuration, err = convertIgnition2to3(configV2)
+		if err != nil {
+			return err
+		}
+	} else if err != nil || report.IsFatal() {
 		return errors.Errorf("failed to parse Ign spec v3.1 config: %v\nReport: %v", err, report)
 	}
 
