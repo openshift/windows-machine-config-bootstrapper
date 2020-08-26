@@ -60,26 +60,27 @@ The following environment variables need to be set for running the end to end te
   - Set this to point to your AWS credentials file
 - KUBE_SSH_KEY_PATH
   - The ssh key used to bring up the VM
-- KUBECONFIG
-  - The kubeconfig of the OpenShift cluster
+- WMCB_IMAGE
+  - Registry url for remote WMCB image that needs to be tested. eg. quay.io/<USERNAME>/<IMAGE>:<TAG>
+
+To build the WMCB image, execute:
+```
+podman build -f Dockerfile.tools -t quay.io/<USERNAME>/<IMAGE>:<TAG> .
+``` 
+The WMCB image needs to be pushed to a remote repository:
+```
+podman push quay.io/<USERNAME>/<IMAGE>:<TAG>
+```
 
 Once the above variables are set, you can run the unit and end to end tests by executing:
 ```shell script
 $ hack/run-wmcb-ci-e2e-test.sh
 ```
 
-The hack script can be given the following options:
-- `-v` option takes a list of VM credentials in the order of `instance-id,ip-address,password`. The username defaults
-   to `Administrator`. This allows you to run the tests against existing set of VMs.
-   ```shell script
-   $ hack/run-wmcb-ci-e2e-test.sh -v"aws-instance-id-1,3.135.234.23,password,aws-instance-id-2,3.135.234.23,password"
-   ```
-
-- `-s` option allows you to skip the framework setup. The assumption here is that the framework setup has already been
-  run on the VM.
-  ```shell script
-  $ hack/run-wmcb-ci-e2e-test.sh -v"aws-instance-id,1.2.34.23,password" -s
-  ```
+Inorder to skip MachineSet setup, add `-skipVMSetup` argument to `args` field in `internal/test/wmcb/deploy/job.yaml`.
+A MachineSet with label `machine.openshift.io/os-id=Windows` needs to be created, and the Machine should be in `Provisioned` 
+state in order to use `-skipVMSetup`. Test suite will use the mounted private key to access the Machine created. 
+Using an already `Provisioned` VM would reduce the wait time to run the test from 12 minute to just 1 minute.
 
 ### Ansible
 
