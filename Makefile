@@ -53,6 +53,7 @@ run-wsu-ci-e2e-test:
 # TODO: Add other verifications
 verify-all:
 	hack/verify-gofmt.sh
+	hack/verify-vendor.sh
 
 bindata:
 	hack/generate-conf-files.sh
