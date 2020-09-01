@@ -2,7 +2,7 @@
 param (
     [Parameter(Mandatory=$true)][string]$server,
     [Parameter(Mandatory=$true)][string]$output,
-    [Parameter(Mandatory=$true)][string]$useragent
+    [Parameter(Mandatory=$true)][string]$acceptHeader
 )
 
 if (-not("dummy" -as [type])) {
@@ -24,4 +24,4 @@ public static class Dummy {
 }
 [System.Net.ServicePointManager]::ServerCertificateValidationCallback = [dummy]::GetDelegate()
 
-wget -UserAgent $useragent $server -o $output
+wget $server -Headers @{'Accept' = $acceptHeader;} -o $output
