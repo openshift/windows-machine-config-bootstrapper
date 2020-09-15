@@ -1,9 +1,11 @@
 package bootstrapper
 
 import (
+	"crypto/tls"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -114,6 +116,8 @@ type winNodeBootstrapper struct {
 	// ignitionFilePath is the path to the ignition file which is used to set up worker nodes
 	// https://github.com/coreos/ignition/blob/spec2x/doc/getting-started.md
 	ignitionFilePath string
+	// ignitionURL of the MCS that serves ignition config
+	ignitionURL string
 	//initialKubeletPath is the path to the kubelet that we'll be using to bootstrap this node
 	initialKubeletPath string
 	// TODO: When more services are added consider decomposing the services to a separate Service struct with common functions
@@ -149,7 +153,7 @@ type cniOptions struct {
 // NewWinNodeBootstrapper takes the dir to install the kubelet to, and paths to the ignition and kubelet files along
 // with the CNI options as inputs, and generates the winNodeBootstrapper object. The CNI options are populated only in
 // the configure-cni command.
-func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cniDir string,
+func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, ignitionURL, kubeletPath string, cniDir string,
 	cniConfig string) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
@@ -164,6 +168,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		kubeconfigPath:     filepath.Join(k8sInstallDir, "kubeconfig"),
 		kubeletConfPath:    filepath.Join(k8sInstallDir, "kubelet.conf"),
 		ignitionFilePath:   ignitionFile,
+		ignitionURL:        ignitionURL,
 		installDir:         k8sInstallDir,
 		logDir:             "C:\\var\\log\\kubelet",
 		initialKubeletPath: kubeletPath,
@@ -422,14 +427,38 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 		return fmt.Errorf("could not make %s directory: %v", wmcb.logDir, err)
 	}
 
-	// Populate destination directory with the files we need
-	if wmcb.ignitionFilePath != "" {
-		ignitionFileContents, err := ioutil.ReadFile(wmcb.ignitionFilePath)
-		if err != nil {
-			return fmt.Errorf("could not read ignition file: %s", err)
+	// get config; ignitionURL takes precedence if both are defined
+	if wmcb.ignitionURL != "" || wmcb.ignitionFilePath != "" {
+		var ignitionConfig []byte
+		var err error
+
+		if wmcb.ignitionURL != "" {
+			// Create a custom transport config for http client
+			// We want all defaults except for TLS's InsecureSkipVerify.
+			// So clone the default and change just the TLSClientConfig.
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+			client := &http.Client{Transport: transport}
+			req, err := http.NewRequest(http.MethodGet, wmcb.ignitionURL, nil)
+			if err != nil {
+				return fmt.Errorf("failed to create http request for ignition config: %s", err)
+			}
+			req.Header.Set("Accept", "application/vnd.coreos.ignition+json=3.10, */*;q=0.1")
+			resp, err := client.Do(req)
+			defer resp.Body.Close()
+			ignitionConfig, err = ioutil.ReadAll(resp.Body)
+			if err != nil {
+				return fmt.Errorf("could not read MCS response body: %s", err)
+			}
+		} else if wmcb.ignitionFilePath != "" {
+			ignitionConfig, err = ioutil.ReadFile(wmcb.ignitionFilePath)
+			if err != nil {
+				return fmt.Errorf("could not read ignition file: %s", err)
+			}
 		}
 
-		err = wmcb.parseIgnitionFileContents(ignitionFileContents, filesToTranslate)
+		// parse config and write files
+		err = wmcb.parseIgnitionFileContents(ignitionConfig, filesToTranslate)
 		if err != nil {
 			return fmt.Errorf("could not parse ignition file: %s", err)
 		}

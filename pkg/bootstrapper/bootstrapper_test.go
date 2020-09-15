@@ -342,11 +342,11 @@ func TestCloudConfInvalidNames(t *testing.T) {
 // TestNewWinNodeBootstrapperWithInvalidCNIInputs tests if NewWinNodeBootstrapper returns the expected error on passing
 // invalid CNI inputs
 func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
-	_, err := NewWinNodeBootstrapper("", "", "", "C:\\something", "")
+	_, err := NewWinNodeBootstrapper("", "", "", "", "C:\\something", "")
 	require.Error(t, err, "no error thrown when cniDir is not empty and cniConfig is empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 
-	_, err = NewWinNodeBootstrapper("", "", "", "", "C:\\something")
+	_, err = NewWinNodeBootstrapper("", "", "", "", "", "C:\\something")
 	require.Error(t, err, "no error thrown when cniDir is empty and cniConfig not empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 }
@@ -354,7 +354,7 @@ func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
 // TestWinNodeBootstrapperConfigureWithInvalidInputs tests if Configure returns the expected error when CNI inputs
 // are not present
 func TestWinNodeBootstrapperConfigureWithInvalidInputs(t *testing.T) {
-	wnb, err := NewWinNodeBootstrapper("", "", "", "", "")
+	wnb, err := NewWinNodeBootstrapper("", "", "", "", "", "")
 	require.NoError(t, err, "error instantiating bootstrapper")
 	err = wnb.Configure()
 	require.Error(t, err, "no error thrown when Configure is called with no CNI inputs")

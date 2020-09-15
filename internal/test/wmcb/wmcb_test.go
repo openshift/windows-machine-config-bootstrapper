@@ -39,8 +39,6 @@ const (
 	kLog = "C:\\k\\log\\"
 	// cniConfigTemplate is the location of the cni.conf template file
 	cniConfigTemplate = "templates/cni.template"
-	// wgetIgnoreCertCmd is the remote location of the wget-ignore-cert.ps1 script
-	wgetIgnoreCertCmd = remoteDir + "wget-ignore-cert.ps1"
 	// e2eExecutable is the remote location of the WMCB e2e test binary
 	e2eExecutable = remoteDir + "wmcb_e2e_test.exe"
 	// unitExecutable is the remote location of the WMCB unit test binary
@@ -95,7 +93,7 @@ func (f *wmcbFramework) initializePackages() error {
 	return nil
 }
 
-// Setup initializes the wsuFramework.
+// Setup initializes the e2e framework.
 func (f *wmcbFramework) Setup(vmCount int, credentials []*types.Credentials, skipVMsetup bool) error {
 	f.TestFramework = &e2ef.TestFramework{}
 	// Set up the framework
@@ -164,10 +162,7 @@ func (vm *wmcbVM) runTest(testCmd string) error {
 
 // runTestBootstrapper runs the initialize-kubelet tests
 func (vm *wmcbVM) runTestBootstrapper(t *testing.T) {
-	err := vm.initializeTestBootstrapperFiles()
-	require.NoError(t, err, "error initializing files required for TestBootstrapper")
-
-	err = vm.runTest(e2eExecutable + " --test.run TestBootstrapper --test.v")
+	err := vm.runTest(e2eExecutable + " --test.run TestBootstrapper --test.v --ignition-url https://api-int." + framework.ClusterAddress + ":22623/config/worker")
 	require.NoError(t, err, "TestBootstrapper failed")
 }
 
@@ -186,32 +181,6 @@ func (vm *wmcbVM) runTestConfigureCNI(t *testing.T) {
 
 	err = vm.runTest(e2eExecutable + " --test.run TestConfigureCNI --test.v")
 	require.NoError(t, err, "TestConfigureCNI failed")
-}
-
-// initializeTestBootstrapperFiles initializes the files required for initialize-kubelet
-func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
-	// Create the temp directory
-	_, _, err := vm.Run(mkdirCmd(remoteDir), false)
-	if err != nil {
-		return fmt.Errorf("unable to create remote directory %s: %v", remoteDir, err)
-	}
-
-	// Copy kubelet.exe to C:\Windows\Temp\
-	_, _, err = vm.Run("cp "+remoteDir+"\\kubelet.exe "+winTemp, true)
-	if err != nil {
-		return fmt.Errorf("unable to copy kubelet.exe to %s", winTemp)
-	}
-
-	// Ignition v2.3.0 maps to Ignition config spec v3.1.0.
-	ignitionAcceptHeaderSpec := "application/vnd.coreos.ignition+json`;version=3.1.0"
-	// Download the worker ignition to C:\Windows\Tenp\ using the script that ignores the server cert
-	_, _, err = vm.Run(wgetIgnoreCertCmd+" -server https://api-int."+framework.ClusterAddress+":22623/config/worker"+
-		" -output "+winTemp+"worker.ign"+" -acceptHeader "+ignitionAcceptHeaderSpec, true)
-	if err != nil {
-		return fmt.Errorf("unable to download worker.ign: %v", err)
-	}
-
-	return nil
 }
 
 // remoteDownload downloads the tar file in url to the remoteDownloadFile location and checks if the SHA matches
