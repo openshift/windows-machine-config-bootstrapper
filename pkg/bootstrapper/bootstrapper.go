@@ -19,7 +19,6 @@ import (
 	ignitionCfgv3Types "github.com/coreos/ignition/v2/config/v3_1/types"
 	"github.com/pkg/errors"
 	"github.com/vincent-petithory/dataurl"
-	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
@@ -37,13 +36,15 @@ const (
 	// KubeletServiceName is the name will we run the kubelet Windows service under. It is required to be named "kubelet":
 	// https://github.com/kubernetes/kubernetes/blob/v1.16.0/cmd/kubelet/app/init_windows.go#L26
 	KubeletServiceName = "kubelet"
+	// kubeletDependentSvc is the name of the service dependent on kubelet Windows service
+	kubeletDependentSvc = "hybrid-overlay-node"
 	// kubeletSystemdName is the name of the systemd service that the kubelet runs under,
 	// this is used to parse the kubelet args
 	kubeletSystemdName = "kubelet.service"
 	// kubeletPauseContainerImage is the location of the image we will use for the kubelet pause container
 	kubeletPauseContainerImage = "mcr.microsoft.com/oss/kubernetes/pause:1.3.0"
-	// serviceWaitTime is an arbitrary amount of time to wait for the Windows service API to complete requests
-	serviceWaitTime = time.Second * 10
+	// serviceWaitTime is amount of wait time required for the Windows service API to complete stop requests
+	serviceWaitTime = time.Second * 20
 	// certDirectory is where the kubelet will look for certificates
 	certDirectory = "c:\\var\\lib\\kubelet\\pki\\"
 	// cloudConfigOption is kubelet CLI option for cloud configuration
@@ -117,8 +118,8 @@ type winNodeBootstrapper struct {
 	//initialKubeletPath is the path to the kubelet that we'll be using to bootstrap this node
 	initialKubeletPath string
 	// TODO: When more services are added consider decomposing the services to a separate Service struct with common functions
-	// kubeletSVC is a pointer to the kubelet Windows service object
-	kubeletSVC *mgr.Service
+	// kubeletSVC is a pointer to the kubeletService struct
+	kubeletSVC *kubeletService
 	// svcMgr is used to interact with the Windows service API
 	svcMgr *mgr.Mgr
 	// installDir is the directory the the kubelet service will be installed
@@ -178,9 +179,16 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		}
 	}
 
+	var dependents []*mgr.Service
 	// If there is already a kubelet service running, find it
 	if ksvc, err := svcMgr.OpenService(KubeletServiceName); err == nil {
-		bootstrapper.kubeletSVC = ksvc
+		if dependentSvc, err := svcMgr.OpenService(kubeletDependentSvc); err == nil {
+			dependents = append(dependents, dependentSvc)
+		}
+		bootstrapper.kubeletSVC, err = newKubeletService(ksvc, dependents)
+		if err != nil {
+			return nil, fmt.Errorf("could not initialize struct kubeletService: %v", err)
+		}
 	}
 	return &bootstrapper, nil
 }
@@ -490,96 +498,25 @@ func (wmcb *winNodeBootstrapper) createKubeletService() error {
 		Password:         "",
 		Description:      "OpenShift Kubelet",
 	}
-	wmcb.kubeletSVC, err = wmcb.svcMgr.CreateService(KubeletServiceName, filepath.Join(wmcb.installDir, "kubelet.exe"), c, kubeletArgs...)
+	ksvc, err := wmcb.svcMgr.CreateService(KubeletServiceName, filepath.Join(wmcb.installDir, "kubelet.exe"), c, kubeletArgs...)
 	if err != nil {
 		return err
 	}
-	err = wmcb.kubeletSVC.SetRecoveryActions([]mgr.RecoveryAction{
-		{Type: mgr.ServiceRestart, Delay: 5},
-	}, 600)
-	if err != nil {
-		return err
+
+	var dependents []*mgr.Service
+	if dependentSvc, err := wmcb.svcMgr.OpenService(kubeletDependentSvc); err == nil {
+		dependents = append(dependents, dependentSvc)
 	}
+	wmcb.kubeletSVC, err = newKubeletService(ksvc, dependents)
+	if err != nil {
+		return fmt.Errorf("could not initialize struct kubeletService: %v", err)
+	}
+
+	if err := wmcb.kubeletSVC.setRecoveryActions(); err != nil {
+		return fmt.Errorf("failed to set recovery actions for Windows service %s", KubeletServiceName)
+	}
+
 	return nil
-}
-
-// startKubeletService starts the kubelet as a Windows service
-func (wmcb *winNodeBootstrapper) startKubeletService() error {
-	if wmcb.kubeletSVC == nil {
-		return fmt.Errorf("no kubelet service")
-	}
-	err := wmcb.kubeletSVC.Start()
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// removeKubeletService deletes the kubelet service via the Windows service API
-func (wmcb *winNodeBootstrapper) removeKubeletService() error {
-	if wmcb.kubeletSVC == nil {
-		return nil
-	}
-	return wmcb.kubeletSVC.Delete()
-}
-
-// controlService sends a signal to the service and waits until it changes state in response to the signal
-func (wmcb *winNodeBootstrapper) controlService(cmd svc.Cmd, desiredState svc.State) error {
-	status, err := wmcb.kubeletSVC.Control(cmd)
-	if err != nil {
-		return err
-	}
-	// Most of the rest of the function borrowed from the package (golang.org/x/sys/windows/svc/mgr) example
-	// Arbitrary wait time
-	timeout := time.Now().Add(serviceWaitTime)
-	for status.State != desiredState {
-		if timeout.Before(time.Now()) {
-			return fmt.Errorf("timeout waiting for service to go to state=%d", desiredState)
-		}
-		time.Sleep(300 * time.Millisecond)
-		status, err = wmcb.kubeletSVC.Query()
-		if err != nil {
-			return fmt.Errorf("could not retrieve service status: %v", err)
-		}
-	}
-	return nil
-}
-
-// stopKubeletService stops the kubelet via the Windows service API
-func (wmcb *winNodeBootstrapper) stopKubeletService() error {
-	if wmcb.kubeletSVC == nil {
-		return nil
-	}
-
-	kubeletIsRunning, err := wmcb.isKubeletServiceRunning()
-	if err != nil {
-		return fmt.Errorf("unable to check if kubelet service is running: %v", err)
-	}
-
-	if !kubeletIsRunning {
-		return nil
-	}
-
-	return wmcb.controlService(svc.Stop, svc.Stopped)
-}
-
-// isKubeletServiceRunning returns true if the kubelet service is running
-func (wmcb *winNodeBootstrapper) isKubeletServiceRunning() (bool, error) {
-	status, err := wmcb.kubeletSVC.Query()
-	if err != nil {
-		return false, err
-	}
-	return status.State == svc.Running, nil
-}
-
-// StopAndRemoveServices stops and removes the kubelet service
-func (wmcb *winNodeBootstrapper) StopAndRemoveServices() error {
-	if wmcb.kubeletSVC == nil {
-		return nil
-	}
-	wmcb.stopKubeletService()
-	return wmcb.removeKubeletService()
-
 }
 
 // refreshServiceManager will disconnect and reconnect from the Windows service API. In order to complete certain
@@ -595,30 +532,13 @@ func (wmcb *winNodeBootstrapper) refreshServiceManager() error {
 	return err
 }
 
-// refreshKubeletService updates the kubelet service with the given config and restarts the service
-func (wmcb *winNodeBootstrapper) refreshKubeletService(config mgr.Config) error {
-	if err := wmcb.stopKubeletService(); err != nil {
-		return fmt.Errorf("error stopping kubelet service: %v", err)
-	}
-
-	if err := wmcb.kubeletSVC.UpdateConfig(config); err != nil {
-		return fmt.Errorf("error updating kubelet service: %v", err)
-	}
-
-	if err := wmcb.startKubeletService(); err != nil {
-		return fmt.Errorf("error starting kubelet service: %v", err)
-	}
-
-	return nil
-}
-
 // InitializeKubelet performs the initial kubelet configuration. It sets up the install directory, creates the kubelet
 // service, and then starts the kubelet service
 func (wmcb *winNodeBootstrapper) InitializeKubelet() error {
 	var err error
 	if wmcb.kubeletSVC != nil {
 		// if the kubelet service exists, we silently remove it and continue, to preserve idempotency
-		err = wmcb.StopAndRemoveServices()
+		err = wmcb.kubeletSVC.stopAndRemove()
 		if err != nil {
 			return err
 		}
@@ -636,7 +556,7 @@ func (wmcb *winNodeBootstrapper) InitializeKubelet() error {
 	if err != nil {
 		return fmt.Errorf("failed to create kubelet windows service: %v", err)
 	}
-	err = wmcb.startKubeletService()
+	err = wmcb.kubeletSVC.start()
 	if err != nil {
 		return fmt.Errorf("failed to start kubelet windows service: %v", err)
 	}
@@ -657,11 +577,11 @@ func (wmcb *winNodeBootstrapper) Configure() error {
 	}
 
 	// Stop the kubelet service as there could be open file handles from kubelet.exe on the plugin files
-	if err := wmcb.stopKubeletService(); err != nil {
+	if err := wmcb.kubeletSVC.stop(); err != nil {
 		return fmt.Errorf("unable to stop kubelet service: %v", err)
 	}
 
-	config, err := wmcb.kubeletSVC.Config()
+	config, err := wmcb.kubeletSVC.config()
 	if err != nil {
 		return fmt.Errorf("error getting kubelet service config: %v", err)
 	}
@@ -671,7 +591,7 @@ func (wmcb *winNodeBootstrapper) Configure() error {
 		return fmt.Errorf("error configuring kubelet service for CNI: %v", err)
 	}
 
-	if err = wmcb.refreshKubeletService(config); err != nil {
+	if err = wmcb.kubeletSVC.refresh(config); err != nil {
 		return fmt.Errorf("unable to refresh kubelet service: %v", err)
 	}
 
@@ -680,11 +600,8 @@ func (wmcb *winNodeBootstrapper) Configure() error {
 
 // Disconnect removes all connections to the Windows service manager api, and allows services to be deleted
 func (wmcb *winNodeBootstrapper) Disconnect() error {
-	if wmcb.kubeletSVC != nil {
-		err := wmcb.kubeletSVC.Close()
-		if err != nil {
-			return err
-		}
+	if err := wmcb.kubeletSVC.disconnect(); err != nil {
+		return err
 	}
 	err := wmcb.svcMgr.Disconnect()
 	wmcb.svcMgr = nil
