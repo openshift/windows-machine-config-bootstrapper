@@ -489,10 +489,11 @@ func (wmcb *winNodeBootstrapper) createKubeletService() error {
 		StartType:    mgr.StartAutomatic,
 		ErrorControl: 0,
 		// Path to kubelet.exe
-		BinaryPathName:   filepath.Join(wmcb.installDir, "kubelet.exe"),
-		LoadOrderGroup:   "",
-		TagId:            0,
-		Dependencies:     nil,
+		BinaryPathName: filepath.Join(wmcb.installDir, "kubelet.exe"),
+		LoadOrderGroup: "",
+		TagId:          0,
+		// set dependency on docker
+		Dependencies:     []string{"docker"},
 		ServiceStartName: "",
 		DisplayName:      "",
 		Password:         "",

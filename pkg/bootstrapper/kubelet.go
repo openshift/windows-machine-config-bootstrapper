@@ -52,6 +52,16 @@ func (k *kubeletService) start() error {
 	if err := k.obj.Start(); err != nil {
 		return err
 	}
+
+	if len(k.dependents) == 0 {
+		return nil
+	}
+	for _, dependent := range k.dependents {
+		err := startService(dependent)
+		if err != nil {
+			return fmt.Errorf("failed to start dependent service %s", dependent.Name)
+		}
+	}
 	return nil
 }
 
@@ -76,7 +86,8 @@ func (k *kubeletService) control(cmd svc.Cmd, desiredState svc.State) error {
 	return nil
 }
 
-// stop ensures that the kubelet service is stopped
+// stop ensures that the kubelet service and its dependent services are stopped,
+// the list of dependent services is static and contains one level of dependencies
 func (k *kubeletService) stop() error {
 	isServiceRunning, err := k.isRunning()
 	if err != nil {
@@ -84,6 +95,14 @@ func (k *kubeletService) stop() error {
 	}
 	if !isServiceRunning {
 		return nil
+	}
+	// the list of dependents is static here and contains one level of dependencies
+	if len(k.dependents) != 0 {
+		for _, dependent := range k.dependents {
+			if err := stopService(dependent); err != nil {
+				return fmt.Errorf("failed to stop dependent service %s", dependent.Name)
+			}
+		}
 	}
 
 	if err := k.control(svc.Stop, svc.Stopped); err != nil {
@@ -160,4 +179,77 @@ func (k *kubeletService) setRecoveryActions() error {
 		return err
 	}
 	return nil
+}
+
+// startService is a helper to start a given service
+func startService(serviceObj *mgr.Service) error {
+	if serviceObj == nil {
+		return fmt.Errorf("service object should not be nil")
+	}
+	isServiceRunning, err := isServiceRunning(serviceObj)
+	if err != nil {
+		return fmt.Errorf("unable to check if service is running: %v", err)
+	}
+	if !isServiceRunning {
+		err := serviceObj.Start()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// controlService is a helper to send control signal to a given service
+func controlService(serviceObj *mgr.Service, cmd svc.Cmd, desiredState svc.State) error {
+	if serviceObj == nil {
+		return fmt.Errorf("service object should not be nil")
+	}
+	status, err := serviceObj.Control(cmd)
+	if err != nil {
+		return err
+	}
+	// Most of the rest of the function borrowed from https://godoc.org/golang.org/x/sys/windows/svc/mgr#Service.Control
+	// Arbitrary service wait time of 20 seconds
+	timeout := time.Now().Add(serviceWaitTime)
+	for status.State != desiredState {
+		if timeout.Before(time.Now()) {
+			return fmt.Errorf("timeout waiting for service to go to state=%d", desiredState)
+		}
+		time.Sleep(300 * time.Millisecond)
+		status, err = serviceObj.Query()
+		if err != nil {
+			return fmt.Errorf("could not retrieve service status: %v", err)
+		}
+	}
+	return nil
+}
+
+// stopService is a helper to stop a given service
+func stopService(serviceObj *mgr.Service) error {
+	if serviceObj == nil {
+		return fmt.Errorf("service object should not be nil")
+	}
+	isServiceRunning, err := isServiceRunning(serviceObj)
+	if err != nil {
+		return fmt.Errorf("unable to check if service is running: %v", err)
+	}
+	if isServiceRunning {
+		err := controlService(serviceObj, svc.Stop, svc.Stopped)
+		if err != nil {
+			return fmt.Errorf("unable to stop %s service", serviceObj.Name)
+		}
+	}
+	return nil
+}
+
+// isServiceRunning returns true if the given service is running
+func isServiceRunning(serviceObj *mgr.Service) (bool, error) {
+	if serviceObj == nil {
+		return false, fmt.Errorf("service object should not be nil")
+	}
+	status, err := serviceObj.Query()
+	if err != nil {
+		return false, err
+	}
+	return status.State == svc.Running, nil
 }

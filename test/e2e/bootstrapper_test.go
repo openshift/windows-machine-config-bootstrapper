@@ -79,8 +79,16 @@ func TestBootstrapper(t *testing.T) {
 	// Does not include node-labels and container-image since their paths do not depend on underlying OS
 	checkPathsFor := []string{"--bootstrap-kubeconfig", "--cloud-config", "--config", "--kubeconfig", "--log-file",
 		"--cert-dir"}
+	expectedDependencies := []string{"docker"}
+
+	_, path, actualDependencies, err := getSvcInfo(bootstrapper.KubeletServiceName)
+	require.NoError(t, err, "Could not get kubelet arguments")
+
 	t.Run("Test the paths in Kubelet arguments", func(t *testing.T) {
-		testPathInKubeletArgs(t, checkPathsFor)
+		testPathInKubeletArgs(t, checkPathsFor, path)
+	})
+	t.Run("Test the config dependencies in Kubelet arguments", func(t *testing.T) {
+		assert.ElementsMatch(t, expectedDependencies, actualDependencies)
 	})
 }
 
@@ -99,7 +107,7 @@ func ensureIgnitionFileExists(t *testing.T, path string) {
 
 // svcRunning returns true if the service with the name svcName is running
 func svcRunning(t *testing.T, svcName string) bool {
-	state, _, err := getSvcInfo(svcName)
+	state, _, _, err := getSvcInfo(svcName)
 	assert.NoError(t, err)
 	return svc.Running == state
 }
@@ -118,36 +126,36 @@ func svcExists(t *testing.T, svcName string) bool {
 	}
 }
 
-// getSvcInfo gets the current state and the fully qualified path of the specified service.
+// getSvcInfo gets the current state, fully qualified path and config dependencies of the specified service.
 // Requires administrator privileges
-func getSvcInfo(svcName string) (svc.State, string, error) {
+func getSvcInfo(svcName string) (svc.State, string, []string, error) {
 	// State(0) is equivalent to "Stopped"
 	state := svc.State(0)
 	svcMgr, err := mgr.Connect()
 	if err != nil {
-		return state, "", fmt.Errorf("could not connect to Windows SCM: %s", err)
+		return state, "", nil, fmt.Errorf("could not connect to Windows SCM: %s", err)
 	}
 	defer svcMgr.Disconnect()
 	mySvc, err := svcMgr.OpenService(svcName)
 	if err != nil {
 		// Could not find the service, so it was never created
-		return state, "", err
+		return state, "", nil, err
 	}
 	defer mySvc.Close()
 	// Get state of Service
 	status, err := mySvc.Query()
 	if err != nil {
-		return state, "", err
+		return state, "", nil, err
 	}
 	// Get fully qualified path of Service
 	config, err := mySvc.Config()
 	if err != nil {
-		return state, "", err
+		return state, "", nil, err
 	}
 	if config.BinaryPathName != "" {
-		return status.State, config.BinaryPathName, nil
+		return status.State, config.BinaryPathName, config.Dependencies, nil
 	} else {
-		return status.State, "", fmt.Errorf("could not fetch %s path: %s", svcName, err)
+		return status.State, "", nil, fmt.Errorf("could not fetch %s path: %s", svcName, err)
 	}
 }
 
@@ -168,10 +176,7 @@ func isKubeletRunning(t *testing.T, logPath string) bool {
 
 // testPathInKubeletArgs checks if the paths given as arguments to kubelet service are correct
 // Only checks for paths that are dependent on the underlying OS
-func testPathInKubeletArgs(t *testing.T, checkPathsFor []string) {
-	// Get fully qualified path for kubelet
-	_, path, err := getSvcInfo(bootstrapper.KubeletServiceName)
-	require.NoError(t, err, "Could not get kubelet arguments")
+func testPathInKubeletArgs(t *testing.T, checkPathsFor []string, path string) {
 	// Split the arguments from kubelet path
 	kubeletArg := strings.Split(path, " ")
 	for _, arg := range kubeletArg {
