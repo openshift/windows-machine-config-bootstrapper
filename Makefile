@@ -45,10 +45,6 @@ test-e2e-wni-azure:
 run-wmcb-ci-e2e-test:
 	hack/run-wmcb-ci-e2e-test.sh
 
-.PHONY: run-wsu-ci-e2e-test
-run-wsu-ci-e2e-test:
-	hack/run-wsu-ci-e2e-test.sh
-
 .PHONY: verify-all
 # TODO: Add other verifications
 verify-all:

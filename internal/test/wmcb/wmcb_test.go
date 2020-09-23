@@ -15,15 +15,13 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/openshift/windows-machine-config-bootstrapper/internal/test"
-	e2ef "github.com/openshift/windows-machine-config-bootstrapper/internal/test/framework"
-	"github.com/openshift/windows-machine-config-bootstrapper/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	certificates "k8s.io/api/certificates/v1beta1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/util/retry"
+
+	"github.com/openshift/windows-machine-config-bootstrapper/internal/test"
+	e2ef "github.com/openshift/windows-machine-config-bootstrapper/internal/test/framework"
 )
 
 const (
@@ -96,10 +94,10 @@ func (f *wmcbFramework) initializePackages() error {
 }
 
 // Setup initializes the wsuFramework.
-func (f *wmcbFramework) Setup(vmCount int, credentials []*types.Credentials, skipVMsetup bool) error {
+func (f *wmcbFramework) Setup(vmCount int, skipVMSetup bool) error {
 	f.TestFramework = &e2ef.TestFramework{}
 	// Set up the framework
-	err := f.TestFramework.Setup(vmCount, credentials, skipVMsetup)
+	err := f.TestFramework.Setup(vmCount, skipVMSetup)
 	if err != nil {
 		return fmt.Errorf("framework setup failed: %v", err)
 	}
@@ -112,6 +110,7 @@ func (f *wmcbFramework) Setup(vmCount int, credentials []*types.Credentials, ski
 // TestWMCB runs the unit and e2e tests for WMCB on the remote VMs
 func TestWMCB(t *testing.T) {
 	for _, vm := range framework.WinVMs {
+		log.Printf("Testing VM: %s", vm.GetCredentials().InstanceId())
 		wVM := &wmcbVM{vm}
 		files := strings.Split(*filesToBeTransferred, ",")
 		for _, file := range files {
@@ -132,31 +131,23 @@ func TestWMCB(t *testing.T) {
 func (vm *wmcbVM) runE2ETestSuite(t *testing.T) {
 	vm.runTestBootstrapper(t)
 
-	// Handle the bootstrap and node CSRs
-	err := handleCSRs()
-	require.NoError(t, err, "error handling CSRs")
-
 	vm.runTestConfigureCNI(t)
 }
 
 // runTest runs the testCmd in the given VM
 func (vm *wmcbVM) runTest(testCmd string) error {
-	stdout, stderr, err := vm.Run(testCmd, true)
+	output, err := vm.Run(testCmd, true)
 
 	// Logging the output so that it is visible on the CI page
-	log.Printf("\n%s\n", stdout)
-	log.Printf("\n%s\n", stderr)
+	log.Printf("\n%s\n", output)
 
 	if err != nil {
-		return fmt.Errorf("error running test: %v", err)
+		return fmt.Errorf("error running test: %v: %s", err, output)
 	}
-	if stderr != "" {
-		return fmt.Errorf("test returned stderr output")
-	}
-	if strings.Contains(stdout, "FAIL") {
+	if strings.Contains(output, "FAIL") {
 		return fmt.Errorf("test output showed a failure")
 	}
-	if strings.Contains(stdout, "panic") {
+	if strings.Contains(output, "panic") {
 		return fmt.Errorf("test output showed panic")
 	}
 	return nil
@@ -173,7 +164,7 @@ func (vm *wmcbVM) runTestBootstrapper(t *testing.T) {
 
 // runTestConfigureCNI performs the required setup and runs the configure-cni tests
 func (vm *wmcbVM) runTestConfigureCNI(t *testing.T) {
-	node, err := framework.GetNode(vm.GetCredentials().GetIPAddress())
+	node, err := framework.GetNode(vm.GetCredentials().IPAddress())
 	require.NoError(t, err, "unable to get node object for VM")
 
 	err = vm.handleHybridOverlay(node.GetName())
@@ -191,24 +182,24 @@ func (vm *wmcbVM) runTestConfigureCNI(t *testing.T) {
 // initializeTestBootstrapperFiles initializes the files required for initialize-kubelet
 func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 	// Create the temp directory
-	_, _, err := vm.Run(mkdirCmd(remoteDir), false)
+	_, err := vm.Run(mkdirCmd(remoteDir), false)
 	if err != nil {
 		return fmt.Errorf("unable to create remote directory %s: %v", remoteDir, err)
 	}
 
 	// Copy kubelet.exe to C:\Windows\Temp\
-	_, _, err = vm.Run("cp "+remoteDir+"\\kubelet.exe "+winTemp, true)
+	_, err = vm.Run("cp "+remoteDir+"kubelet.exe "+winTemp, true)
 	if err != nil {
-		return fmt.Errorf("unable to copy kubelet.exe to %s", winTemp)
+		return fmt.Errorf("unable to copy kubelet.exe to %s: %v", winTemp, err)
 	}
 
 	// Ignition v2.3.0 maps to Ignition config spec v3.1.0.
 	ignitionAcceptHeaderSpec := "application/vnd.coreos.ignition+json`;version=3.1.0"
 	// Download the worker ignition to C:\Windows\Tenp\ using the script that ignores the server cert
-	_, _, err = vm.Run(wgetIgnoreCertCmd+" -server https://api-int."+framework.ClusterAddress+":22623/config/worker"+
+	output, err := vm.Run(wgetIgnoreCertCmd+" -server https://"+framework.ClusterAddress+":22623/config/worker"+
 		" -output "+winTemp+"worker.ign"+" -acceptHeader "+ignitionAcceptHeaderSpec, true)
 	if err != nil {
-		return fmt.Errorf("unable to download worker.ign: %v", err)
+		return fmt.Errorf("unable to download worker.ign: %v\nOutput: %s", err, output)
 	}
 
 	return nil
@@ -216,10 +207,11 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 
 // remoteDownload downloads the tar file in url to the remoteDownloadFile location and checks if the SHA matches
 func (vm *wmcbVM) remoteDownload(pkg PkgInfo, remoteDownloadFile string) error {
-	_, stderr, err := vm.Run("if (!(Test-Path "+remoteDownloadFile+")) { wget "+pkg.getUrl()+" -o "+remoteDownloadFile+" }",
-		true)
+	acceptHeader := "*/*"
+	cmd := wgetIgnoreCertCmd + " -server \"" + pkg.getUrl() + "\" -output \"" + remoteDownloadFile + "\" -acceptHeader \"" + acceptHeader + "\""
+	output, err := vm.Run(cmd, true)
 	if err != nil {
-		return fmt.Errorf("unable to download %s: %v\n%s", pkg.getUrl(), err, stderr)
+		return fmt.Errorf("unable to download %s: %v\nOutput: %s", pkg.getUrl(), err, output)
 	}
 
 	shaValue, err := pkg.getShaValue()
@@ -228,12 +220,12 @@ func (vm *wmcbVM) remoteDownload(pkg PkgInfo, remoteDownloadFile string) error {
 	}
 
 	// Perform a checksum check
-	stdout, _, err := vm.Run("certutil -hashfile "+remoteDownloadFile+" "+pkg.getShaType(), true)
+	output, err = vm.Run("certutil -hashfile "+remoteDownloadFile+" "+pkg.getShaType(), true)
 	if err != nil {
 		return fmt.Errorf("unable to check SHA of %s: %v", remoteDownloadFile, err)
 	}
-	if !strings.Contains(stdout, shaValue) {
-		return fmt.Errorf("package %s SHA does not match: %v\n%s", remoteDownloadFile, err, stdout)
+	if !strings.Contains(output, shaValue) {
+		return fmt.Errorf("package %s SHA does not match: %v\n%s", remoteDownloadFile, err, output)
 	}
 
 	return nil
@@ -249,9 +241,9 @@ func (vm *wmcbVM) remoteDownloadExtract(pkg PkgInfo, remoteDownloadFile, remoteE
 	}
 
 	// Extract files from the archive
-	_, stderr, err := vm.Run("tar -xf "+remoteDownloadFile+" -C "+remoteExtractDir, true)
+	output, err := vm.Run("tar -xf "+remoteDownloadFile+" -C "+remoteExtractDir, true)
 	if err != nil {
-		return fmt.Errorf("unable to extract %s: %v\n%s", remoteDownloadFile, err, stderr)
+		return fmt.Errorf("unable to extract %s: %v\n%s", remoteDownloadFile, err, output)
 	}
 	return nil
 }
@@ -259,9 +251,9 @@ func (vm *wmcbVM) remoteDownloadExtract(pkg PkgInfo, remoteDownloadFile, remoteE
 // initializeTestConfigureCNIFiles initializes the files required for configure-cni
 func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 	// Create the CNI directory C:\Windows\Temp\cni on the Windows VM
-	_, stderr, err := vm.Run(mkdirCmd(winCNIDir), false)
+	output, err := vm.Run(mkdirCmd(winCNIDir), false)
 	if err != nil {
-		return fmt.Errorf("unable to create remote directory %s: %v\n%s", remoteDir, err, stderr)
+		return fmt.Errorf("unable to create remote directory %s: %v\n%s", remoteDir, err, output)
 	}
 
 	cniPkgUrl := framework.pkgs[cniPluginPkgName].getUrl()
@@ -294,10 +286,10 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 // handleHybridOverlay ensures that the hybrid overlay is running on the node
 func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 	// Check if the hybrid-overlay-node is running
-	_, stderr, err := vm.Run("Get-Process -Name \"hybrid-overlay-node\"", true)
+	output, err := vm.Run("Get-Process -Name \"hybrid-overlay-node\"", true)
 
 	// stderr being empty implies that an hybrid-overlay-node was running. This is to help with local development.
-	if err == nil || stderr == "" {
+	if err == nil || output == "" {
 		return nil
 	}
 
@@ -307,15 +299,15 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 		return fmt.Errorf("error waiting for hybrid overlay node annotation: %v", err)
 	}
 
-	_, stderr, err = vm.Run(mkdirCmd(kLog), false)
+	output, err = vm.Run(mkdirCmd(kLog), false)
 	if err != nil {
-		return fmt.Errorf("unable to create remote directory %s: %v\n%s", kLog, err, stderr)
+		return fmt.Errorf("unable to create remote directory %s: %v\n%s", kLog, err, output)
 	}
 
 	// Start the hybrid-overlay-node in the background over ssh. We cannot use vm.Run() and by extension WinRM.Run() here as
 	// we observed WinRM.Run() returning before the commands completes execution. The reason for that is unclear and
 	// requires further investigation.
-	go vm.RunOverSSH(hybridOverlayExecutable+" --node "+nodeName+
+	go vm.Run(hybridOverlayExecutable+" --node "+nodeName+
 		" --k8s-kubeconfig c:\\k\\kubeconfig > "+kLog+"hybrid-overlay.log 2>&1", false)
 
 	err = vm.waitForHybridOverlayToRun()
@@ -338,24 +330,24 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 
 // waitForOpenShiftHSNNetworks waits for the OpenShift HNS networks to be created until the timeout is reached
 func (vm *wmcbVM) waitForOpenShiftHNSNetworks() error {
-	var stdout string
+	var output string
 	var err error
 	for retries := 0; retries < e2ef.RetryCount; retries++ {
-		stdout, _, err = vm.Run("Get-HnsNetwork", true)
+		output, err = vm.Run("Get-HnsNetwork", true)
 		if err != nil {
 			// retry
 			continue
 		}
 
-		if strings.Contains(stdout, "BaseOVNKubernetesHybridOverlayNetwork") &&
-			strings.Contains(stdout, "OVNKubernetesHybridOverlayNetwork") {
+		if strings.Contains(output, "BaseOVNKubernetesHybridOverlayNetwork") &&
+			strings.Contains(output, "OVNKubernetesHybridOverlayNetwork") {
 			return nil
 		}
 		time.Sleep(e2ef.RetryInterval)
 	}
 
 	// OpenShift HNS networks were not found
-	log.Printf("Get-HnsNetwork:\n%s", stdout)
+	log.Printf("Get-HnsNetwork:\n%s", output)
 	return fmt.Errorf("timeout waiting for OpenShift HNS networks: %v", err)
 }
 
@@ -363,7 +355,7 @@ func (vm *wmcbVM) waitForOpenShiftHNSNetworks() error {
 func (vm *wmcbVM) waitForHybridOverlayToRun() error {
 	var err error
 	for retries := 0; retries < e2ef.RetryCount; retries++ {
-		_, _, err = vm.Run("Get-Process -Name \"hybrid-overlay-node\"", true)
+		_, err = vm.Run("Get-Process -Name \"hybrid-overlay-node\"", true)
 		if err == nil {
 			return nil
 		}
@@ -372,116 +364,6 @@ func (vm *wmcbVM) waitForHybridOverlayToRun() error {
 
 	// hybrid-overlay-node never started running
 	return fmt.Errorf("timeout waiting for hybrid-overlay-node: %v", err)
-}
-
-// approve approves the given CSR if it has not already been approved
-// Based on https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/certificates/certificates.go#L237
-func approve(csr *certificates.CertificateSigningRequest) error {
-	// Check if the certificate has already been approved
-	for _, c := range csr.Status.Conditions {
-		if c.Type == certificates.CertificateApproved {
-			return nil
-		}
-	}
-
-	// Approve the CSR
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		// Ensure we get the current version
-		csr, err := framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().Get(context.TODO(),
-			csr.GetName(), metav1.GetOptions{})
-		if err != nil {
-			return err
-		}
-
-		// Add the approval status condition
-		csr.Status.Conditions = append(csr.Status.Conditions, certificates.CertificateSigningRequestCondition{
-			Type:           certificates.CertificateApproved,
-			Reason:         "WMCBe2eTestRunnerApprove",
-			Message:        "This CSR was approved by WMCB e2e test runner",
-			LastUpdateTime: metav1.Now(),
-		})
-
-		_, err = framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().UpdateApproval(context.TODO(),
-			csr, metav1.UpdateOptions{})
-		return err
-	})
-}
-
-//findCSR finds the CSR that matches the requestor filter
-func findCSR(requestor string) (*certificates.CertificateSigningRequest, error) {
-	var foundCSR *certificates.CertificateSigningRequest
-	// Find the CSR
-	for retries := 0; retries < e2ef.RetryCount; retries++ {
-		csrs, err := framework.K8sclientset.CertificatesV1beta1().CertificateSigningRequests().List(context.TODO(),
-			metav1.ListOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("unable to get CSR list: %v", err)
-		}
-		if csrs == nil {
-			time.Sleep(e2ef.RetryInterval)
-			continue
-		}
-
-		for _, csr := range csrs.Items {
-			if !strings.Contains(csr.Spec.Username, requestor) {
-				continue
-			}
-			var handledCSR bool
-			for _, c := range csr.Status.Conditions {
-				if c.Type == certificates.CertificateApproved || c.Type == certificates.CertificateDenied {
-					handledCSR = true
-					break
-				}
-			}
-			if handledCSR {
-				continue
-			}
-			foundCSR = &csr
-			break
-		}
-
-		if foundCSR != nil {
-			break
-		}
-		time.Sleep(e2ef.RetryInterval)
-	}
-
-	if foundCSR == nil {
-		return nil, fmt.Errorf("unable to find CSR with requestor %s", requestor)
-	}
-	return foundCSR, nil
-}
-
-// handleCSR finds the CSR based on the requestor filter and approves it
-func handleCSR(requestorFilter string) error {
-	csr, err := findCSR(requestorFilter)
-	if err != nil {
-		return fmt.Errorf("error finding CSR for %s: %v", requestorFilter, err)
-	}
-
-	if err = approve(csr); err != nil {
-		return fmt.Errorf("error approving CSR for %s: %v", requestorFilter, err)
-	}
-
-	return nil
-}
-
-// handleCSRs handles the approval of bootstrap and node CSRs
-func handleCSRs() error {
-	// Handle the bootstrap CSR
-	err := handleCSR("system:serviceaccount:openshift-machine-config-operator:node-bootstrapper")
-	if err != nil {
-		return fmt.Errorf("unable to handle bootstrap CSR: %v", err)
-	}
-
-	// Handle the node CSR
-	// Note: for the product we want to get the node name from the instance information
-	err = handleCSR("system:node:")
-	if err != nil {
-		return fmt.Errorf("unable to handle node CSR: %v", err)
-	}
-
-	return nil
 }
 
 // mkdirCmd returns the Windows command to create a directory if it does not exists

@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: wmcb-e2e-test
+spec:
+  template:
+    metadata:
+      labels:
+        name: wmcb-e2e-test
+    spec:
+      hostNetwork: true
+      volumes:
+      - name: cloud-private-key
+        secret:
+          secretName: cloud-private-key
+      - name: aws-creds
+        secret:
+          secretName: aws-creds
+      containers:
+        - name: wmcb-e2e-test
+          # Replace this with the built image name
+          image: REPLACE_IMAGE
+          imagePullPolicy: Always
+          command:
+            - test-wmcb
+          args:
+            - -filesToBeTransferred=/home/test/wmcb_unit_test.exe,/home/test/wmcb_e2e_test.exe,/home/test/wget-ignore-cert.ps1,/home/test/hybrid-overlay-node.exe,/home/test/kubelet.exe
+            - -test.run=TestWMCB
+            - -test.v
+          volumeMounts:
+          - name: cloud-private-key
+            mountPath: "/etc/private-key/"
+            readOnly: true
+          - name: aws-creds
+            mountPath: "/etc/aws-creds/"
+            readOnly: true
+          env:
+            - name: ARTIFACT_DIR
+              value: ARTIFACT_DIR_VALUE
+            - name: AWS_SHARED_CREDENTIALS_FILE
+              value: /etc/aws-creds/credentials
+      restartPolicy: Never

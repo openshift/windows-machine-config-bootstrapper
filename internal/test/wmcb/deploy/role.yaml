@@ -1,0 +1,45 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: wmcb-e2e-test
+rules:
+  - apiGroups:
+    - ""
+    resources:
+    - nodes
+    verbs:
+    - "*"
+  - apiGroups:
+    - config.openshift.io
+    resources:
+    - infrastructures
+    - networks
+    verbs:
+    - get
+  # Permissions needed to approve a CSR.
+  - apiGroups:
+    - certificates.k8s.io
+    resources:
+    - signers
+    verbs:
+    - approve
+  - apiGroups:
+    - ""
+    resources:
+    - secrets
+    verbs:
+    - create
+    - get
+  # Permissions to access the machine api
+  - apiGroups:
+    - machine.openshift.io
+    resources:
+    - machines
+    - machinesets
+    verbs:
+    - create
+    - get
+    - list
+    - watch
+    - delete
