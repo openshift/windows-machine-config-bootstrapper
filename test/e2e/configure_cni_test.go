@@ -78,8 +78,11 @@ func testConfigureCNI(t *testing.T) {
 	// Kubelet arguments with paths that are set by configure-cni
 	// Does not include arguments with paths that do not depend on underlying OS
 	checkPathsFor := []string{"--cni-bin-dir", "--cni-conf-dir"}
+	_, path, _, err := getSvcInfo(bootstrapper.KubeletServiceName)
+	require.NoError(t, err, "Could not get kubelet arguments")
+
 	t.Run("Test the paths in Kubelet arguments", func(t *testing.T) {
-		testPathInKubeletArgs(t, checkPathsFor)
+		testPathInKubeletArgs(t, checkPathsFor, path)
 	})
 }
 
