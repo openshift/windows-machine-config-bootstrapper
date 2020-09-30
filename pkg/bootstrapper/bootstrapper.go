@@ -91,6 +91,9 @@ const (
 	cniBinDirOption = "--cni-bin-dir"
 	// cniConfDirOption is to specify the CNI conf directory
 	cniConfDirOption = "--cni-conf-dir"
+
+	// logDir specifies the logging directory that can be collected with must-gather
+	logDir = "C:\\var\\log"
 )
 
 // These regex are global, so that we only need to compile them once
@@ -124,9 +127,9 @@ type winNodeBootstrapper struct {
 	svcMgr *mgr.Mgr
 	// installDir is the directory the the kubelet service will be installed
 	installDir string
-	// logDir is the directory that captures log outputs of Kubelet
+	// kubeletLogDir is the directory that captures log outputs of Kubelet
 	// TODO: make this directory available in Artifacts
-	logDir string
+	kubeletLogDir string
 	// kubeletArgs is a map of the variable arguments that will be passed to the kubelet
 	kubeletArgs map[string]string
 	// cni holds all the CNI specific information
@@ -166,7 +169,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		kubeletConfPath:    filepath.Join(k8sInstallDir, "kubelet.conf"),
 		ignitionFilePath:   ignitionFile,
 		installDir:         k8sInstallDir,
-		logDir:             "C:\\var\\log\\kubelet",
+		kubeletLogDir:      filepath.Join(logDir, "kubelet"),
 		initialKubeletPath: kubeletPath,
 		svcMgr:             svcMgr,
 		kubeletArgs:        make(map[string]string),
@@ -425,9 +428,21 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 	}
 
 	// Create log directory
-	err = os.MkdirAll(wmcb.logDir, os.ModeDir)
+	err = os.MkdirAll(wmcb.kubeletLogDir, os.ModeDir)
 	if err != nil {
-		return fmt.Errorf("could not make %s directory: %v", wmcb.logDir, err)
+		return fmt.Errorf("could not make %s directory: %v", wmcb.kubeletLogDir, err)
+	}
+
+	// Create docker logs symlink
+	dockerLogDir := filepath.Join(logDir, "docker")
+	err = os.Mkdir(dockerLogDir, os.ModeDir)
+	if err != nil {
+		return fmt.Errorf("could not make %s directory: %v", dockerLogDir, err)
+	}
+
+	err = os.Symlink(filepath.Join(dockerLogDir, "docker.log"), "%LOCALAPPDATA%\\Docker\\log.txt")
+	if err != nil {
+		return fmt.Errorf("could not create docker logs symlink: %v", err)
 	}
 
 	// Populate destination directory with the files we need
@@ -460,7 +475,7 @@ func (wmcb *winNodeBootstrapper) createKubeletService() error {
 		"--cert-dir=" + certDirectory,
 		"--windows-service",
 		"--logtostderr=false",
-		"--log-file=" + filepath.Join(wmcb.logDir, "kubelet.log"),
+		"--log-file=" + filepath.Join(wmcb.kubeletLogDir, "kubelet.log"),
 		// Registers the Kubelet with Windows specific taints so that linux pods won't get scheduled onto
 		// Windows nodes.
 		// TODO: Write a `against the cluster` e2e test which checks for the Windows node object created

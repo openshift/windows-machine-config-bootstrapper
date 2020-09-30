@@ -567,9 +567,9 @@ func TestKubeletDirectoriesCreation(t *testing.T) {
 	// logDirectory which has to be created by wmcb
 	logDirectory := filepath.Join(dir, "log")
 	wnb := winNodeBootstrapper{
-		installDir:  dir,
-		logDir:      logDirectory,
-		kubeletArgs: make(map[string]string),
+		installDir:    dir,
+		kubeletLogDir: logDirectory,
+		kubeletArgs:   make(map[string]string),
 	}
 	err = wnb.initializeKubeletFiles()
 	assert.NoError(t, err, "error initializing kubelet files")
