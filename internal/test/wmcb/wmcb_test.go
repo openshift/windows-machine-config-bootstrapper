@@ -2,7 +2,6 @@ package wmcb
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -25,6 +24,10 @@ import (
 )
 
 const (
+	// payloadDirectory is the directory in the operator image where are all the binaries live
+	payloadDirectory = "/payload/"
+	// cniDirectory is the directory for storing the CNI plugins
+	cniDirectory = payloadDirectory + "/cni/"
 	// remoteDir is the remote temporary directory that the e2e test uses
 	remoteDir = "C:\\Temp\\"
 	// winTemp is the default Windows temporary directory
@@ -58,9 +61,6 @@ var (
 		Value:  "Windows",
 		Effect: v1.TaintEffectNoSchedule,
 	}
-	// filesToBeTransferred holds the list of files that needs to be transferred to the Windows VM
-	filesToBeTransferred = flag.String("filesToBeTransferred", "",
-		"Comma separated list of files to be transferred")
 	// cniPluginPkgName is the user-defined name of the required cni plugins package
 	cniPluginPkgName = pkgName("cniPlugins")
 )
@@ -109,13 +109,17 @@ func (f *wmcbFramework) Setup(vmCount int, skipVMSetup bool) error {
 
 // TestWMCB runs the unit and e2e tests for WMCB on the remote VMs
 func TestWMCB(t *testing.T) {
+	srcDestPairs := map[string]string{
+		payloadDirectory: remoteDir,
+		cniDirectory:     winCNIDir,
+	}
+
 	for _, vm := range framework.WinVMs {
 		log.Printf("Testing VM: %s", vm.GetCredentials().InstanceId())
 		wVM := &wmcbVM{vm}
-		files := strings.Split(*filesToBeTransferred, ",")
-		for _, file := range files {
-			err := wVM.CopyFile(file, remoteDir)
-			require.NoError(t, err, "error copying %s to the Windows VM", file)
+		for src, dest := range srcDestPairs {
+			err := wVM.CopyDirectory(src, dest)
+			require.NoError(t, err, "error copying %s to the Windows VM", src)
 		}
 		t.Run("Unit", func(t *testing.T) {
 			assert.NoError(t, wVM.runTest(unitExecutable+" --test.v"), "WMCB unit test failed")
