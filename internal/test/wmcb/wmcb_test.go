@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,8 +48,6 @@ const (
 	hybridOverlayName = "hybrid-overlay-node.exe"
 	// hybridOverExecutable is the remote location of the hybrid overlay binary
 	hybridOverlayExecutable = remoteDir + hybridOverlayName
-	// cniPluginsBaseURL is the base URL of the CNI Plugins location
-	cniPluginsBaseURL = "https://github.com/containernetworking/plugins/releases/download/"
 )
 
 var (
@@ -61,8 +57,6 @@ var (
 		Value:  "Windows",
 		Effect: v1.TaintEffectNoSchedule,
 	}
-	// cniPluginPkgName is the user-defined name of the required cni plugins package
-	cniPluginPkgName = pkgName("cniPlugins")
 )
 
 // wmcbVM is a wrapper for the WindowsVM interface that associates it with WMCB specific testing
@@ -73,24 +67,6 @@ type wmcbVM struct {
 type wmcbFramework struct {
 	// TestFramework holds the instantiation of test suite being executed
 	*e2ef.TestFramework
-	// pkgs contains map of the packages to be downloaded
-	pkgs map[pkgName]PkgInfo
-}
-
-// initializePackages sets up all the required packages of type pkgInfo
-func (f *wmcbFramework) initializePackages() error {
-	var pkgs = make(map[pkgName]PkgInfo)
-	// create pkgInfo struct that implements PkgInfo interface for cni plugins and populate it
-	cniPluginsPkg, err := pkgInfoFactory(cniPluginPkgName, "sha512", cniPluginsBaseURL,
-		framework.LatestCniPluginsVersion)
-	if err != nil {
-		return err
-	}
-	// Add cniPlugins to the pkgs map
-	pkgs[cniPluginsPkg.getName()] = cniPluginsPkg
-
-	f.pkgs = pkgs
-	return nil
 }
 
 // Setup initializes the wsuFramework.
@@ -100,9 +76,6 @@ func (f *wmcbFramework) Setup(vmCount int, skipVMSetup bool) error {
 	err := f.TestFramework.Setup(vmCount, skipVMSetup)
 	if err != nil {
 		return fmt.Errorf("framework setup failed: %v", err)
-	}
-	if err := f.initializePackages(); err != nil {
-		return fmt.Errorf("unable to initialize CNI Plugins package info: %v", err)
 	}
 	return nil
 }
@@ -209,68 +182,12 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 	return nil
 }
 
-// remoteDownload downloads the tar file in url to the remoteDownloadFile location and checks if the SHA matches
-func (vm *wmcbVM) remoteDownload(pkg PkgInfo, remoteDownloadFile string) error {
-	acceptHeader := "*/*"
-	cmd := wgetIgnoreCertCmd + " -server \"" + pkg.getUrl() + "\" -output \"" + remoteDownloadFile + "\" -acceptHeader \"" + acceptHeader + "\""
-	output, err := vm.Run(cmd, true)
-	if err != nil {
-		return fmt.Errorf("unable to download %s: %v\nOutput: %s", pkg.getUrl(), err, output)
-	}
-
-	shaValue, err := pkg.getShaValue()
-	if err != nil {
-		return nil
-	}
-
-	// Perform a checksum check
-	output, err = vm.Run("certutil -hashfile "+remoteDownloadFile+" "+pkg.getShaType(), true)
-	if err != nil {
-		return fmt.Errorf("unable to check SHA of %s: %v", remoteDownloadFile, err)
-	}
-	if !strings.Contains(output, shaValue) {
-		return fmt.Errorf("package %s SHA does not match: %v\n%s", remoteDownloadFile, err, output)
-	}
-
-	return nil
-}
-
-// remoteDownloadExtract downloads the tar file in url to the remoteDownloadFile location, checks if the SHA matches and
-//  extracts the files to the remoteExtractDir directory
-func (vm *wmcbVM) remoteDownloadExtract(pkg PkgInfo, remoteDownloadFile, remoteExtractDir string) error {
-	// Download the file from the URL
-	err := vm.remoteDownload(pkg, remoteDownloadFile)
-	if err != nil {
-		return fmt.Errorf("unable to download %s: %v", pkg.getUrl(), err)
-	}
-
-	// Extract files from the archive
-	output, err := vm.Run("tar -xf "+remoteDownloadFile+" -C "+remoteExtractDir, true)
-	if err != nil {
-		return fmt.Errorf("unable to extract %s: %v\n%s", remoteDownloadFile, err, output)
-	}
-	return nil
-}
-
 // initializeTestConfigureCNIFiles initializes the files required for configure-cni
 func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 	// Create the CNI directory C:\Windows\Temp\cni on the Windows VM
 	output, err := vm.Run(mkdirCmd(winCNIDir), false)
 	if err != nil {
 		return fmt.Errorf("unable to create remote directory %s: %v\n%s", remoteDir, err, output)
-	}
-
-	cniPkgUrl := framework.pkgs[cniPluginPkgName].getUrl()
-	cniUrl, err := url.Parse(cniPkgUrl)
-	if err != nil {
-		return fmt.Errorf("error parsing %s: %v", cniPkgUrl, err)
-	}
-
-	// Download and extract the CNI binaries on the Windows VM
-	err = vm.remoteDownloadExtract(framework.pkgs[cniPluginPkgName], remoteDir+path.Base(cniUrl.Path), winCNIDir)
-
-	if err != nil {
-		return fmt.Errorf("unable to download CNI package: %v", err)
 	}
 
 	// Create the CNI config file locally
