@@ -24,7 +24,6 @@ spec:
           command:
             - test-wmcb
           args:
-            - -filesToBeTransferred=/home/test/wmcb_unit_test.exe,/home/test/wmcb_e2e_test.exe,/home/test/wget-ignore-cert.ps1,/home/test/hybrid-overlay-node.exe,/home/test/kubelet.exe
             - -test.run=TestWMCB
             - -test.v
           volumeMounts:

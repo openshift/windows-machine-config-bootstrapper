@@ -32,16 +32,17 @@ RUN CGO_ENABLED=0 GO111MODULE=on go test -c -run=TestWMCB -timeout=30m . -o test
 FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.6 as testing
 LABEL stage=testing
 
-WORKDIR /home/test
-COPY internal/test/wmcb/templates templates
+WORKDIR /payload
 COPY internal/test/wmcb/powershell/ .
-
 COPY --from=build /build/ovn-kubernetes/go-controller/_output/go/bin/windows/hybrid-overlay-node.exe .
 COPY --from=build /build/kubernetes/_output/local/bin/windows/amd64/kubelet.exe .
 COPY --from=build /build/wmcb_unit_test.exe .
 COPY --from=build /build/wmcb_e2e_test.exe .
+
+WORKDIR /test
+COPY internal/test/wmcb/templates templates
 COPY --from=build /build/internal/test/wmcb/test-wmcb .
 
-ENV PATH="${PATH}:/home/test"
+ENV PATH="${PATH}:/test"
 
 ENTRYPOINT ["/bin/bash"]
