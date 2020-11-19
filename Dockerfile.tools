@@ -15,8 +15,12 @@ RUN git clone --branch release-4.6 --single-branch https://github.com/openshift/
 WORKDIR /build/ovn-kubernetes/go-controller/
 RUN make windows
 
-# TODO: Add building the CNI plugins to dockerfile and remove downloading binary
-# https://issues.redhat.com/browse/WINC-490
+# Build CNI plugins
+WORKDIR /build/
+RUN git clone --branch release-4.6 --single-branch https://github.com/openshift/containernetworking-plugins
+WORKDIR /build/containernetworking-plugins/
+ENV CGO_ENABLED=0
+RUN ./build_windows.sh
 
 WORKDIR /build/
 COPY . .
@@ -31,6 +35,12 @@ RUN CGO_ENABLED=0 GO111MODULE=on go test -c -run=TestWMCB -timeout=30m . -o test
 
 FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.6 as testing
 LABEL stage=testing
+
+WORKDIR /payload/cni
+COPY --from=build /build/containernetworking-plugins/bin/flannel.exe .
+COPY --from=build /build/containernetworking-plugins/bin/host-local.exe .
+COPY --from=build /build/containernetworking-plugins/bin/win-bridge.exe .
+COPY --from=build /build/containernetworking-plugins/bin/win-overlay.exe .
 
 WORKDIR /payload
 COPY internal/test/wmcb/powershell/ .
