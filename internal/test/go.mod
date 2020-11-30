@@ -1,6 +1,6 @@
 module github.com/openshift/windows-machine-config-bootstrapper/internal/test
 
-go 1.14
+go 1.15
 
 replace (
 	github.com/Azure/go-autorest => github.com/Azure/go-autorest v13.3.2+incompatible // Required by OLM
