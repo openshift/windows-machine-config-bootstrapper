@@ -6,6 +6,14 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
+	"k8s.io/apimachinery/pkg/util/wait"
+)
+
+const (
+	// svcPollInterval is the is the interval at which we poll the kubelet service
+	svcPollInterval = 30 * time.Second
+	// svcRunTimeout is the maximum duration to wait for the kubelet service to go to running state
+	svcRunTimeout = 2 * time.Minute
 )
 
 // kubeletService struct contains the kubelet specific service information
@@ -125,16 +133,19 @@ func (k *kubeletService) refresh(config mgr.Config) error {
 	if err := k.start(); err != nil {
 		return fmt.Errorf("error starting kubelet service: %v", err)
 	}
+	// Wait for service to go to Running state
+	err := wait.Poll(svcPollInterval, svcRunTimeout, func() (done bool, err error) {
+		isKubeletRunning, err := k.isRunning()
+		if err != nil {
+			return false, nil
+		}
+		return isKubeletRunning, nil
+	})
+	if err != nil {
+		return fmt.Errorf("error running kubelet service %v", err)
+	}
 
 	return nil
-}
-
-// remove deletes the kubelet service via the Windows service API
-func (k *kubeletService) remove() error {
-	if k.obj == nil {
-		return nil
-	}
-	return k.obj.Delete()
 }
 
 // isRunning returns true if the kubelet service is running
@@ -144,15 +155,6 @@ func (k *kubeletService) isRunning() (bool, error) {
 		return false, err
 	}
 	return status.State == svc.Running, nil
-}
-
-// stopAndRemove stops and removes the kubelet service
-func (k *kubeletService) stopAndRemove() error {
-	if k.obj == nil {
-		return nil
-	}
-	k.stop()
-	return k.remove()
 }
 
 // disconnect removes all connections to the Windows service svcMgr api, and allows services to be deleted
