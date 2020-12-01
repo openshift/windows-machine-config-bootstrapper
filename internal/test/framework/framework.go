@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -66,8 +65,6 @@ type TestFramework struct {
 	ClusterVersion string
 	// latestRelease is the latest release of the wmcb
 	latestRelease *github.RepositoryRelease
-	// LatestCniPluginsVersion is the latest 0.8.x version of CNI Plugins
-	LatestCniPluginsVersion string
 	// K8sVersion is the current version of Kuberenetes
 	K8sVersion string
 	// clusterAddress is the address of the OpenShift cluster e.g. "foo.fah.com".
@@ -110,9 +107,6 @@ func (f *TestFramework) Setup(vmCount int, skipVMSetup bool) error {
 	}
 	if err := f.getClusterAddress(); err != nil {
 		return fmt.Errorf("unable to get cluster address: %v", err)
-	}
-	if err := f.getLatestCniPluginsVersion(); err != nil {
-		return fmt.Errorf("unable to get latest 0.8.x version of CNI Plugins: %v", err)
 	}
 	if err := f.getMachineAPIClient(config); err != nil {
 		return fmt.Errorf("unable to get the Kube API client: %v", err)
@@ -231,29 +225,6 @@ func (f *TestFramework) GetClusterVersion() error {
 
 	f.ClusterVersion = openshiftVersion
 	return nil
-}
-
-// getLatestCniPluginsVersion returns the latest 0.8.x version of CNI plugins in 'v<major>.<minor>.<patch>' format
-func (f *TestFramework) getLatestCniPluginsVersion() error {
-	releases, err := f.getGithubReleases("containernetworking", "plugins")
-	if err != nil {
-		return err
-	}
-	// Iterating over releases to fetch versions from tag names
-	var cniPluginsVersions = []string{}
-	for _, release := range releases {
-		cniPluginsVersions = append(cniPluginsVersions, release.GetTagName())
-	}
-	// Sorting versions in reverse order so as to get latest version first
-	sort.Sort(sort.Reverse(sort.StringSlice(cniPluginsVersions)))
-	// Iterating over versions to find first 0.8.x version which is not a release candidate
-	for _, cniPluginsVersion := range cniPluginsVersions {
-		if strings.HasPrefix(cniPluginsVersion, "v0.8.") && !strings.Contains(cniPluginsVersion, "rc") {
-			f.LatestCniPluginsVersion = cniPluginsVersion
-			return nil
-		}
-	}
-	return fmt.Errorf("could not fetch latest 0.8.x version of CNI Plugins")
 }
 
 // getGithubReleases gets all the github releases for a given owner and repo
