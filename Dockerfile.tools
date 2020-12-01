@@ -1,26 +1,5 @@
-FROM registry.access.redhat.com/ubi8/ubi-minimal as build
+FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.6 as build
 LABEL stage=build
-
-RUN microdnf -y install rsync make git tar findutils diffutils
-
-# We are explictly downloading Go instead of using `microdnf install`, as microdnf currently installs Go v1.13.x,
-# we need minimim Go v1.14.4 for building the kubelet.
-# Download and install Go
-RUN curl -L -s https://dl.google.com/go/go1.14.7.linux-amd64.tar.gz > go1.14.7.linux-amd64.tar.gz \
-    && sha256sum go1.14.7.linux-amd64.tar.gz \
-    && echo "4a7fa60f323ee1416a4b1425aefc37ea359e9d64df19c326a58953a97ad41ea5  go1.14.7.linux-amd64.tar.gz" | sha256sum -c \
-    && tar -xzf go1.14.7.linux-amd64.tar.gz \
-    && mv go /usr/local \
-    && rm -rf ./go*
-
-# Configuring go
-RUN mkdir /go/
-RUN chmod -R g=u+w /go
-ENV GOCACHE="/go/.cache"
-ENV PATH="${PATH}:/usr/local/go/bin"
-ENV GOPATH="/go"
-
-RUN mkdir /build/
 WORKDIR /build/
 
 # Build kubelet.exe
@@ -50,27 +29,8 @@ RUN make build-wmcb-e2e-test
 WORKDIR /build/internal/test/wmcb/
 RUN CGO_ENABLED=0 GO111MODULE=on go test -c -run=TestWMCB -timeout=30m . -o test-wmcb
 
-FROM registry.access.redhat.com/ubi8/ubi-minimal as testing
+FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.6 as testing
 LABEL stage=testing
-
-RUN microdnf -y install rsync make git tar findutils diffutils
-
-# We are explictly downloading Go instead of using `microdnf install`, as microdnf currently installs Go v1.13.x,
-# keeping this in sync with build stage.
-# Download and install Go
-RUN curl -L -s https://dl.google.com/go/go1.14.7.linux-amd64.tar.gz > go1.14.7.linux-amd64.tar.gz \
-    && sha256sum go1.14.7.linux-amd64.tar.gz \
-    && echo "4a7fa60f323ee1416a4b1425aefc37ea359e9d64df19c326a58953a97ad41ea5  go1.14.7.linux-amd64.tar.gz" | sha256sum -c \
-    && tar -xzf go1.14.7.linux-amd64.tar.gz \
-    && mv go /usr/local \
-    && rm -rf ./go*
-
-# Configuring go
-RUN mkdir /go/
-RUN chmod -R g=u+w /go
-ENV GOCACHE="/go/.cache"
-ENV PATH="${PATH}:/usr/local/go/bin"
-ENV GOPATH="/go"
 
 WORKDIR /home/test
 COPY internal/test/wmcb/templates templates
