@@ -26,6 +26,6 @@ require (
 	go.uber.org/zap v1.10.0
 	golang.org/x/sys v0.0.0-20200610111108-226ff32320da
 	k8s.io/api v0.0.0-20190923155552-eac758366a00 // indirect
-	k8s.io/apimachinery v0.0.0-20190923155427-ec87dd743e08 // indirect
+	k8s.io/apimachinery v0.0.0-20190923155427-ec87dd743e08
 	sigs.k8s.io/controller-runtime v0.2.1
 )
