@@ -412,4 +412,16 @@ func testWMCBCluster(t *testing.T) {
 		metav1.ListOptions{LabelSelector: e2ef.WindowsLabel})
 	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
 	assert.Lenf(t, winNodes.Items, 1, "expected one node to have node label but found: %v", len(winNodes.Items))
+	// Test Windows Nodes for Ready status
+	for _, node := range winNodes.Items {
+		readyCondition := false
+		for _, condition := range node.Status.Conditions {
+			if condition.Type == v1.NodeReady {
+				readyCondition = true
+				assert.Equalf(t, v1.ConditionTrue, condition.Status, "expected Windows node %v should be in %v State",
+					node.Name, condition.Status)
+			}
+		}
+		assert.Truef(t, readyCondition, "expected node Status to have condition type Ready for node %v", node.Name)
+	}
 }
