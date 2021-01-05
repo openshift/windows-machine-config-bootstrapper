@@ -1,9 +1,13 @@
 FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.6 as build
 LABEL stage=build
+
+# Clone WMCO repo and initialize submodules for building of windows binaries payload for e2e testing 
 WORKDIR /build/
+RUN git clone --branch release-4.6 --single-branch https://github.com/openshift/windows-machine-config-operator.git
+WORKDIR /build/windows-machine-config-operator/
+RUN git submodule update --init containernetworking-plugins kubernetes ovn-kubernetes
 
-RUN git clone --branch release-4.6 --single-branch --recurse-submodules https://github.com/openshift/windows-machine-config-operator.git
-
+# Build kubelet.exe
 WORKDIR /build/windows-machine-config-operator/kubernetes/
 RUN KUBE_BUILD_PLATFORMS=windows/amd64 make WHAT=cmd/kubelet
 
