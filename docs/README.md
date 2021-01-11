@@ -81,7 +81,3 @@ Inorder to skip MachineSet setup, add `-skipVMSetup` argument to `args` field in
 A MachineSet with label `machine.openshift.io/os-id=Windows` needs to be created, and the Machine should be in `Provisioned` 
 state in order to use `-skipVMSetup`. Test suite will use the mounted private key to access the Machine created. 
 Using an already `Provisioned` VM would reduce the wait time to run the test from 12 minute to just 1 minute.
-
-### Ansible
-
-Follow the instructions in `tools/ansible/README.md`, and ensure the playbook completes successfully.
