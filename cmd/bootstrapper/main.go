@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"os"
 
 	"github.com/spf13/cobra"
 	logger "sigs.k8s.io/controller-runtime/pkg/log"
@@ -35,5 +36,6 @@ func init() {
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		log.Error(err, "wmcb execution failed")
+		os.Exit(1)
 	}
 }
