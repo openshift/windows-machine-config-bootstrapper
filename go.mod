@@ -15,7 +15,6 @@ require (
 	github.com/coreos/ignition v0.35.0
 	github.com/coreos/ignition/v2 v2.6.0
 	github.com/go-bindata/go-bindata/v3 v3.1.3
-	github.com/go-logr/zapr v0.1.0
 	github.com/gogo/protobuf v1.2.1 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/spf13/cobra v0.0.5
@@ -23,7 +22,7 @@ require (
 	github.com/stretchr/testify v1.5.1
 	github.com/vincent-petithory/dataurl v0.0.0-20160330182126-9a301d65acbb
 	go.uber.org/atomic v1.4.0 // indirect
-	go.uber.org/zap v1.10.0
+	go.uber.org/zap v1.10.0 // indirect
 	golang.org/x/sys v0.0.0-20200610111108-226ff32320da
 	k8s.io/api v0.0.0-20190923155552-eac758366a00 // indirect
 	k8s.io/apimachinery v0.0.0-20190923155427-ec87dd743e08
