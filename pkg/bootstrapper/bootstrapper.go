@@ -580,12 +580,21 @@ func (wmcb *winNodeBootstrapper) updateKubeletService(config mgr.Config, kubelet
 // service, and then starts the kubelet service
 func (wmcb *winNodeBootstrapper) InitializeKubelet() error {
 	var err error
-	if wmcb.kubeletSVC == nil {
-		err = wmcb.initializeKubeletFiles()
+
+	if wmcb.kubeletSVC != nil {
+		// Stop kubelet service if it is in Running state. This is required to access kubelet files
+		// without getting 'The process cannot access the file because it is being used by another process.' error
+		err := wmcb.kubeletSVC.stop()
 		if err != nil {
-			return fmt.Errorf("failed to initialize kubelet: %v", err)
+			return fmt.Errorf("failed to stop kubelet service: %v", err)
 		}
 	}
+
+	err = wmcb.initializeKubeletFiles()
+	if err != nil {
+		return fmt.Errorf("failed to initialize kubelet: %v", err)
+	}
+
 	err = wmcb.ensureKubeletService()
 	if err != nil {
 		return fmt.Errorf("failed to ensure that kubelet windows service is present: %v", err)
