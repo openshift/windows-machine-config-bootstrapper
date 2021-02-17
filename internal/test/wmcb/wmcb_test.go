@@ -109,6 +109,9 @@ func (vm *wmcbVM) runE2ETestSuite(t *testing.T) {
 	vm.runTestBootstrapper(t)
 
 	vm.runTestConfigureCNI(t)
+
+	// Run this test only after TestBoostrapper() to ensure kubelet service is present.
+	vm.runTestKubeletUninstall(t)
 }
 
 // runTest runs the testCmd in the given VM
@@ -285,6 +288,11 @@ func (vm *wmcbVM) waitForHybridOverlayToRun() error {
 
 	// hybrid-overlay-node never started running
 	return fmt.Errorf("timeout waiting for hybrid-overlay-node: %v", err)
+}
+
+func (vm *wmcbVM) runTestKubeletUninstall(t *testing.T) {
+	err := vm.runTest(e2eExecutable + " --test.run TestKubeletUninstall --test.v")
+	require.NoError(t, err, "TestKubeletUninstall failed")
 }
 
 // mkdirCmd returns the Windows command to create a directory if it does not exists
