@@ -183,6 +183,17 @@ func (k *kubeletService) setRecoveryActions() error {
 	return nil
 }
 
+// stopAndRemove stops and removes the kubelet service
+func (k *kubeletService) stopAndRemove() error {
+	if k.obj == nil {
+		return nil
+	}
+	if err := k.stop(); err != nil {
+		return fmt.Errorf("failed to stop kubelet service: %v", err)
+	}
+	return k.obj.Delete()
+}
+
 // startService is a helper to start a given service
 func startService(serviceObj *mgr.Service) error {
 	if serviceObj == nil {
