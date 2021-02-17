@@ -149,7 +149,7 @@ type cniOptions struct {
 
 // NewWinNodeBootstrapper takes the dir to install the kubelet to, and paths to the ignition and kubelet files along
 // with the CNI options as inputs, and generates the winNodeBootstrapper object. The CNI options are populated only in
-// the configure-cni command.
+// the configure-cni command. The inputs to NewWinNodeBootstrapper are ignored while using the uninstall kubelet functionality.
 func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cniDir string,
 	cniConfig string) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
@@ -665,6 +665,19 @@ func (wmcb *winNodeBootstrapper) Disconnect() error {
 	err := wmcb.svcMgr.Disconnect()
 	wmcb.svcMgr = nil
 	return err
+}
+
+// UninstallKubelet uninstalls the kubelet service from Windows node
+func (wmcb *winNodeBootstrapper) UninstallKubelet() error {
+	if wmcb.kubeletSVC == nil {
+		return fmt.Errorf("kubelet service is not present")
+	}
+	// Stop and remove kubelet service if it is in Running state.
+	err := wmcb.kubeletSVC.stopAndRemove()
+	if err != nil {
+		return fmt.Errorf("failed to stop and remove kubelet service: %v", err)
+	}
+	return nil
 }
 
 func copyFile(src, dest string) error {
