@@ -1,4 +1,4 @@
-FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.7 as build
+FROM docker.io/openshift/origin-release:golang-1.15 as build
 LABEL stage=build
 
 # Clone WMCO repo and initialize submodules for building of windows binaries payload for e2e testing 
@@ -31,7 +31,7 @@ RUN make build-wmcb-e2e-test
 WORKDIR /build/internal/test/wmcb/
 RUN CGO_ENABLED=0 GO111MODULE=on go test -c -run=TestWMCB -timeout=30m . -o test-wmcb
 
-FROM registry.svc.ci.openshift.org/ocp/builder:rhel-8-golang-1.15-openshift-4.7 as testing
+FROM docker.io/openshift/origin-release:golang-1.15 as testing
 LABEL stage=testing
 
 WORKDIR /payload/cni
