@@ -179,18 +179,34 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		}
 	}
 
-	// If there is already a kubelet service running, find it
-	if ksvc, err := svcMgr.OpenService(KubeletServiceName); err == nil {
-		dependents, err := updateKubeletDependents(svcMgr)
-		if err != nil {
-			return nil, fmt.Errorf("error updating kubelet dependents field %v", err)
-		}
-		bootstrapper.kubeletSVC, err = newKubeletService(ksvc, dependents)
-		if err != nil {
-			return nil, fmt.Errorf("could not initialize struct kubeletService: %v", err)
-		}
+	// If there is already a kubelet service running, find and assign it
+	bootstrapper.kubeletSVC, err = assignExistingKubelet(svcMgr)
+	if err != nil {
+		return nil, fmt.Errorf("could not assign existing kubelet service: %v", err)
 	}
 	return &bootstrapper, nil
+}
+
+// assignExistingKubelet finds the existing kubelet service from the Windows Service Manager,
+// assigns its value to the kubeletService struct and returns it.
+func assignExistingKubelet(svcMgr *mgr.Mgr) (*kubeletService, error) {
+	ksvc, err := svcMgr.OpenService(KubeletServiceName)
+	if err != nil {
+		// Do not return error if the service is not installed.
+		if !strings.Contains(err.Error(), "service does not exist") {
+			return nil, fmt.Errorf("error getting existing kubelet service %v", err)
+		}
+		return nil, nil
+	}
+	dependents, err := updateKubeletDependents(svcMgr)
+	if err != nil {
+		return nil, fmt.Errorf("error updating kubelet dependents field %v", err)
+	}
+	kubeletSVC, err := newKubeletService(ksvc, dependents)
+	if err != nil {
+		return nil, fmt.Errorf("could not initialize struct kubeletService: %v", err)
+	}
+	return kubeletSVC, nil
 }
 
 // newCNIOptions takes the paths to the kubelet installation and the CNI files as input and returns the cniOptions
