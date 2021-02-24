@@ -149,7 +149,7 @@ type cniOptions struct {
 
 // NewWinNodeBootstrapper takes the dir to install the kubelet to, and paths to the ignition and kubelet files along
 // with the CNI options as inputs, and generates the winNodeBootstrapper object. The CNI options are populated only in
-// the configure-cni command.
+// the configure-cni command. The inputs to NewWinNodeBootstrapper are ignored while using the uninstall kubelet functionality.
 func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cniDir string,
 	cniConfig string) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
@@ -179,18 +179,34 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		}
 	}
 
-	// If there is already a kubelet service running, find it
-	if ksvc, err := svcMgr.OpenService(KubeletServiceName); err == nil {
-		dependents, err := updateKubeletDependents(svcMgr)
-		if err != nil {
-			return nil, fmt.Errorf("error updating kubelet dependents field %v", err)
-		}
-		bootstrapper.kubeletSVC, err = newKubeletService(ksvc, dependents)
-		if err != nil {
-			return nil, fmt.Errorf("could not initialize struct kubeletService: %v", err)
-		}
+	// If there is already a kubelet service running, find and assign it
+	bootstrapper.kubeletSVC, err = assignExistingKubelet(svcMgr)
+	if err != nil {
+		return nil, fmt.Errorf("could not assign existing kubelet service: %v", err)
 	}
 	return &bootstrapper, nil
+}
+
+// assignExistingKubelet finds the existing kubelet service from the Windows Service Manager,
+// assigns its value to the kubeletService struct and returns it.
+func assignExistingKubelet(svcMgr *mgr.Mgr) (*kubeletService, error) {
+	ksvc, err := svcMgr.OpenService(KubeletServiceName)
+	if err != nil {
+		// Do not return error if the service is not installed.
+		if !strings.Contains(err.Error(), "service does not exist") {
+			return nil, fmt.Errorf("error getting existing kubelet service %v", err)
+		}
+		return nil, nil
+	}
+	dependents, err := updateKubeletDependents(svcMgr)
+	if err != nil {
+		return nil, fmt.Errorf("error updating kubelet dependents field %v", err)
+	}
+	kubeletSVC, err := newKubeletService(ksvc, dependents)
+	if err != nil {
+		return nil, fmt.Errorf("could not initialize struct kubeletService: %v", err)
+	}
+	return kubeletSVC, nil
 }
 
 // newCNIOptions takes the paths to the kubelet installation and the CNI files as input and returns the cniOptions
@@ -649,6 +665,19 @@ func (wmcb *winNodeBootstrapper) Disconnect() error {
 	err := wmcb.svcMgr.Disconnect()
 	wmcb.svcMgr = nil
 	return err
+}
+
+// UninstallKubelet uninstalls the kubelet service from Windows node
+func (wmcb *winNodeBootstrapper) UninstallKubelet() error {
+	if wmcb.kubeletSVC == nil {
+		return fmt.Errorf("kubelet service is not present")
+	}
+	// Stop and remove kubelet service if it is in Running state.
+	err := wmcb.kubeletSVC.stopAndRemove()
+	if err != nil {
+		return fmt.Errorf("failed to stop and remove kubelet service: %v", err)
+	}
+	return nil
 }
 
 func copyFile(src, dest string) error {
