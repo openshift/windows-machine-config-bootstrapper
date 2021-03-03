@@ -3,7 +3,7 @@ LABEL stage=build
 
 # Clone WMCO repo and initialize submodules for building of windows binaries payload for e2e testing 
 WORKDIR /build/
-RUN git clone --branch release-4.7 --single-branch https://github.com/openshift/windows-machine-config-operator.git
+RUN git clone --branch release-4.8 --single-branch https://github.com/openshift/windows-machine-config-operator.git
 WORKDIR /build/windows-machine-config-operator/
 RUN git submodule update --init containernetworking-plugins kubernetes ovn-kubernetes
 
