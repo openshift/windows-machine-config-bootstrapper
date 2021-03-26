@@ -1,6 +1,6 @@
 module github.com/openshift/windows-machine-config-bootstrapper
 
-go 1.15
+go 1.16
 
 // Replace is used to pin a specific version of a package or to point to sub-go.mod directories.
 // Use 'replace' to point to the sub-go.mod directory for building a binary in the root directory and always build by
