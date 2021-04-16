@@ -92,5 +92,5 @@ func isCNIConfigured(t *testing.T, logPath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return strings.Contains(string(buf), "Loaded network plugin \"cni\""), nil
+	return strings.Contains(string(buf), "\"Loaded network plugin\" networkPluginName=\"cni\""), nil
 }
