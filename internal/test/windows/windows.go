@@ -142,7 +142,7 @@ func (w *Windows) Run(cmd string, psCmd bool) (string, error) {
 
 	out, err := session.CombinedOutput(cmd)
 	if err != nil {
-		return "", err
+		return string(out), err
 	}
 	return string(out), nil
 }
