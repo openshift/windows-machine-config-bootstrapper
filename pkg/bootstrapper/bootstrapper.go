@@ -484,6 +484,10 @@ func (wmcb *winNodeBootstrapper) getInitialKubeletArgs() []string {
 		"--register-with-taints=" + windowsTaints,
 		// Label that WMCB uses
 		"--node-labels=" + nodeLabel,
+		// Added to allow pulling of large base Windows images. Note that this only works with the Docker runtime and is
+		// not available for ContainerD yet. Addition of this option is tracked by
+		// https://github.com/containerd/containerd/issues/4984
+		"--image-pull-progress-deadline=30m",
 	}
 	if cloudProvider, ok := wmcb.kubeletArgs["cloud-provider"]; ok {
 		kubeletArgs = append(kubeletArgs, "--cloud-provider="+cloudProvider)
