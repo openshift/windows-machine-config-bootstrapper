@@ -141,10 +141,7 @@ func (w *Windows) Run(cmd string, psCmd bool) (string, error) {
 	}
 
 	out, err := session.CombinedOutput(cmd)
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return string(out), err
 }
 
 func (w *Windows) GetCredentials() *credentials.Credentials {
