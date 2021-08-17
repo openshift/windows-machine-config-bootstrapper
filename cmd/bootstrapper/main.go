@@ -30,6 +30,7 @@ func init() {
 	// https://issues.redhat.com/browse/WINC-347
 	// Here we set up the logger that sends logs to StdErr. Info level logs should be bubbled up to StdOut instead
 	// WMCO interprets logs in StdErr as an indication that bootstrapping failed
+
 	logger.SetLogger(zap.New())
 }
 
