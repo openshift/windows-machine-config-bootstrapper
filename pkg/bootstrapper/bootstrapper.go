@@ -127,8 +127,8 @@ type winNodeBootstrapper struct {
 	// logDir is the directory that captures log outputs of Kubelet
 	// TODO: make this directory available in Artifacts
 	logDir string
-	// kubeletArgs is a map of the variable arguments that will be passed to the kubelet
-	kubeletArgs map[string]string
+	// kubeletArgs is a slice of the arguments that will be passed to the kubelet
+	kubeletArgs []string
 	// cni holds all the CNI specific information
 	cni *cniOptions
 }
@@ -169,7 +169,6 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		logDir:             "C:\\var\\log\\kubelet",
 		initialKubeletPath: kubeletPath,
 		svcMgr:             svcMgr,
-		kubeletArgs:        make(map[string]string),
 	}
 	// populate the CNI struct if CNI options are present
 	if cniDir != "" && cniConfig != "" {
@@ -314,8 +313,8 @@ func convertIgnition2to3(ign2config ignitionCfgv2_4Types.Config) (ignitionCfgv3T
 	return ign3_1config, nil
 }
 
-// parseIgnitionFileContents parses the ignition file contents and writes the contents of the described files to the k8s
-// installation directory
+// parseIgnitionFileContents parses the ignition file contents gathering the required kubelet args, and writing
+// the contents of the described files to the k8s installation directory
 func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents []byte,
 	filesToTranslate map[string]fileTranslation) error {
 	// Parse raw file contents for Ignition spec v3.1 config
@@ -336,50 +335,48 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 
 	// Find the kubelet systemd service specified in the ignition file and grab the variable arguments
 	// TODO: Refactor this to handle environment variables in argument values
+	var kubeletUnit *ignitionCfgv3Types.Unit
 	for _, unit := range configuration.Systemd.Units {
-		if unit.Name != kubeletSystemdName {
-			continue
+		if unit.Name == kubeletSystemdName {
+			kubeletUnit = &unit
+			break
 		}
+	}
+	if kubeletUnit == nil {
+		return errors.Errorf("ignition missing kubelet systemd unit file")
+	}
+	args, err := wmcb.parseKubeletArgs(*kubeletUnit)
+	if err != nil {
+		return errors.Wrap(err, "error parsing kubelet systemd unit args")
+	}
 
-		if unit.Contents == nil {
-			return fmt.Errorf("could not process %s: Unit is empty", unit.Name)
+	// TODO: This is being done because this function is trying to handle both file creation and kubelet arg parsing.
+	//       The cloud-config file translation is dependent on the file path given by the ignition file, but for the
+	//       kubelet args we want to alter that path. Because of how this function is structured right now, this is
+	//       resulting in the altering of the path to be delayed, in order to not have to parse the kubelet unit again.
+	//       This should not have been done this way, the setting of the args map should be contained to
+	//       parseKubeletArgs. This should be corrected as part of https://issues.redhat.com/browse/WINC-670
+	// Check for the presence of "--cloud-config" option and if it is present append the value to
+	// filesToTranslate. This option is only present for Azure and hence we cannot assume it as a file that
+	// requires translation across clouds.
+	if cloudConfigPath, ok := args[cloudConfigOption]; ok {
+		cloudConfigFilename := filepath.Base(cloudConfigPath)
+		// Check if we were able to get a valid filename. Read filepath.Base() godoc for explanation.
+		if cloudConfigFilename == "." || os.IsPathSeparator(cloudConfigFilename[0]) {
+			return fmt.Errorf("could not get cloud config filename from %s", cloudConfigPath)
 		}
+		// As the cloud-config option is a path it must be changed to point to the local file
+		localCloudConfigDestination := filepath.Join(wmcb.installDir, cloudConfigFilename)
+		args[cloudConfigOption] = localCloudConfigDestination
 
-		results := cloudProviderRegex.FindStringSubmatch(*unit.Contents)
-		if len(results) == 2 {
-			wmcb.kubeletArgs["cloud-provider"] = results[1]
-		}
-
-		// Check for the presence of "--cloud-config" option and if it is present append the value to
-		// filesToTranslate. This option is only present for Azure and hence we cannot assume it as a file that
-		// requires translation across clouds.
-		results = cloudConfigRegex.FindStringSubmatch(*unit.Contents)
-		if len(results) == 2 {
-			cloudConfFilename := filepath.Base(results[1])
-
-			// Check if we were able to get a valid filename. Read filepath.Base() godoc for explanation.
-			if cloudConfFilename == "." || os.IsPathSeparator(cloudConfFilename[0]) {
-				return fmt.Errorf("could not get cloud config filename from %s", results[0])
-			}
-
-			filesToTranslate[results[1]] = fileTranslation{
-				dest: filepath.Join(wmcb.installDir, cloudConfFilename),
-			}
-
-			// Set the --cloud-config option value
-			wmcb.kubeletArgs[cloudConfigOption] = filepath.Join(wmcb.installDir, cloudConfFilename)
-		}
-
-		results = verbosityRegex.FindStringSubmatch(*unit.Contents)
-		if len(results) == 2 {
-			wmcb.kubeletArgs["v"] = results[1]
+		// Ensure that we create the cloud-config file
+		filesToTranslate[cloudConfigPath] = fileTranslation{
+			dest: localCloudConfigDestination,
 		}
 	}
 
-	// In case the verbosity argument is missing, use a default value
-	if wmcb.kubeletArgs["v"] == "" {
-		wmcb.kubeletArgs["v"] = "3"
-	}
+	// Generate the full list of kubelet arguments from the arguments present in the ignition file
+	wmcb.kubeletArgs = wmcb.generateInitialKubeletArgs(args)
 
 	// For each new file in the ignition file check if is a file we are interested in, if so, decode, transform,
 	// and write it to the destination path
@@ -400,6 +397,33 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 	}
 
 	return nil
+}
+
+// parseKubeletArgs returns args we are interested in from the kubelet systemd unit file
+func (wmcb *winNodeBootstrapper) parseKubeletArgs(unit ignitionCfgv3Types.Unit) (map[string]string, error) {
+	if unit.Contents == nil {
+		return nil, fmt.Errorf("could not process %s: Unit is empty", unit.Name)
+	}
+
+	kubeletArgs := make(map[string]string)
+	results := cloudProviderRegex.FindStringSubmatch(*unit.Contents)
+	if len(results) == 2 {
+		kubeletArgs["cloud-provider"] = results[1]
+	}
+
+	// Check for the presence of "--cloud-config" option and if it is present append the value to
+	// filesToTranslate. This option is only present for Azure and hence we cannot assume it as a file that
+	// requires translation across clouds.
+	results = cloudConfigRegex.FindStringSubmatch(*unit.Contents)
+	if len(results) == 2 {
+		kubeletArgs[cloudConfigOption] = results[1]
+	}
+
+	results = verbosityRegex.FindStringSubmatch(*unit.Contents)
+	if len(results) == 2 {
+		kubeletArgs["v"] = results[1]
+	}
+	return kubeletArgs, nil
 }
 
 // initializeKubeletFiles initializes the files required by the kubelet
@@ -461,9 +485,9 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 	return nil
 }
 
-// getInitialKubeletArgs returns the kubelet args required during initial kubelet start up.
-// This function assumes that wmcb.kubeletArgs are populated.
-func (wmcb *winNodeBootstrapper) getInitialKubeletArgs() []string {
+// generateInitialKubeletArgs returns the kubelet args required during initial kubelet start up. args should be a map
+// of the variable options passed along to WMCB via the ignition file.
+func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]string) []string {
 	// If initialize-kubelet is run after configure-cni, the kubelet args will be overwritten and the CNI
 	// configuration will be lost. The assumption is that every time initialize-kubelet is run, configure-cni needs to
 	// be run again. WMCO ensures that the initialize-kubelet is run successfully before configure-cni and we don't
@@ -489,16 +513,19 @@ func (wmcb *winNodeBootstrapper) getInitialKubeletArgs() []string {
 		// https://github.com/containerd/containerd/issues/4984
 		"--image-pull-progress-deadline=30m",
 	}
-	if cloudProvider, ok := wmcb.kubeletArgs["cloud-provider"]; ok {
+	if cloudProvider, ok := args["cloud-provider"]; ok {
 		kubeletArgs = append(kubeletArgs, "--cloud-provider="+cloudProvider)
 	}
-	if v, ok := wmcb.kubeletArgs["v"]; ok {
+	if v, ok := args["v"]; ok && v != "" {
 		kubeletArgs = append(kubeletArgs, "--v="+v)
+	} else {
+		// In case the verbosity argument is missing, use a default value
+		kubeletArgs = append(kubeletArgs, "--v="+"3")
 	}
-	if cloudConfigValue, ok := wmcb.kubeletArgs[cloudConfigOption]; ok {
+	if cloudConfigValue, ok := args[cloudConfigOption]; ok {
 		kubeletArgs = append(kubeletArgs, "--"+cloudConfigOption+"="+cloudConfigValue)
 	}
-	if nodeWorkerLabel, ok := wmcb.kubeletArgs["node-labels"]; ok {
+	if nodeWorkerLabel, ok := args["node-labels"]; ok {
 		kubeletArgs = append(kubeletArgs, "--"+"node-labels"+"="+nodeWorkerLabel)
 	}
 	return kubeletArgs
@@ -522,15 +549,13 @@ func (wmcb *winNodeBootstrapper) ensureKubeletService() error {
 		Password:         "",
 		Description:      "OpenShift Kubelet",
 	}
-	// Get kubelet args
-	kubeletArgs := wmcb.getInitialKubeletArgs()
 
 	if wmcb.kubeletSVC == nil {
-		if err := wmcb.createKubeletService(c, kubeletArgs); err != nil {
+		if err := wmcb.createKubeletService(c); err != nil {
 			return fmt.Errorf("failed to create kubelet service : %v ", err)
 		}
 	} else {
-		if err := wmcb.updateKubeletService(c, kubeletArgs); err != nil {
+		if err := wmcb.updateKubeletService(c, wmcb.kubeletArgs); err != nil {
 			return fmt.Errorf("failed to update kubelet service : %v ", err)
 		}
 	}
@@ -542,8 +567,9 @@ func (wmcb *winNodeBootstrapper) ensureKubeletService() error {
 }
 
 // createKubeletService creates a new kubelet service to our specifications
-func (wmcb *winNodeBootstrapper) createKubeletService(c mgr.Config, kubeletArgs []string) error {
-	ksvc, err := wmcb.svcMgr.CreateService(KubeletServiceName, filepath.Join(wmcb.installDir, "kubelet.exe"), c, kubeletArgs...)
+func (wmcb *winNodeBootstrapper) createKubeletService(c mgr.Config) error {
+	ksvc, err := wmcb.svcMgr.CreateService(KubeletServiceName, filepath.Join(wmcb.installDir, "kubelet.exe"), c,
+		wmcb.kubeletArgs...)
 	if err != nil {
 		return err
 	}

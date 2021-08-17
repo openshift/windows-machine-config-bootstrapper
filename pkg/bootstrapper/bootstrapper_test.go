@@ -223,6 +223,56 @@ func TestCreateKubeletConf(t *testing.T) {
 //	"disableOutboundSNAT": null,
 //	"maximumLoadBalancerRuleCount": 0
 //}
+
+// getArgValue takes a slice of args and returns whether the specified arg is present, and if it is, its value
+func getArgValue(key string, args []string) (string, bool) {
+	prefix := fmt.Sprintf("--%s=", key)
+	for _, arg := range args {
+		if !strings.HasPrefix(arg, prefix) {
+			continue
+		}
+		return strings.TrimPrefix(arg, prefix), true
+	}
+	return "", false
+}
+
+// TestKubeletArgs tests that parseIgnitionFileContents populates the kubelet args properly
+func TestKubeletArgs(t *testing.T) {
+	// ignitionContents is the actual worker ignition contents from an azure cluster with dummy credentials and
+	// resources
+	ignitionContents := `{"ignition":{"version":"3.1.0"},"passwd":{"users":[{"name":"core","sshAuthorizedKeys":["ssh-rsa dummy"]}]},"systemd":{"units":[{"contents":"[Unit]\nDescription=Kubernetes Kubelet\nWants=rpc-statd.service crio.service\nAfter=crio.service\n\n[Service]\nType=notify\nExecStartPre=/bin/mkdir --parents /etc/kubernetes/manifests\nExecStartPre=/bin/rm -f /var/lib/kubelet/cpu_manager_state\nEnvironmentFile=/etc/os-release\nEnvironmentFile=-/etc/kubernetes/kubelet-workaround\nEnvironmentFile=-/etc/kubernetes/kubelet-env\n\nExecStart=/usr/bin/hyperkube \\\n    kubelet \\\n      --config=/etc/kubernetes/kubelet.conf \\\n      --bootstrap-kubeconfig=/etc/kubernetes/kubeconfig \\\n      --kubeconfig=/var/lib/kubelet/kubeconfig \\\n      --container-runtime=remote \\\n      --container-runtime-endpoint=/var/run/crio/crio.sock \\\n      --node-labels=node-role.kubernetes.io/worker,node.openshift.io/os_id=${ID} \\\n      --minimum-container-ttl-duration=6m0s \\\n      --volume-plugin-dir=/etc/kubernetes/kubelet-plugins/volume/exec \\\n      --cloud-provider=aws \\\n      --v=3\n\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n","enabled":true,"name":"kubelet.service"}]}}`
+
+	// Create a temp directory with wmcb prefix
+	dir, err := ioutil.TempDir("", "wmcb")
+	require.NoError(t, err, "error creating temp directory")
+	// Ignore the return error as there is not much we can do if the temporary directory is not deleted
+	defer os.RemoveAll(dir)
+
+	wnb := winNodeBootstrapper{
+		installDir:      dir,
+		kubeconfigPath:  filepath.Join("/fakepath/kubeconfig"),
+		kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
+		logDir:          "/fakepath/",
+	}
+
+	err = wnb.parseIgnitionFileContents([]byte(ignitionContents), map[string]fileTranslation{})
+	require.NoError(t, err, "error parsing ignition file contents")
+	expectedArgs := []string{"--config=\\fakepath\\kubelet.conf",
+		"--bootstrap-kubeconfig=" + filepath.Join(dir, "bootstrap-kubeconfig"),
+		"--kubeconfig=\\fakepath\\kubeconfig",
+		"--pod-infra-container-image=mcr.microsoft.com/oss/kubernetes/pause:3.4.1",
+		"--cert-dir=c:\\var\\lib\\kubelet\\pki\\",
+		"--windows-service",
+		"--logtostderr=false",
+		"--log-file=\\fakepath\\kubelet.log",
+		"--register-with-taints=os=Windows:NoSchedule",
+		"--node-labels=node.openshift.io/os_id=Windows",
+		"--image-pull-progress-deadline=30m",
+		"--cloud-provider=aws",
+		"--v=3"}
+	assert.ElementsMatch(t, expectedArgs, wnb.kubeletArgs, "unexpected kubelet args")
+}
+
 func TestCloudConfExtraction(t *testing.T) {
 	// ignitionContents is the actual worker ignition contents from an azure cluster with dummy credentials and
 	// resources
@@ -235,8 +285,7 @@ func TestCloudConfExtraction(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	wnb := winNodeBootstrapper{
-		installDir:  dir,
-		kubeletArgs: make(map[string]string),
+		installDir: dir,
 	}
 
 	err = wnb.parseIgnitionFileContents([]byte(ignitionContents), map[string]fileTranslation{})
@@ -288,7 +337,7 @@ func TestCloudConfExtraction(t *testing.T) {
 	}
 
 	// Check that the --cloud-conf option value is present in the kubelet args and matches tempdir + /cloud.conf
-	cloudConfigOptValue, present := wnb.kubeletArgs["cloud-config"]
+	cloudConfigOptValue, present := getArgValue(cloudConfigOption, wnb.kubeletArgs)
 	assert.True(t, present, "cloud-config option is not present in kubelet args")
 	assert.Equal(t, filepath.Join(dir, "cloud.conf"), cloudConfigOptValue,
 		"unexpected --cloud-config value %s", cloudConfigOptValue)
@@ -309,8 +358,7 @@ func TestCloudConfNotPresent(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	wnb := winNodeBootstrapper{
-		installDir:  dir,
-		kubeletArgs: make(map[string]string),
+		installDir: dir,
 	}
 
 	err = wnb.parseIgnitionFileContents([]byte(ignitionContents), map[string]fileTranslation{})
@@ -320,7 +368,7 @@ func TestCloudConfNotPresent(t *testing.T) {
 	assert.Error(t, err, "cloud.conf was created")
 
 	// Check that the --cloud-conf option value is not present in the kubelet args
-	_, present := wnb.kubeletArgs["cloud-config"]
+	_, present := getArgValue(cloudConfigOption, wnb.kubeletArgs)
 	assert.False(t, present, "cloud-config option is not present in kubelet args")
 }
 
@@ -332,8 +380,7 @@ func TestCloudConfInvalidNames(t *testing.T) {
 	ignitionContents := `{"ignition":{"version":"3.1.0"},"passwd":{"users":[{"name":"core","sshAuthorizedKeys":["ssh-rsa dummy"]}]},"storage":{"files":[{"path":"/etc/kubernetes/cloud.conf","contents":{"source":"data:,not needed"},"mode":420}]},"systemd":{"units":[{"contents":"[Unit]\nDescription=Kubernetes Kubelet\nWants=rpc-statd.service crio.service\nAfter=crio.service\n\n[Service]\nType=notify\nExecStartPre=/bin/mkdir --parents /etc/kubernetes/manifests\nExecStartPre=/bin/rm -f /var/lib/kubelet/cpu_manager_state\nEnvironmentFile=/etc/os-release\nEnvironmentFile=-/etc/kubernetes/kubelet-workaround\nEnvironmentFile=-/etc/kubernetes/kubelet-env\n\nExecStart=/usr/bin/hyperkube \\\n    kubelet \\\n      --config=/etc/kubernetes/kubelet.conf \\\n      --bootstrap-kubeconfig=/etc/kubernetes/kubeconfig \\\n      --kubeconfig=/var/lib/kubelet/kubeconfig \\\n      --container-runtime=remote \\\n      --container-runtime-endpoint=/var/run/crio/crio.sock \\\n      --node-labels=node-role.kubernetes.io/worker,node.openshift.io/os_id=${ID} \\\n      --minimum-container-ttl-duration=6m0s \\\n      --volume-plugin-dir=/etc/kubernetes/kubelet-plugins/volume/exec \\\n      --cloud-provider=azure \\\n      --cloud-config=/ \\\n      --v=3\n\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n","enabled":true,"name":"kubelet.service"}]}}`
 
 	wnb := winNodeBootstrapper{
-		installDir:  "/",
-		kubeletArgs: make(map[string]string),
+		installDir: "/",
 	}
 	err := wnb.parseIgnitionFileContents([]byte(ignitionContents), map[string]fileTranslation{})
 	assert.Error(t, err, "error not thrown on encountering invalid --cloud-config option")
@@ -567,9 +614,8 @@ func TestKubeletDirectoriesCreation(t *testing.T) {
 	// logDirectory which has to be created by wmcb
 	logDirectory := filepath.Join(dir, "log")
 	wnb := winNodeBootstrapper{
-		installDir:  dir,
-		logDir:      logDirectory,
-		kubeletArgs: make(map[string]string),
+		installDir: dir,
+		logDir:     logDirectory,
 	}
 	err = wnb.initializeKubeletFiles()
 	assert.NoError(t, err, "error initializing kubelet files")
