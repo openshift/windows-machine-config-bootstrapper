@@ -35,6 +35,8 @@ var (
 		kubeletPath string
 		// The directory to install the kubelet and related files
 		installDir string
+		// forceCloudNone ensures the the kubelet `cloud` flag is set to none
+		forceCloudNone bool
 	}
 )
 
@@ -46,6 +48,8 @@ func init() {
 		"Kubelet file location to bootstrap the Windows node")
 	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.installDir, "install-dir", "c:\\k",
 		"Kubelet file location to bootstrap the Windows node. Defaults to C:\\k")
+	initializeKubeletCmd.PersistentFlags().BoolVar(&initializeKubeletOpts.forceCloudNone, "force-cloud-none", false,
+		"If set, the cluster's platform will be ignored and kubelet will not use any cloud specific features")
 }
 
 // runInitializeKubeletCmd starts the Windows Machine Config Bootstrapper
@@ -54,7 +58,8 @@ func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 	// TODO: add validation for flags
 
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(initializeKubeletOpts.installDir,
-		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath, "", "")
+		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath, "", "",
+		initializeKubeletOpts.forceCloudNone)
 	if err != nil {
 		log.Error(err, "could not create bootstrapper")
 		os.Exit(1)

@@ -117,6 +117,8 @@ type winNodeBootstrapper struct {
 	ignitionFilePath string
 	//initialKubeletPath is the path to the kubelet that we'll be using to bootstrap this node
 	initialKubeletPath string
+	// forceCloudNone overrides the kubelet cloud options, setting no cloud provider
+	forceCloudNone bool
 	// TODO: When more services are added consider decomposing the services to a separate Service struct with common functions
 	// kubeletSVC is a pointer to the kubeletService struct
 	kubeletSVC *kubeletService
@@ -150,8 +152,8 @@ type cniOptions struct {
 // NewWinNodeBootstrapper takes the dir to install the kubelet to, and paths to the ignition and kubelet files along
 // with the CNI options as inputs, and generates the winNodeBootstrapper object. The CNI options are populated only in
 // the configure-cni command. The inputs to NewWinNodeBootstrapper are ignored while using the uninstall kubelet functionality.
-func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cniDir string,
-	cniConfig string) (*winNodeBootstrapper, error) {
+func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, cniDir, cniConfig string,
+	forceNoCloud bool) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
 		return nil, fmt.Errorf("both cniDir and cniConfig need to be populated")
@@ -170,6 +172,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		initialKubeletPath: kubeletPath,
 		svcMgr:             svcMgr,
 		kubeletArgs:        make(map[string]string),
+		forceCloudNone:     forceNoCloud,
 	}
 	// populate the CNI struct if CNI options are present
 	if cniDir != "" && cniConfig != "" {
@@ -345,34 +348,37 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 			return fmt.Errorf("could not process %s: Unit is empty", unit.Name)
 		}
 
-		results := cloudProviderRegex.FindStringSubmatch(*unit.Contents)
-		if len(results) == 2 {
-			wmcb.kubeletArgs["cloud-provider"] = results[1]
-		}
-
-		// Check for the presence of "--cloud-config" option and if it is present append the value to
-		// filesToTranslate. This option is only present for Azure and hence we cannot assume it as a file that
-		// requires translation across clouds.
-		results = cloudConfigRegex.FindStringSubmatch(*unit.Contents)
-		if len(results) == 2 {
-			cloudConfFilename := filepath.Base(results[1])
-
-			// Check if we were able to get a valid filename. Read filepath.Base() godoc for explanation.
-			if cloudConfFilename == "." || os.IsPathSeparator(cloudConfFilename[0]) {
-				return fmt.Errorf("could not get cloud config filename from %s", results[0])
+		// Get the cloud provider information if desired
+		if !wmcb.forceCloudNone {
+			results := cloudProviderRegex.FindStringSubmatch(*unit.Contents)
+			if len(results) == 2 {
+				wmcb.kubeletArgs["cloud-provider"] = results[1]
 			}
 
-			filesToTranslate[results[1]] = fileTranslation{
-				dest: filepath.Join(wmcb.installDir, cloudConfFilename),
+			// Check for the presence of "--cloud-config" option and if it is present append the value to
+			// filesToTranslate. This option is only present for Azure and hence we cannot assume it as a file that
+			// requires translation across clouds.
+			results = cloudConfigRegex.FindStringSubmatch(*unit.Contents)
+			if len(results) == 2 {
+				cloudConfFilename := filepath.Base(results[1])
+
+				// Check if we were able to get a valid filename. Read filepath.Base() godoc for explanation.
+				if cloudConfFilename == "." || os.IsPathSeparator(cloudConfFilename[0]) {
+					return fmt.Errorf("could not get cloud config filename from %s", results[0])
+				}
+
+				filesToTranslate[results[1]] = fileTranslation{
+					dest: filepath.Join(wmcb.installDir, cloudConfFilename),
+				}
+
+				// Set the --cloud-config option value
+				wmcb.kubeletArgs[cloudConfigOption] = filepath.Join(wmcb.installDir, cloudConfFilename)
 			}
 
-			// Set the --cloud-config option value
-			wmcb.kubeletArgs[cloudConfigOption] = filepath.Join(wmcb.installDir, cloudConfFilename)
-		}
-
-		results = verbosityRegex.FindStringSubmatch(*unit.Contents)
-		if len(results) == 2 {
-			wmcb.kubeletArgs["v"] = results[1]
+			results = verbosityRegex.FindStringSubmatch(*unit.Contents)
+			if len(results) == 2 {
+				wmcb.kubeletArgs["v"] = results[1]
+			}
 		}
 	}
 
