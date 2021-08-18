@@ -12,6 +12,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
@@ -48,6 +49,9 @@ const (
 	hybridOverlayName = "hybrid-overlay-node.exe"
 	// hybridOverExecutable is the remote location of the hybrid overlay binary
 	hybridOverlayExecutable = remoteDir + hybridOverlayName
+	// hybridOverlayConfigurationTime is the approximate time taken for the hybrid-overlay to complete reconfiguring
+	// the Windows VM's network
+	hybridOverlayConfigurationTime = 2 * time.Minute
 )
 
 var (
@@ -228,9 +232,7 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 		return fmt.Errorf("unable to create remote directory %s: %v\n%s", kLog, err, output)
 	}
 
-	// Start the hybrid-overlay-node in the background over ssh. We cannot use vm.Run() and by extension WinRM.Run() here as
-	// we observed WinRM.Run() returning before the commands completes execution. The reason for that is unclear and
-	// requires further investigation.
+	// Start the hybrid-overlay-node in the background over ssh.
 	go vm.Run(hybridOverlayExecutable+" --node "+nodeName+
 		" --k8s-kubeconfig c:\\k\\kubeconfig > "+kLog+"hybrid-overlay.log 2>&1", false)
 
@@ -239,15 +241,21 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 		return fmt.Errorf("error running %s: %v", hybridOverlayName, err)
 	}
 
+	// Wait for the hybrid-overlay to complete reconfiguring the network. The only way to detect that it has completed
+	// the reconfiguration is to check for the HNS networks but doing that results in 5+ minutes wait times for the
+	// vm.Run() call to complete. So the only alternative is to wait before proceeding.
+	time.Sleep(hybridOverlayConfigurationTime)
+
+	// Running the hybrid-overlay causes network reconfiguration in the Windows VM which results in the ssh connection
+	// being closed and the client is not smart enough to reconnect.
+	if err = vm.Reinitialize(); err != nil {
+		return errors.Wrap(err, "error reinitializing VM after running hybrid-overlay")
+	}
+
 	err = vm.waitForOpenShiftHNSNetworks()
 	if err != nil {
 		return fmt.Errorf("error waiting for OpenShift HNS networks to be created: %v", err)
 	}
-
-	// Running the hybrid-overlay-node causes network reconfiguration in the Windows VM which results in the ssh connection
-	// being closed and the client is not smart enough to reconnect. We have observed that the WinRM connection does not
-	// get closed and does not need reinitialization.
-	err = vm.Reinitialize()
 
 	return nil
 }
