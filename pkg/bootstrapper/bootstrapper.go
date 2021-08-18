@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -117,6 +118,8 @@ type winNodeBootstrapper struct {
 	ignitionFilePath string
 	//initialKubeletPath is the path to the kubelet that we'll be using to bootstrap this node
 	initialKubeletPath string
+	// nodeIP is the IP that should be used as the node object's IP. If unset, kubelet will determine the IP itself.
+	nodeIP string
 	// TODO: When more services are added consider decomposing the services to a separate Service struct with common functions
 	// kubeletSVC is a pointer to the kubeletService struct
 	kubeletSVC *kubeletService
@@ -147,14 +150,22 @@ type cniOptions struct {
 	confDir string
 }
 
-// NewWinNodeBootstrapper takes the dir to install the kubelet to, and paths to the ignition and kubelet files along
-// with the CNI options as inputs, and generates the winNodeBootstrapper object. The CNI options are populated only in
-// the configure-cni command. The inputs to NewWinNodeBootstrapper are ignored while using the uninstall kubelet functionality.
-func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cniDir string,
+// NewWinNodeBootstrapper takes the dir to install the kubelet to, and paths to the ignition and kubelet files, an
+// optional node IP, along with the CNI options as inputs, and generates the winNodeBootstrapper object. The CNI options
+// are populated only in the configure-cni command. The inputs to NewWinNodeBootstrapper are ignored while using the
+// uninstall kubelet functionality.
+func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cniDir,
 	cniConfig string) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
 		return nil, fmt.Errorf("both cniDir and cniConfig need to be populated")
+	}
+
+	// If nodeIP is set, ensure that it is a valid IP
+	if nodeIP != "" {
+		if parsed := net.ParseIP(nodeIP); parsed == nil {
+			return nil, fmt.Errorf("nodeIP value %s is not a valid IP format", nodeIP)
+		}
 	}
 
 	svcMgr, err := mgr.Connect()
@@ -169,6 +180,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 		logDir:             "C:\\var\\log\\kubelet",
 		initialKubeletPath: kubeletPath,
 		svcMgr:             svcMgr,
+		nodeIP:             nodeIP,
 	}
 	// populate the CNI struct if CNI options are present
 	if cniDir != "" && cniConfig != "" {
@@ -527,6 +539,9 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 	}
 	if nodeWorkerLabel, ok := args["node-labels"]; ok {
 		kubeletArgs = append(kubeletArgs, "--"+"node-labels"+"="+nodeWorkerLabel)
+	}
+	if wmcb.nodeIP != "" {
+		kubeletArgs = append(kubeletArgs, "--node-ip="+wmcb.nodeIP)
 	}
 	return kubeletArgs
 }
