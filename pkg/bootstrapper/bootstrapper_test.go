@@ -248,16 +248,7 @@ func TestKubeletArgs(t *testing.T) {
 	// Ignore the return error as there is not much we can do if the temporary directory is not deleted
 	defer os.RemoveAll(dir)
 
-	wnb := winNodeBootstrapper{
-		installDir:      dir,
-		kubeconfigPath:  filepath.Join("/fakepath/kubeconfig"),
-		kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
-		logDir:          "/fakepath/",
-	}
-
-	err = wnb.parseIgnitionFileContents([]byte(ignitionContents), map[string]fileTranslation{})
-	require.NoError(t, err, "error parsing ignition file contents")
-	expectedArgs := []string{"--config=\\fakepath\\kubelet.conf",
+	baseExpectedArgs := []string{"--config=\\fakepath\\kubelet.conf",
 		"--bootstrap-kubeconfig=" + filepath.Join(dir, "bootstrap-kubeconfig"),
 		"--kubeconfig=\\fakepath\\kubeconfig",
 		"--pod-infra-container-image=mcr.microsoft.com/oss/kubernetes/pause:3.4.1",
@@ -270,7 +261,42 @@ func TestKubeletArgs(t *testing.T) {
 		"--image-pull-progress-deadline=30m",
 		"--cloud-provider=aws",
 		"--v=3"}
-	assert.ElementsMatch(t, expectedArgs, wnb.kubeletArgs, "unexpected kubelet args")
+	testIO := []struct {
+		name                   string
+		additionalExpectedArgs []string
+		wnb                    winNodeBootstrapper
+	}{
+		{
+			name:                   "Without nodeIP specified",
+			additionalExpectedArgs: []string{},
+			wnb: winNodeBootstrapper{
+				installDir:      dir,
+				kubeconfigPath:  filepath.Join("/fakepath/kubeconfig"),
+				kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
+				logDir:          "/fakepath/",
+			},
+		},
+		{
+			name:                   "With nodeIP specified",
+			additionalExpectedArgs: []string{"--node-ip=192.168.1.1"},
+			wnb: winNodeBootstrapper{
+				installDir:      dir,
+				kubeconfigPath:  filepath.Join("/fakepath/kubeconfig"),
+				kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
+				logDir:          "/fakepath/",
+				nodeIP:          "192.168.1.1",
+			},
+		},
+	}
+	for _, test := range testIO {
+		t.Run(test.name, func(t *testing.T) {
+			expectedArgs := append(baseExpectedArgs, test.additionalExpectedArgs...)
+			err = test.wnb.parseIgnitionFileContents([]byte(ignitionContents), map[string]fileTranslation{})
+			require.NoError(t, err, "error parsing ignition file contents")
+			assert.ElementsMatch(t, expectedArgs, test.wnb.kubeletArgs, "unexpected kubelet args")
+		})
+	}
+
 }
 
 func TestCloudConfExtraction(t *testing.T) {
@@ -389,11 +415,11 @@ func TestCloudConfInvalidNames(t *testing.T) {
 // TestNewWinNodeBootstrapperWithInvalidCNIInputs tests if NewWinNodeBootstrapper returns the expected error on passing
 // invalid CNI inputs
 func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
-	_, err := NewWinNodeBootstrapper("", "", "", "C:\\something", "")
+	_, err := NewWinNodeBootstrapper("", "", "", "", "C:\\something", "")
 	require.Error(t, err, "no error thrown when cniDir is not empty and cniConfig is empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 
-	_, err = NewWinNodeBootstrapper("", "", "", "", "C:\\something")
+	_, err = NewWinNodeBootstrapper("", "", "", "", "", "C:\\something")
 	require.Error(t, err, "no error thrown when cniDir is empty and cniConfig not empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 }
@@ -401,7 +427,7 @@ func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
 // TestWinNodeBootstrapperConfigureWithInvalidInputs tests if Configure returns the expected error when CNI inputs
 // are not present
 func TestWinNodeBootstrapperConfigureWithInvalidInputs(t *testing.T) {
-	wnb, err := NewWinNodeBootstrapper("", "", "", "", "")
+	wnb, err := NewWinNodeBootstrapper("", "", "", "", "", "")
 	require.NoError(t, err, "error instantiating bootstrapper")
 	err = wnb.Configure()
 	require.Error(t, err, "no error thrown when Configure is called with no CNI inputs")
