@@ -1,6 +1,7 @@
 package windows
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -134,17 +135,20 @@ func (w *Windows) Run(cmd string, psCmd bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer session.Close()
+	defer func() {
+		// io.EOF is returned if you attempt to close a session that is already closed which typically happens given
+		// that CombinedOutput() internally closes the session.
+		if err := session.Close(); err != nil && !errors.Is(err, io.EOF) {
+			log.Printf("error closing SSH session: %v", err)
+		}
+	}()
 
 	if psCmd {
 		cmd = remotePowerShellCmdPrefix + cmd
 	}
 
 	out, err := session.CombinedOutput(cmd)
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return string(out), err
 }
 
 func (w *Windows) GetCredentials() *credentials.Credentials {
