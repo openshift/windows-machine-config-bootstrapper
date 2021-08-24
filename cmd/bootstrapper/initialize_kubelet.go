@@ -35,6 +35,8 @@ var (
 		kubeletPath string
 		// The directory to install the kubelet and related files
 		installDir string
+		// nodeIP directs the kubelet to use a specific IP for the node object
+		nodeIP string
 	}
 )
 
@@ -46,6 +48,9 @@ func init() {
 		"Kubelet file location to bootstrap the Windows node")
 	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.installDir, "install-dir", "c:\\k",
 		"Kubelet file location to bootstrap the Windows node. Defaults to C:\\k")
+	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.nodeIP, "node-ip", "",
+		"nodeIP is the IP that should be used as the node object's IP. "+
+			"If unset, kubelet will determine the IP itself.")
 }
 
 // runInitializeKubeletCmd starts the Windows Machine Config Bootstrapper
@@ -54,7 +59,7 @@ func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 	// TODO: add validation for flags
 
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(initializeKubeletOpts.installDir,
-		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath, "", "")
+		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath, initializeKubeletOpts.nodeIP, "", "")
 	if err != nil {
 		log.Error(err, "could not create bootstrapper")
 		os.Exit(1)
