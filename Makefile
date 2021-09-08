@@ -6,15 +6,15 @@ MAIN_PACKAGE=$(PACKAGE)/cmd/bootstrapper
 GO_BUILD_ARGS=CGO_ENABLED=0 GO111MODULE=on
 
 .PHONY: build
-build: bindata
+build:
 	$(GO_BUILD_ARGS) GOOS=windows go build -o wmcb.exe  $(MAIN_PACKAGE)
 
 .PHONY: build-wmcb-unit-test
-build-wmcb-unit-test: bindata
+build-wmcb-unit-test:
 	$(GO_BUILD_ARGS) GOOS=windows GOFLAGS=-v go test -c ./pkg/... -o wmcb_unit_test.exe
 
 .PHONY: build-wmcb-e2e-test
-build-wmcb-e2e-test: bindata
+build-wmcb-e2e-test:
 	$(GO_BUILD_ARGS) GOOS=windows GOFLAGS=-v go test -c ./test/e2e... -o wmcb_e2e_test.exe
 
 test-e2e-prepared-node:
@@ -29,6 +29,3 @@ run-wmcb-ci-e2e-test:
 verify-all:
 	hack/verify-gofmt.sh
 	hack/verify-vendor.sh
-
-bindata:
-	hack/generate-conf-files.sh
