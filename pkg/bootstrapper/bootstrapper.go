@@ -1,6 +1,7 @@
 package bootstrapper
 
 import (
+	_ "embed"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -106,6 +107,9 @@ var (
 	// verbosityRegex searches for the verbosity option given to the kubelet
 	verbosityRegex = regexp.MustCompile(`--v=(\w*)`)
 )
+
+//go:embed templates/kubelet_config.json
+var baseConfig string
 
 // winNodeBootstrapper is responsible for bootstrapping and ensuring kubelet runs as a Windows service
 type winNodeBootstrapper struct {
@@ -255,16 +259,10 @@ type kubeletConf struct {
 // Add values in kubelet_config.json files, for additional static fields.
 // Add fields in kubeletConf struct for variable fields
 func (wmcb *winNodeBootstrapper) createKubeletConf() ([]byte, error) {
-	// get config file content using bindata.go
-	content, err := Asset("templates/kubelet_config.json")
-
-	if err != nil {
-		return nil, fmt.Errorf("error reading kubelet config template: %v", err)
-	}
 	kubeletConfTmpl := template.New("kubeletconf")
 
 	// Parse the template
-	kubeletConfTmpl, err = kubeletConfTmpl.Parse(string(content))
+	kubeletConfTmpl, err := kubeletConfTmpl.Parse(baseConfig)
 	if err != nil {
 		return nil, err
 	}
