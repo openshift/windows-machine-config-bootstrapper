@@ -2,6 +2,7 @@ package bootstrapper
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -22,6 +23,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vincent-petithory/dataurl"
 	"golang.org/x/sys/windows/svc/mgr"
+	kubeletconfig "k8s.io/kubelet/config/v1beta1"
+	"sigs.k8s.io/yaml"
 )
 
 /*
@@ -117,6 +120,8 @@ type winNodeBootstrapper struct {
 	kubeconfigPath string
 	// kubeletConfPath is the file path of the kubelet configuration
 	kubeletConfPath string
+	// kubeletConfData hold the data for the kubelet configuration
+	kubeletConfData kubeletConf
 	// ignitionFilePath is the path to the ignition file which is used to set up worker nodes
 	// https://github.com/coreos/ignition/blob/spec2x/doc/getting-started.md
 	ignitionFilePath string
@@ -177,8 +182,11 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cn
 		return nil, fmt.Errorf("could not connect to Windows SCM: %s", err)
 	}
 	bootstrapper := winNodeBootstrapper{
-		kubeconfigPath:     filepath.Join(k8sInstallDir, "kubeconfig"),
-		kubeletConfPath:    filepath.Join(k8sInstallDir, "kubelet.conf"),
+		kubeconfigPath:  filepath.Join(k8sInstallDir, "kubeconfig"),
+		kubeletConfPath: filepath.Join(k8sInstallDir, "kubelet.conf"),
+		kubeletConfData: kubeletConf{
+			ClusterDNS: "[]",
+		},
 		ignitionFilePath:   ignitionFile,
 		installDir:         k8sInstallDir,
 		logDir:             "C:\\var\\log\\kubelet",
@@ -253,6 +261,8 @@ type fileTranslation struct {
 type kubeletConf struct {
 	// ClientCAFile specifies location to client certificate
 	ClientCAFile string
+	// ClusterDNS is the list of cluster DNS IP addresses (JSON)
+	ClusterDNS string
 }
 
 // createKubeletConf creates config file for kubelet, with Windows specific configuration
@@ -269,6 +279,7 @@ func (wmcb *winNodeBootstrapper) createKubeletConf() ([]byte, error) {
 	// Fill up the config file, using kubeletConf struct
 	variableFields := kubeletConf{
 		ClientCAFile: strings.Join(append(strings.Split(wmcb.installDir, `\`), `kubelet-ca.crt`), `\\`),
+		ClusterDNS:   wmcb.kubeletConfData.ClusterDNS,
 	}
 	// Create kubelet.conf file
 	kubeletConfPath := filepath.Join(wmcb.installDir, "kubelet.conf")
@@ -321,6 +332,51 @@ func convertIgnition2to3(ign2config ignitionCfgv2_4Types.Config) (ignitionCfgv3T
 	}
 
 	return ign3_1config, nil
+}
+
+// extractClusterDNS parse the URL-encoded content source of the ignition file kubelet.conf
+// and return the list of IP addresses for the cluster DNS server, If any.
+// If ClusterDNS is not set, returns nil
+func extractClusterDNS(kubeletConfSource string) (string, error) {
+	if kubeletConfSource == "" {
+		return "", errors.New("kubeletConfSource cannot be empty")
+	}
+	sourceDecoded, err := dataurl.DecodeString(kubeletConfSource)
+	if err != nil || sourceDecoded == nil {
+		return "", err
+	}
+	// set receiving struct
+	var kConf kubeletconfig.KubeletConfiguration
+	// unmarshal YAML data
+	if err := yaml.Unmarshal(sourceDecoded.Data, &kConf); err != nil {
+		return "", err
+	}
+	// check clusterDNS
+	if kConf.ClusterDNS == nil || len(kConf.ClusterDNS) == 0 {
+		// clusterDNS not found in content source
+		return "", fmt.Errorf("cannot find clusterDNS")
+	}
+	// convert array to JSON
+	clusterDNSJson, err := json.Marshal(kConf.ClusterDNS)
+	if err != nil {
+		return "", fmt.Errorf("error generating JSON object from %s: %s", kConf.ClusterDNS, err)
+	}
+
+	clusterDNSString := string(clusterDNSJson)
+
+	return clusterDNSString, nil
+}
+
+// generateKubeletConfData generates the kubelet configuration from the
+// ignition file kubelet.conf
+func (wmcb *winNodeBootstrapper) generateKubeletConfData(kubeletConfSource string) error {
+	clusterDNS, err := extractClusterDNS(kubeletConfSource)
+	if err != nil {
+		return err
+	}
+	wmcb.kubeletConfData.ClusterDNS = clusterDNS
+
+	return nil
 }
 
 // parseIgnitionFileContents parses the ignition file contents gathering the required kubelet args, and writing
@@ -391,6 +447,14 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 	// For each new file in the ignition file check if is a file we are interested in, if so, decode, transform,
 	// and write it to the destination path
 	for _, ignFile := range configuration.Storage.Files {
+		// look for kubelet.conf file to generate kubelet configuration data
+		if ignFile.Node.Path == "/etc/kubernetes/kubelet.conf" {
+			if err := wmcb.generateKubeletConfData(*ignFile.Contents.Source); err != nil {
+				return fmt.Errorf("error processing ignition file %s: %s", ignFile.Node.Path, err)
+			}
+			// skip file translate and write
+			continue
+		}
 		if filePair, ok := filesToTranslate[ignFile.Node.Path]; ok {
 			if ignFile.Contents.Source == nil {
 				return fmt.Errorf("could not process %s: File is empty", ignFile.Node.Path)
@@ -462,6 +526,19 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 		return fmt.Errorf("could not make install directory: %s", err)
 	}
 
+	// Populate destination directory with the files we need
+	if wmcb.ignitionFilePath != "" {
+		ignitionFileContents, err := ioutil.ReadFile(wmcb.ignitionFilePath)
+		if err != nil {
+			return fmt.Errorf("could not read ignition file: %s", err)
+		}
+
+		err = wmcb.parseIgnitionFileContents(ignitionFileContents, filesToTranslate)
+		if err != nil {
+			return fmt.Errorf("could not parse ignition file: %s", err)
+		}
+	}
+
 	_, err = wmcb.createKubeletConf()
 	if err != nil {
 		return fmt.Errorf("error creating kubelet configuration %v", err)
@@ -480,18 +557,6 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 		return fmt.Errorf("could not make %s directory: %v", wmcb.logDir, err)
 	}
 
-	// Populate destination directory with the files we need
-	if wmcb.ignitionFilePath != "" {
-		ignitionFileContents, err := ioutil.ReadFile(wmcb.ignitionFilePath)
-		if err != nil {
-			return fmt.Errorf("could not read ignition file: %s", err)
-		}
-
-		err = wmcb.parseIgnitionFileContents(ignitionFileContents, filesToTranslate)
-		if err != nil {
-			return fmt.Errorf("could not parse ignition file: %s", err)
-		}
-	}
 	return nil
 }
 
