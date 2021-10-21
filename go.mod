@@ -21,5 +21,7 @@ require (
 	github.com/vincent-petithory/dataurl v0.0.0-20160330182126-9a301d65acbb
 	golang.org/x/sys v0.0.0-20201112073958-5cba982894dd
 	k8s.io/apimachinery v0.20.0
+	k8s.io/kubelet v0.20.0
 	sigs.k8s.io/controller-runtime v0.7.0
+	sigs.k8s.io/yaml v1.2.0
 )
