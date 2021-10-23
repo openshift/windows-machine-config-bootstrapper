@@ -158,27 +158,60 @@ rqLuyNO+hCh/ZclPL+UiGJH1dlQ=
 // TestCreateKubeletConf tests that we are creating the kubelet configuration in a way that allows it to run on windows
 func TestCreateKubeletConf(t *testing.T) {
 	type args struct {
-		in []byte
+		kubeletConfData kubeletConf
 	}
 	instDir := `C:\k`
 	err := os.MkdirAll(instDir, 0755)
 	require.NoError(t, err, "error creating install directory")
 
 	tests := []struct {
-		name string
-		args args
-		want []byte
+		name    string
+		args    args
+		want    []byte
+		wantErr bool
 	}{
 		{
-			name: "Base case",
-			want: []byte(`{"kind":"KubeletConfiguration","apiVersion":"kubelet.config.k8s.io/v1beta1","rotateCertificates":true,"serverTLSBootstrap":true,"authentication":{"x509":{"clientCAFile":"C:\\k\\kubelet-ca.crt "},"anonymous":{"enabled":false}},"clusterDomain":"cluster.local","clusterDNS":["172.30.0.10"],"cgroupsPerQOS":false,"runtimeRequestTimeout":"10m0s","maxPods":250,"kubeAPIQPS":50,"kubeAPIBurst":100,"serializeImagePulls":false,"featureGates":{"LegacyNodeRoleBehavior":false,"NodeDisruptionExclusion":true,"RotateKubeletServerCertificate":true,"SCTPSupport":true,"ServiceNodeExclusion":true,"SupportPodPidsLimit":true},"containerLogMaxSize":"50Mi","systemReserved":{"cpu":"500m","ephemeral-storage":"1Gi","memory":"1Gi"},"enforceNodeAllocatable":[]}`),
+			name: "empty list of clusterDNS",
+			args: args{
+				kubeletConfData: kubeletConf{
+					ClusterDNS: "[]",
+				},
+			},
+			want:    []byte(`{"kind":"KubeletConfiguration","apiVersion":"kubelet.config.k8s.io/v1beta1","rotateCertificates":true,"serverTLSBootstrap":true,"authentication":{"x509":{"clientCAFile":"C:\\k\\kubelet-ca.crt "},"anonymous":{"enabled":false}},"clusterDomain":"cluster.local","clusterDNS":[],"cgroupsPerQOS":false,"runtimeRequestTimeout":"10m0s","maxPods":250,"kubeAPIQPS":50,"kubeAPIBurst":100,"serializeImagePulls":false,"featureGates":{"LegacyNodeRoleBehavior":false,"NodeDisruptionExclusion":true,"RotateKubeletServerCertificate":true,"SCTPSupport":true,"ServiceNodeExclusion":true,"SupportPodPidsLimit":true},"containerLogMaxSize":"50Mi","systemReserved":{"cpu":"500m","ephemeral-storage":"1Gi","memory":"1Gi"},"enforceNodeAllocatable":[]}`),
+			wantErr: false,
+		},
+		{
+			name: "valid list of clusterDNS",
+			args: args{
+				kubeletConfData: kubeletConf{
+					ClusterDNS: "[\"100.123.0.10\"]",
+				},
+			},
+			want:    []byte(`{"kind":"KubeletConfiguration","apiVersion":"kubelet.config.k8s.io/v1beta1","rotateCertificates":true,"serverTLSBootstrap":true,"authentication":{"x509":{"clientCAFile":"C:\\k\\kubelet-ca.crt "},"anonymous":{"enabled":false}},"clusterDomain":"cluster.local","clusterDNS":["100.123.0.10"],"cgroupsPerQOS":false,"runtimeRequestTimeout":"10m0s","maxPods":250,"kubeAPIQPS":50,"kubeAPIBurst":100,"serializeImagePulls":false,"featureGates":{"LegacyNodeRoleBehavior":false,"NodeDisruptionExclusion":true,"RotateKubeletServerCertificate":true,"SCTPSupport":true,"ServiceNodeExclusion":true,"SupportPodPidsLimit":true},"containerLogMaxSize":"50Mi","systemReserved":{"cpu":"500m","ephemeral-storage":"1Gi","memory":"1Gi"},"enforceNodeAllocatable":[]}`),
+			wantErr: false,
+		},
+		{
+			name: "clusterDNS list with two elements",
+			args: args{
+				kubeletConfData: kubeletConf{
+					ClusterDNS: "[\"100.123.0.10\", \"0:0:0:0:0:ffff:647b:000a\"]",
+				},
+			},
+			want:    []byte(`{"kind":"KubeletConfiguration","apiVersion":"kubelet.config.k8s.io/v1beta1","rotateCertificates":true,"serverTLSBootstrap":true,"authentication":{"x509":{"clientCAFile":"C:\\k\\kubelet-ca.crt "},"anonymous":{"enabled":false}},"clusterDomain":"cluster.local","clusterDNS":["100.123.0.10", "0:0:0:0:0:ffff:647b:000a"],"cgroupsPerQOS":false,"runtimeRequestTimeout":"10m0s","maxPods":250,"kubeAPIQPS":50,"kubeAPIBurst":100,"serializeImagePulls":false,"featureGates":{"LegacyNodeRoleBehavior":false,"NodeDisruptionExclusion":true,"RotateKubeletServerCertificate":true,"SCTPSupport":true,"ServiceNodeExclusion":true,"SupportPodPidsLimit":true},"containerLogMaxSize":"50Mi","systemReserved":{"cpu":"500m","ephemeral-storage":"1Gi","memory":"1Gi"},"enforceNodeAllocatable":[]}`),
+			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bs := winNodeBootstrapper{installDir: instDir}
+			bs := winNodeBootstrapper{
+				installDir:      instDir,
+				kubeletConfData: tt.args.kubeletConfData,
+			}
 			got, err := bs.createKubeletConf()
-			assert.NoError(t, err)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("extractClusterDNS() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
 			assert.Equalf(t, tt.want, got, "got = %v, want %v", string(got), string(tt.want))
 		})
 	}
@@ -647,4 +680,77 @@ func TestKubeletDirectoriesCreation(t *testing.T) {
 	assert.NoError(t, err, "error initializing kubelet files")
 	assert.DirExists(t, podManifestDirectory, "pod manifest directory was not created")
 	assert.DirExists(t, logDirectory, "log directory was not created")
+}
+
+func TestExtractClusterDNS(t *testing.T) {
+	type args struct {
+		kubeletConfSource string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "empty kubeletConfSource",
+			args: args{
+				kubeletConfSource: "",
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "invalid kubeletConfSource",
+			args: args{
+				kubeletConfSource: "invalid",
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "kubeletConfSource with invalid YAML format",
+			args: args{
+				kubeletConfSource: "data:,kind%3A%20KubeletConfiguration%0AapiVersion%3A%20kubelet.config.k8s.io%2Fv1beta1%0Aauthentication%3A%0A%20%20x509%3A%0A%20%20%20%20clientCAFile%3A%20%2Fetc%2Fkubernetes%2Fkubelet-ca.crt%0A%20%20anonymous%3A%0A%20%20%20%20enabled%3A%20false%0AcgroupDriver%3A%20systemd%0AcgroupRoot%3A%20%2F%0AclusterDNS%3A%0AclusterDomain%0A",
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "kubeletConfSource without data",
+			args: args{
+				kubeletConfSource: "data:,",
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "kubeletConfSource with valid data",
+			args: args{
+				kubeletConfSource: "data:,kind%3A%20KubeletConfiguration%0AapiVersion%3A%20kubelet.config.k8s.io%2Fv1beta1%0Aauthentication%3A%0A%20%20x509%3A%0A%20%20%20%20clientCAFile%3A%20%2Fetc%2Fkubernetes%2Fkubelet-ca.crt%0A%20%20anonymous%3A%0A%20%20%20%20enabled%3A%20false%0AcgroupDriver%3A%20systemd%0AcgroupRoot%3A%20%2F%0AclusterDNS%3A%0A%20%20-%20100.123.0.10%0AclusterDomain%3A%20cluster.local%0AcontainerLogMaxSize%3A%2050Mi%0AmaxPods%3A%20250%0AkubeAPIQPS%3A%2050%0AkubeAPIBurst%3A%20100%0ArotateCertificates%3A%20true%0AserializeImagePulls%3A%20false%0AstaticPodPath%3A%20%2Fetc%2Fkubernetes%2Fmanifests%0AsystemCgroups%3A%20%2Fsystem.slice%0AsystemReserved%3A%0A%20%20ephemeral-storage%3A%201Gi%0AfeatureGates%3A%0A%20%20APIPriorityAndFairness%3A%20true%0A%20%20LegacyNodeRoleBehavior%3A%20false%0A%20%20NodeDisruptionExclusion%3A%20true%0A%20%20RotateKubeletServerCertificate%3A%20true%0A%20%20ServiceNodeExclusion%3A%20true%0A%20%20SupportPodPidsLimit%3A%20true%0A%20%20DownwardAPIHugePages%3A%20true%0AserverTLSBootstrap%3A%20true%0AtlsMinVersion%3A%20VersionTLS12%0AtlsCipherSuites%3A%0A%20%20-%20TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256%0A%20%20-%20TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256%0A%20%20-%20TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384%0A%20%20-%20TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384%0A%20%20-%20TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256%0A%20%20-%20TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256%0A",
+			},
+			want:    "[\"100.123.0.10\"]",
+			wantErr: false,
+		},
+		{
+			name: "kubeletConfSource with valid IPv6 address data",
+			args: args{
+				kubeletConfSource: "data:,kind%3A%20KubeletConfiguration%0AapiVersion%3A%20kubelet.config.k8s.io%2Fv1beta1%0Aauthentication%3A%0A%20%20x509%3A%0A%20%20%20%20clientCAFile%3A%20%2Fetc%2Fkubernetes%2Fkubelet-ca.crt%0A%20%20anonymous%3A%0A%20%20%20%20enabled%3A%20false%0AcgroupDriver%3A%20systemd%0AcgroupRoot%3A%20%2F%0AclusterDNS%3A%0A%20%20-%20100.123.0.10%0A%20%20-%200:0:0:0:0:ffff:647b:000a%0AclusterDomain%3A%20cluster.local%0AcontainerLogMaxSize%3A%2050Mi%0AmaxPods%3A%20250%0AkubeAPIQPS%3A%2050%0AkubeAPIBurst%3A%20100%0ArotateCertificates%3A%20true%0AserializeImagePulls%3A%20false%0AstaticPodPath%3A%20%2Fetc%2Fkubernetes%2Fmanifests%0AsystemCgroups%3A%20%2Fsystem.slice%0AsystemReserved%3A%0A%20%20ephemeral-storage%3A%201Gi%0AfeatureGates%3A%0A%20%20APIPriorityAndFairness%3A%20true%0A%20%20LegacyNodeRoleBehavior%3A%20false%0A%20%20NodeDisruptionExclusion%3A%20true%0A%20%20RotateKubeletServerCertificate%3A%20true%0A%20%20ServiceNodeExclusion%3A%20true%0A%20%20SupportPodPidsLimit%3A%20true%0A%20%20DownwardAPIHugePages%3A%20true%0AserverTLSBootstrap%3A%20true%0AtlsMinVersion%3A%20VersionTLS12%0AtlsCipherSuites%3A%0A%20%20-%20TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256%0A%20%20-%20TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256%0A%20%20-%20TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384%0A%20%20-%20TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384%0A%20%20-%20TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256%0A%20%20-%20TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256%0A",
+			},
+			want:    "[\"100.123.0.10\",\"0:0:0:0:0:ffff:647b:000a\"]",
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := extractClusterDNS(tt.args.kubeletConfSource)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("extractClusterDNS() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("extractClusterDNS() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
