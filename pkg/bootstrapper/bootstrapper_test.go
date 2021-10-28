@@ -158,7 +158,7 @@ rqLuyNO+hCh/ZclPL+UiGJH1dlQ=
 // TestCreateKubeletConf tests that we are creating the kubelet configuration in a way that allows it to run on windows
 func TestCreateKubeletConf(t *testing.T) {
 	type args struct {
-		in []byte
+		clusterDNS string
 	}
 	instDir := `C:\k`
 	err := os.MkdirAll(instDir, 0755)
@@ -171,12 +171,25 @@ func TestCreateKubeletConf(t *testing.T) {
 	}{
 		{
 			name: "Base case",
+			args: args{
+				clusterDNS: "172.30.0.10",
+			},
 			want: []byte(`{"kind":"KubeletConfiguration","apiVersion":"kubelet.config.k8s.io/v1beta1","rotateCertificates":true,"serverTLSBootstrap":true,"authentication":{"x509":{"clientCAFile":"C:\\k\\kubelet-ca.crt "},"anonymous":{"enabled":false}},"clusterDomain":"cluster.local","clusterDNS":["172.30.0.10"],"cgroupsPerQOS":false,"runtimeRequestTimeout":"10m0s","maxPods":250,"kubeAPIQPS":50,"kubeAPIBurst":100,"serializeImagePulls":false,"featureGates":{"LegacyNodeRoleBehavior":false,"NodeDisruptionExclusion":true,"RotateKubeletServerCertificate":true,"SCTPSupport":true,"ServiceNodeExclusion":true,"SupportPodPidsLimit":true},"containerLogMaxSize":"50Mi","systemReserved":{"cpu":"500m","ephemeral-storage":"1Gi","memory":"1Gi"},"enforceNodeAllocatable":[]}`),
+		},
+		{
+			name: "empty clusterDNS",
+			args: args{
+				clusterDNS: "",
+			},
+			want: []byte(`{"kind":"KubeletConfiguration","apiVersion":"kubelet.config.k8s.io/v1beta1","rotateCertificates":true,"serverTLSBootstrap":true,"authentication":{"x509":{"clientCAFile":"C:\\k\\kubelet-ca.crt "},"anonymous":{"enabled":false}},"clusterDomain":"cluster.local","clusterDNS":[],"cgroupsPerQOS":false,"runtimeRequestTimeout":"10m0s","maxPods":250,"kubeAPIQPS":50,"kubeAPIBurst":100,"serializeImagePulls":false,"featureGates":{"LegacyNodeRoleBehavior":false,"NodeDisruptionExclusion":true,"RotateKubeletServerCertificate":true,"SCTPSupport":true,"ServiceNodeExclusion":true,"SupportPodPidsLimit":true},"containerLogMaxSize":"50Mi","systemReserved":{"cpu":"500m","ephemeral-storage":"1Gi","memory":"1Gi"},"enforceNodeAllocatable":[]}`),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			bs := winNodeBootstrapper{installDir: instDir}
+			bs := winNodeBootstrapper{
+				installDir: instDir,
+				clusterDNS: tt.args.clusterDNS,
+			}
 			got, err := bs.createKubeletConf()
 			assert.NoError(t, err)
 			assert.Equalf(t, tt.want, got, "got = %v, want %v", string(got), string(tt.want))
@@ -415,11 +428,11 @@ func TestCloudConfInvalidNames(t *testing.T) {
 // TestNewWinNodeBootstrapperWithInvalidCNIInputs tests if NewWinNodeBootstrapper returns the expected error on passing
 // invalid CNI inputs
 func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
-	_, err := NewWinNodeBootstrapper("", "", "", "", "C:\\something", "")
+	_, err := NewWinNodeBootstrapper("", "", "", "", "", "C:\\something", "")
 	require.Error(t, err, "no error thrown when cniDir is not empty and cniConfig is empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 
-	_, err = NewWinNodeBootstrapper("", "", "", "", "", "C:\\something")
+	_, err = NewWinNodeBootstrapper("", "", "", "", "", "", "C:\\something")
 	require.Error(t, err, "no error thrown when cniDir is empty and cniConfig not empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 }
@@ -427,7 +440,7 @@ func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
 // TestWinNodeBootstrapperConfigureWithInvalidInputs tests if Configure returns the expected error when CNI inputs
 // are not present
 func TestWinNodeBootstrapperConfigureWithInvalidInputs(t *testing.T) {
-	wnb, err := NewWinNodeBootstrapper("", "", "", "", "", "")
+	wnb, err := NewWinNodeBootstrapper("", "", "", "", "", "", "")
 	require.NoError(t, err, "error instantiating bootstrapper")
 	err = wnb.Configure()
 	require.Error(t, err, "no error thrown when Configure is called with no CNI inputs")
