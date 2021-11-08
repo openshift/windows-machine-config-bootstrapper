@@ -62,7 +62,7 @@ func TestBootstrapper(t *testing.T) {
 	t.Run("Uninstall kubelet without kubelet service present", testUninstallWithoutKubeletSvc)
 
 	// Run the bootstrapper, which will start the kubelet service
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "", "", "")
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "", "", "", "my-computer")
 	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
 	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)
@@ -108,6 +108,9 @@ func TestBootstrapper(t *testing.T) {
 	})
 	t.Run("Test the config dependencies in Kubelet arguments", func(t *testing.T) {
 		assert.ElementsMatch(t, expectedDependencies, actualDependencies)
+	})
+	t.Run("Test hostname", func(t *testing.T) {
+		testHostname(t, path)
 	})
 }
 
@@ -207,6 +210,22 @@ func testPathInKubeletArgs(t *testing.T, checkPathsFor []string, path string) {
 				if key == argSplit[0] {
 					assert.Containsf(t, argSplit[1], string(os.PathSeparator), "Path not correctly set for %s", key)
 				}
+			}
+		}
+	}
+}
+
+// testHostname checks if the hostname given as the argument to kubelet service is correct
+func testHostname(t *testing.T, path string) {
+	// Split the arguments from kubelet path
+	kubeletArg := strings.Split(path, " ")
+	for _, arg := range kubeletArg {
+		// Split the key and value of arg
+		argSplit := strings.SplitN(arg, "=", 2)
+		// Ignore single valued arguments
+		if len(argSplit) > 1 {
+			if argSplit[0] == "--hostname-override" {
+				assert.Equal(t, argSplit[1], "my-computer")
 			}
 		}
 	}

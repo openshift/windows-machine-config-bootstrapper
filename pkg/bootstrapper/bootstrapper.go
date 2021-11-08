@@ -140,6 +140,8 @@ type winNodeBootstrapper struct {
 	kubeletArgs []string
 	// cni holds all the CNI specific information
 	cni *cniOptions
+	// hostname contains the name for the host
+	hostname string
 }
 
 // cniOptions is responsible for reconfiguring the kubelet service with CNI configuration
@@ -161,7 +163,7 @@ type cniOptions struct {
 // object. The CNI options are populated only in the configure-cni command. The inputs to NewWinNodeBootstrapper are
 // ignored while using the uninstall kubelet functionality.
 func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, clusterDNS, cniDir,
-	cniConfig string) (*winNodeBootstrapper, error) {
+	cniConfig string, hostname string) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
 		return nil, fmt.Errorf("both cniDir and cniConfig need to be populated")
@@ -195,6 +197,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cl
 		svcMgr:             svcMgr,
 		nodeIP:             nodeIP,
 		clusterDNS:         clusterDNS,
+		hostname:           hostname,
 	}
 	// populate the CNI struct if CNI options are present
 	if cniDir != "" && cniConfig != "" {
@@ -557,6 +560,9 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 	}
 	if wmcb.nodeIP != "" {
 		kubeletArgs = append(kubeletArgs, "--node-ip="+wmcb.nodeIP)
+	}
+	if wmcb.hostname != "" {
+		kubeletArgs = append(kubeletArgs, "--hostname-override="+wmcb.hostname)
 	}
 	return kubeletArgs
 }

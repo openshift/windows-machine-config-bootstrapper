@@ -42,7 +42,7 @@ func testConfigureCNIWithoutKubeletSvc(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Instantiate the bootstrapper
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(tempDir, "", "", "", "", tempDir, cniConfig.Name())
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(tempDir, "", "", "", "", tempDir, cniConfig.Name(), "")
 	require.NoError(t, err, "could not instantiate wmcb")
 
 	err = wmcb.Configure()
@@ -53,7 +53,7 @@ func testConfigureCNIWithoutKubeletSvc(t *testing.T) {
 // testConfigureCNI tests if ConfigureCNI() runs successfully by checking if the kubelet service comes up after
 // configuring CNI
 func testConfigureCNI(t *testing.T) {
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, "", "", "", "", cniDir, cniConfig)
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, "", "", "", "", cniDir, cniConfig, "")
 	require.NoError(t, err, "could not create wmcb")
 
 	err = wmcb.Configure()
