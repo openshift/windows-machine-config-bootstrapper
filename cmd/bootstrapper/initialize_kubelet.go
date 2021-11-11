@@ -39,6 +39,8 @@ var (
 		nodeIP string
 		// clusterDNS is the IP address of the DNS server used for all containers
 		clusterDNS string
+		// platformType contains type of the platform where the cluster is deployed
+		platformType string
 	}
 )
 
@@ -56,6 +58,8 @@ func init() {
 	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.clusterDNS, "cluster-dns", "",
 		"The DNS server IP passed to kubelet, that will be used to configure all containers for DNS resolution. "+
 			"If unset, kubelet will determine the DNS server to use.")
+	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.platformType, "platform-type", "",
+		"Type of the platform where the cluster is deployed. Example: AWS, Azure, GCP")
 }
 
 // runInitializeKubeletCmd starts the Windows Machine Config Bootstrapper
@@ -65,7 +69,8 @@ func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(initializeKubeletOpts.installDir,
 		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath,
-		initializeKubeletOpts.nodeIP, initializeKubeletOpts.clusterDNS, "", "")
+		initializeKubeletOpts.nodeIP, initializeKubeletOpts.clusterDNS, "", "",
+		initializeKubeletOpts.platformType)
 	if err != nil {
 		log.Error(err, "could not create bootstrapper")
 		os.Exit(1)
