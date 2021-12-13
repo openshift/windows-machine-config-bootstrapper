@@ -20,6 +20,7 @@ import (
 var ignitionFilePath string
 var kubeletPath string
 var installDir string
+var platformType string
 
 const (
 	kubeletLogPath = "C:\\var\\log\\kubelet\\kubelet.log"
@@ -36,6 +37,7 @@ func init() {
 	pflag.StringVar(&ignitionFilePath, "ignition-file", "C:\\Windows\\Temp\\worker.ign", "ign file location")
 	pflag.StringVar(&kubeletPath, "kubelet-path", "C:\\Windows\\Temp\\kubelet.exe", "kubelet location")
 	pflag.StringVar(&installDir, "install-dir", "C:\\k", "Installation directory")
+	pflag.StringVar(&platformType, "platform-type", "", "platform type")
 }
 
 // TestBootstrapper tests that the bootstrapper was able to start the required services
@@ -62,7 +64,7 @@ func TestBootstrapper(t *testing.T) {
 	t.Run("Uninstall kubelet without kubelet service present", testUninstallWithoutKubeletSvc)
 
 	// Run the bootstrapper, which will start the kubelet service
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "", "", "")
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "", "", "", platformType)
 	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
 	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)

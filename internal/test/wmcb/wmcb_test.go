@@ -142,7 +142,7 @@ func (vm *wmcbVM) runTestBootstrapper(t *testing.T) {
 	err := vm.initializeTestBootstrapperFiles()
 	require.NoError(t, err, "error initializing files required for TestBootstrapper")
 
-	err = vm.runTest(e2eExecutable + " --test.run TestBootstrapper --test.v")
+	err = vm.runTest(e2eExecutable + " --test.run TestBootstrapper --test.v --platform-type=aws")
 	require.NoError(t, err, "TestBootstrapper failed")
 }
 
@@ -159,7 +159,7 @@ func (vm *wmcbVM) runTestConfigureCNI(t *testing.T) {
 	err = vm.initializeTestConfigureCNIFiles(hybridOverlayAnnotation)
 	require.NoError(t, err, "error initializing files required for TestConfigureCNI")
 
-	err = vm.runTest(e2eExecutable + " --test.run TestConfigureCNI --test.v")
+	err = vm.runTest(e2eExecutable + " --test.run TestConfigureCNI --test.v --platform-type=aws")
 	require.NoError(t, err, "TestConfigureCNI failed")
 }
 

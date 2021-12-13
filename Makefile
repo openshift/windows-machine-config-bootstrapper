@@ -11,7 +11,7 @@ build:
 
 .PHONY: build-wmcb-unit-test
 build-wmcb-unit-test:
-	$(GO_BUILD_ARGS) GOOS=windows GOFLAGS=-v go test -c ./pkg/... -o wmcb_unit_test.exe
+	$(GO_BUILD_ARGS) GOOS=windows GOFLAGS=-v go test -c ./pkg/bootstrapper/... -o wmcb_unit_test.exe
 
 .PHONY: build-wmcb-e2e-test
 build-wmcb-e2e-test:

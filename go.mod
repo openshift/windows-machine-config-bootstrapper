@@ -11,6 +11,8 @@ replace (
 )
 
 require (
+	github.com/aws/aws-sdk-go-v2/config v1.10.0
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.8.0
 	github.com/coreos/ign-converter v0.0.0-20200825151652-ea20012f9844
 	github.com/coreos/ignition v0.35.0
 	github.com/coreos/ignition/v2 v2.6.0

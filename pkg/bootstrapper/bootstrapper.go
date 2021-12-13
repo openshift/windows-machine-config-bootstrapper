@@ -22,6 +22,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/vincent-petithory/dataurl"
 	"golang.org/x/sys/windows/svc/mgr"
+
+	"github.com/openshift/windows-machine-config-bootstrapper/pkg/cloud"
 )
 
 /*
@@ -140,6 +142,8 @@ type winNodeBootstrapper struct {
 	kubeletArgs []string
 	// cni holds all the CNI specific information
 	cni *cniOptions
+	// platformType contains type of the platform where the cluster is deployed
+	platformType string
 }
 
 // cniOptions is responsible for reconfiguring the kubelet service with CNI configuration
@@ -161,7 +165,7 @@ type cniOptions struct {
 // object. The CNI options are populated only in the configure-cni command. The inputs to NewWinNodeBootstrapper are
 // ignored while using the uninstall kubelet functionality.
 func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, clusterDNS, cniDir,
-	cniConfig string) (*winNodeBootstrapper, error) {
+	cniConfig, platformType string) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
 		return nil, fmt.Errorf("both cniDir and cniConfig need to be populated")
@@ -195,6 +199,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cl
 		svcMgr:             svcMgr,
 		nodeIP:             nodeIP,
 		clusterDNS:         clusterDNS,
+		platformType:       platformType,
 	}
 	// populate the CNI struct if CNI options are present
 	if cniDir != "" && cniConfig != "" {
@@ -403,7 +408,10 @@ func (wmcb *winNodeBootstrapper) parseIgnitionFileContents(ignitionFileContents 
 	}
 
 	// Generate the full list of kubelet arguments from the arguments present in the ignition file
-	wmcb.kubeletArgs = wmcb.generateInitialKubeletArgs(args)
+	wmcb.kubeletArgs, err = wmcb.generateInitialKubeletArgs(args)
+	if err != nil {
+		return fmt.Errorf("cannot generate initial kubelet args: %w", err)
+	}
 
 	// For each new file in the ignition file check if is a file we are interested in, if so, decode, transform,
 	// and write it to the destination path
@@ -514,7 +522,7 @@ func (wmcb *winNodeBootstrapper) initializeKubeletFiles() error {
 
 // generateInitialKubeletArgs returns the kubelet args required during initial kubelet start up. args should be a map
 // of the variable options passed along to WMCB via the ignition file.
-func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]string) []string {
+func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]string) ([]string, error) {
 	// If initialize-kubelet is run after configure-cni, the kubelet args will be overwritten and the CNI
 	// configuration will be lost. The assumption is that every time initialize-kubelet is run, configure-cni needs to
 	// be run again. WMCO ensures that the initialize-kubelet is run successfully before configure-cni and we don't
@@ -558,7 +566,16 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 	if wmcb.nodeIP != "" {
 		kubeletArgs = append(kubeletArgs, "--node-ip="+wmcb.nodeIP)
 	}
-	return kubeletArgs
+
+	hostname, err := cloud.GetKubeletHostnameOverride(wmcb.platformType)
+	if err != nil {
+		return nil, err
+	}
+	if hostname != "" {
+		kubeletArgs = append(kubeletArgs, "--hostname-override="+hostname)
+	}
+
+	return kubeletArgs, nil
 }
 
 // ensureKubeletService creates a new kubelet service to our specifications if it is not already present, else
