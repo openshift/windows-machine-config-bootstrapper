@@ -48,6 +48,11 @@ wmcb configure-cni --cni-dir $CNI_BIN_DIR --cni-config $CNI_CONFIG
 after `configure-cni` is executed, all the CNI options will be removed. This is to give the user a chance to change
 network configuration to something other than CNI after the initial setup.
 
+The `initialize-kubelet` command provides the following optional parameters:
+- `--cluster-dns` is the DNS server IP passed to kubelet, that will be used to configure all containers for 
+  DNS resolution. If unset, kubelet will determine the DNS server to use. See `clusterDNS` option in 
+  [KubeletConfiguration](https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration).
+
 ## Testing
 
 ### Windows Machine Config Bootstrapper
