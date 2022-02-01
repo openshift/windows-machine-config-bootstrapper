@@ -93,6 +93,9 @@ const (
 	cniBinDirOption = "--cni-bin-dir"
 	// cniConfDirOption is to specify the CNI conf directory
 	cniConfDirOption = "--cni-conf-dir"
+	// managedServicePrefix indicates that the service being described is managed by OpenShift. This ensures that all
+	// services created as part of Node configuration can be searched for by checking their description for this string
+	managedServicePrefix = "OpenShift managed"
 )
 
 // These regex are global, so that we only need to compile them once
@@ -577,7 +580,7 @@ func (wmcb *winNodeBootstrapper) ensureKubeletService() error {
 		ServiceStartName: "",
 		DisplayName:      "",
 		Password:         "",
-		Description:      "OpenShift Kubelet",
+		Description:      fmt.Sprintf("%s kubelet", managedServicePrefix),
 	}
 
 	if wmcb.kubeletSVC == nil {

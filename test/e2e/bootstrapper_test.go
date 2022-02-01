@@ -109,6 +109,11 @@ func TestBootstrapper(t *testing.T) {
 	t.Run("Test the config dependencies in Kubelet arguments", func(t *testing.T) {
 		assert.ElementsMatch(t, expectedDependencies, actualDependencies)
 	})
+	t.Run("Kubelet service has 'OpenShift managed' in description", func(t *testing.T) {
+		config, err := getSvcConfig(bootstrapper.KubeletServiceName)
+		require.NoError(t, err, "error getting Kubelet Config")
+		assert.Contains(t, config.Description, "OpenShift managed")
+	})
 }
 
 // ensureIgnitionFileExists will create a generic ignition file if one is not provided on the node
@@ -176,6 +181,23 @@ func getSvcInfo(svcName string) (svc.State, string, []string, error) {
 	} else {
 		return status.State, "", nil, fmt.Errorf("could not fetch %s path: %s", svcName, err)
 	}
+}
+
+// getSvcConfig returns the configuration of the Windows Service with the given name
+func getSvcConfig(svcName string) (mgr.Config, error) {
+	svcMgr, err := mgr.Connect()
+	if err != nil {
+		return mgr.Config{}, fmt.Errorf("could not connect to Windows SCM: %s", err)
+	}
+	defer svcMgr.Disconnect()
+
+	svcHandle, err := svcMgr.OpenService(svcName)
+	if err != nil {
+		return mgr.Config{}, err
+	}
+	defer svcHandle.Close()
+
+	return svcHandle.Config()
 }
 
 // removeFileIfExists removes the file given by 'path', and will not throw an error if it does not exist
