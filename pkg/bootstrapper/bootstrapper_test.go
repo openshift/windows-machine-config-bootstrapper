@@ -264,7 +264,7 @@ func TestKubeletArgs(t *testing.T) {
 	baseExpectedArgs := []string{"--config=\\fakepath\\kubelet.conf",
 		"--bootstrap-kubeconfig=" + filepath.Join(dir, "bootstrap-kubeconfig"),
 		"--kubeconfig=\\fakepath\\kubeconfig",
-		"--pod-infra-container-image=mcr.microsoft.com/oss/kubernetes/pause:3.4.1",
+		"--pod-infra-container-image=mcr.microsoft.com/oss/kubernetes/pause:3.6",
 		"--cert-dir=c:\\var\\lib\\kubelet\\pki\\",
 		"--windows-service",
 		"--logtostderr=false",
