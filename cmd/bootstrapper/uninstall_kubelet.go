@@ -26,7 +26,8 @@ func init() {
 // runUninstallKubeletCmd uninstalls kubelet service from the Windows node
 func runUninstallKubeletCmd(cmd *cobra.Command, args []string) {
 	flag.Parse()
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper("", "", "", "", "", "", "", "")
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper("", "", "", "", "",
+		"", "", "", true)
 	if err != nil {
 		log.Error(err, "could not create bootstrapper")
 		os.Exit(1)
