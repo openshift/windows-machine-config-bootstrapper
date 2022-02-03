@@ -382,49 +382,6 @@ func (f *TestFramework) RetrieveArtifacts() {
 	}
 }
 
-// waitUntilHybridOverlayReady returns once OVN is ready again, after applying the hybrid overlay patch.
-func (f *TestFramework) waitUntilHybridOverlayReady() error {
-	// This is being done after we wait for the master nodes, as we need to make sure the patch is being acted on,
-	// and we are not checking the pods before they begin to restart with the hybrid overlay changes
-	if err := f.waitUntilOVNPodsReady(); err != nil {
-		return fmt.Errorf("error waiting for all pods in the OVN namespace to be ready: %s", err)
-	}
-
-	return nil
-}
-
-// waitUntilOVNPodsReady returns when either all pods in the openshift-ovn-kubernetes namespace are ready, or the
-// timeout limit has been reached.
-func (f *TestFramework) waitUntilOVNPodsReady() error {
-	for i := 0; i < RetryCount; i++ {
-		pods, err := f.K8sclientset.CoreV1().Pods("openshift-ovn-kubernetes").List(context.TODO(), metav1.ListOptions{})
-		if err != nil {
-			return fmt.Errorf("could not get pods: %s", err)
-		}
-
-		allReady := true
-		for _, pod := range pods.Items {
-			podReady := false
-			for _, condition := range pod.Status.Conditions {
-				if condition.Type == v1.PodReady {
-					podReady = true
-					break
-				}
-			}
-			if !podReady {
-				allReady = false
-				break
-			}
-		}
-		if allReady {
-			return nil
-		}
-		time.Sleep(RetryInterval)
-	}
-	return fmt.Errorf("timed out waiting for pods in namespace \"openshift-ovn-kubernetes\" to be ready")
-
-}
-
 // TearDown destroys the resources created by the Setup function
 func (f *TestFramework) TearDown() {
 	if f.noTeardown || f.WinVMs == nil {
