@@ -52,6 +52,8 @@ const (
 	// hybridOverlayConfigurationTime is the approximate time taken for the hybrid-overlay to complete reconfiguring
 	// the Windows VM's network
 	hybridOverlayConfigurationTime = 2 * time.Minute
+	// hybridOverlayServiceName is the name of hybrid-overlay Windows service
+	hybridOverlayServiceName = "hybrid-overlay-node"
 )
 
 var (
@@ -221,10 +223,10 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 		return nil
 	}
 
-	// Wait until the node object has the hybrid overlay subnet annotation. Otherwise the hybrid-overlay-node will fail to
-	// start
-	if err = waitForHybridOverlayAnnotation(nodeName); err != nil {
-		return fmt.Errorf("error waiting for hybrid overlay node annotation: %v", err)
+	// Wait until the node object has the hybrid overlay subnet annotation. Otherwise the hybrid-overlay-node will fail
+	// to start
+	if err = waitForNodeAnnotation(nodeName, test.HybridOverlaySubnet); err != nil {
+		return fmt.Errorf("error waiting for hybrid overlay subnet annotation: %v", err)
 	}
 
 	output, err = vm.Run(mkdirCmd(kLog), false)
@@ -232,13 +234,14 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 		return fmt.Errorf("unable to create remote directory %s: %v\n%s", kLog, err, output)
 	}
 
-	// Start the hybrid-overlay-node in the background over ssh.
-	go vm.Run(hybridOverlayExecutable+" --node "+nodeName+
-		" --k8s-kubeconfig c:\\k\\kubeconfig > "+kLog+"hybrid-overlay.log 2>&1", false)
-
-	err = vm.waitForHybridOverlayToRun()
+	// Start the hybrid-overlay-node Windows service
+	binPath := fmt.Sprintf("%s --node %s --windows-service --k8s-kubeconfig c:\\k\\kubeconfig "+
+		"--logfile %s\\hybrid-overlay.log", hybridOverlayExecutable, nodeName, kLog)
+	startCommand := fmt.Sprintf("sc.exe create %s binPath=\"%s\" start=auto && sc.exe start %s",
+		hybridOverlayServiceName, binPath, hybridOverlayServiceName)
+	out, err := vm.Run(startCommand, false)
 	if err != nil {
-		return fmt.Errorf("error running %s: %v", hybridOverlayName, err)
+		return errors.Wrapf(err, "failed to start service with output: %s", out)
 	}
 
 	// Wait for the hybrid-overlay to complete reconfiguring the network. The only way to detect that it has completed
@@ -255,6 +258,12 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 	err = vm.waitForOpenShiftHNSNetworks()
 	if err != nil {
 		return fmt.Errorf("error waiting for OpenShift HNS networks to be created: %v", err)
+	}
+
+	// Wait until the node object has the hybrid overlay mac annotation, this is indicative of hybrid-overlay
+	// starting successfully
+	if err = waitForNodeAnnotation(nodeName, test.HybridOverlayGatewayMAC); err != nil {
+		return fmt.Errorf("error waiting for hybrid overlay mac annotation: %v", err)
 	}
 
 	return nil
@@ -281,21 +290,6 @@ func (vm *wmcbVM) waitForOpenShiftHNSNetworks() error {
 	// OpenShift HNS networks were not found
 	log.Printf("Get-HnsNetwork:\n%s", output)
 	return fmt.Errorf("timeout waiting for OpenShift HNS networks: %v", err)
-}
-
-// waitForHybridOverlayToRun waits for the hybrid-overlay-node.exe to run until the timeout is reached
-func (vm *wmcbVM) waitForHybridOverlayToRun() error {
-	var err error
-	for retries := 0; retries < e2ef.RetryCount; retries++ {
-		_, err = vm.Run("Get-Process -Name \"hybrid-overlay-node\"", true)
-		if err == nil {
-			return nil
-		}
-		time.Sleep(e2ef.RetryInterval)
-	}
-
-	// hybrid-overlay-node never started running
-	return fmt.Errorf("timeout waiting for hybrid-overlay-node: %v", err)
 }
 
 func (vm *wmcbVM) runTestKubeletUninstall(t *testing.T) {
@@ -385,21 +379,20 @@ func generateCNIConf(ovnHostSubnet, serviceNetworkCIDR string) (string, error) {
 	return cniConfigPath.Name(), nil
 }
 
-// waitForHybridOverlayAnnotation waits for the hybrid overlay subnet annotation to be present on the node until the
-// timeout is reached
-func waitForHybridOverlayAnnotation(nodeName string) error {
+// waitForNodeAnnotation waits for the given annotation to be present on the node
+func waitForNodeAnnotation(nodeName, annotation string) error {
 	for retries := 0; retries < e2ef.RetryCount; retries++ {
 		node, err := framework.K8sclientset.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 		if err != nil {
 			return fmt.Errorf("error getting node %s: %v", nodeName, err)
 		}
-		_, found := node.Annotations[test.HybridOverlaySubnet]
+		_, found := node.Annotations[annotation]
 		if found {
 			return nil
 		}
 		time.Sleep(e2ef.RetryInterval)
 	}
-	return fmt.Errorf("timeout waiting for %s node annotation", test.HybridOverlaySubnet)
+	return fmt.Errorf("timeout waiting for %s node annotation", annotation)
 }
 
 // hasWindowsTaint returns true if the given Windows node has the Windows taint
