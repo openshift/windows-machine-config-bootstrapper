@@ -1,9 +1,12 @@
 FROM registry.ci.openshift.org/openshift/release:golang-1.17 as build
 LABEL stage=build
 
+# dos2unix is needed to build CNI plugins
+RUN yum install -y dos2unix
+
 # Clone WMCO repo and initialize submodules for building of windows binaries payload for e2e testing 
 WORKDIR /build/
-RUN git clone --branch release-4.8 --single-branch https://github.com/openshift/windows-machine-config-operator.git
+RUN git clone --branch release-4.11 --single-branch https://github.com/openshift/windows-machine-config-operator.git
 WORKDIR /build/windows-machine-config-operator/
 RUN git submodule update --init containernetworking-plugins kubelet ovn-kubernetes
 
@@ -35,7 +38,6 @@ FROM registry.ci.openshift.org/openshift/release:golang-1.17 as testing
 LABEL stage=testing
 
 WORKDIR /payload/cni
-COPY --from=build /build/windows-machine-config-operator/containernetworking-plugins/bin/flannel.exe .
 COPY --from=build /build/windows-machine-config-operator/containernetworking-plugins/bin/host-local.exe .
 COPY --from=build /build/windows-machine-config-operator/containernetworking-plugins/bin/win-bridge.exe .
 COPY --from=build /build/windows-machine-config-operator/containernetworking-plugins/bin/win-overlay.exe .
