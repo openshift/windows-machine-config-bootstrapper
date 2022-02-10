@@ -44,7 +44,7 @@ const (
 	// this is used to parse the kubelet args
 	kubeletSystemdName = "kubelet.service"
 	// kubeletPauseContainerImage is the location of the image we will use for the kubelet pause container
-	kubeletPauseContainerImage = "mcr.microsoft.com/oss/kubernetes/pause:3.4.1"
+	kubeletPauseContainerImage = "mcr.microsoft.com/oss/kubernetes/pause:3.6"
 	// serviceWaitTime is amount of wait time required for the Windows service API to complete stop requests
 	serviceWaitTime = time.Second * 20
 	// certDirectory is where the kubelet will look for certificates
