@@ -124,6 +124,8 @@ type winNodeBootstrapper struct {
 	initialKubeletPath string
 	// nodeIP is the IP that should be used as the node object's IP. If unset, kubelet will determine the IP itself.
 	nodeIP string
+	// clusterDNS is the IP address of the DNS server used for all containers
+	clusterDNS string
 	// TODO: When more services are added consider decomposing the services to a separate Service struct with common functions
 	// kubeletSVC is a pointer to the kubeletService struct
 	kubeletSVC *kubeletService
@@ -155,10 +157,10 @@ type cniOptions struct {
 }
 
 // NewWinNodeBootstrapper takes the dir to install the kubelet to, and paths to the ignition and kubelet files, an
-// optional node IP, along with the CNI options as inputs, and generates the winNodeBootstrapper object. The CNI options
-// are populated only in the configure-cni command. The inputs to NewWinNodeBootstrapper are ignored while using the
-// uninstall kubelet functionality.
-func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cniDir,
+// optional node IP, an optional clusterDNS, along with the CNI options as inputs, and generates the winNodeBootstrapper
+// object. The CNI options are populated only in the configure-cni command. The inputs to NewWinNodeBootstrapper are
+// ignored while using the uninstall kubelet functionality.
+func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, clusterDNS, cniDir,
 	cniConfig string) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
@@ -169,6 +171,13 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cn
 	if nodeIP != "" {
 		if parsed := net.ParseIP(nodeIP); parsed == nil {
 			return nil, fmt.Errorf("nodeIP value %s is not a valid IP format", nodeIP)
+		}
+	}
+
+	// If clusterDNS is set, ensure that it is a valid IP
+	if clusterDNS != "" {
+		if parsed := net.ParseIP(clusterDNS); parsed == nil {
+			return nil, fmt.Errorf("clusterDNS value %s is not a valid IP format", clusterDNS)
 		}
 	}
 
@@ -185,6 +194,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cn
 		initialKubeletPath: kubeletPath,
 		svcMgr:             svcMgr,
 		nodeIP:             nodeIP,
+		clusterDNS:         clusterDNS,
 	}
 	// populate the CNI struct if CNI options are present
 	if cniDir != "" && cniConfig != "" {
@@ -253,6 +263,8 @@ type fileTranslation struct {
 type kubeletConf struct {
 	// ClientCAFile specifies location to client certificate
 	ClientCAFile string
+	// ClusterDNS is the IP address of the DNS server used for all containers
+	ClusterDNS string
 }
 
 // createKubeletConf creates config file for kubelet, with Windows specific configuration
@@ -269,6 +281,11 @@ func (wmcb *winNodeBootstrapper) createKubeletConf() ([]byte, error) {
 	// Fill up the config file, using kubeletConf struct
 	variableFields := kubeletConf{
 		ClientCAFile: strings.Join(append(strings.Split(wmcb.installDir, `\`), `kubelet-ca.crt`), `\\`),
+	}
+	// check clusterDNS
+	if wmcb.clusterDNS != "" {
+		// surround with double-quotes for valid JSON format
+		variableFields.ClusterDNS = "\"" + wmcb.clusterDNS + "\""
 	}
 	// Create kubelet.conf file
 	kubeletConfPath := filepath.Join(wmcb.installDir, "kubelet.conf")
