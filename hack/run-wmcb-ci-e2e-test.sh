@@ -57,6 +57,11 @@ fi
 sed -i "s~ARTIFACT_DIR_VALUE~${ARTIFACT_DIR}~g" internal/test/wmcb/deploy/job.yaml
 sed -i "s~REPLACE_IMAGE~${WMCB_IMAGE}~g" internal/test/wmcb/deploy/job.yaml
 
+# If DOCKER_RUNTIME is set, set that value for flag -dockerRuntime in job.yaml.
+# If it is unset, default value taken will be true.
+DOCKER_RUNTIME=${DOCKER_RUNTIME:-true}
+sed -i "s~DOCKER_RUNTIME~${DOCKER_RUNTIME}~g" internal/test/wmcb/deploy/job.yaml
+
 # deploy the test pod on test cluster
 if ! $OC apply -f internal/test/wmcb/deploy/job.yaml -n default; then
     echo "job already deployed"

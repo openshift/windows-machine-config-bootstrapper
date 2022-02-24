@@ -21,6 +21,7 @@ var ignitionFilePath string
 var kubeletPath string
 var installDir string
 var platformType string
+var dockerRuntime bool
 
 const (
 	kubeletLogPath = "C:\\var\\log\\kubelet\\kubelet.log"
@@ -38,6 +39,7 @@ func init() {
 	pflag.StringVar(&kubeletPath, "kubelet-path", "C:\\Windows\\Temp\\kubelet.exe", "kubelet location")
 	pflag.StringVar(&installDir, "install-dir", "C:\\k", "Installation directory")
 	pflag.StringVar(&platformType, "platform-type", "", "platform type")
+	pflag.BoolVar(&dockerRuntime, "dockerRuntime", true, "Container runtime to be used")
 }
 
 // TestBootstrapper tests that the bootstrapper was able to start the required services
@@ -65,7 +67,7 @@ func TestBootstrapper(t *testing.T) {
 
 	// Run the bootstrapper, which will start the kubelet service
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "",
-		"", "", platformType, true)
+		"", "", platformType, dockerRuntime)
 	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
 	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)
@@ -102,6 +104,9 @@ func TestBootstrapper(t *testing.T) {
 	checkPathsFor := []string{"--bootstrap-kubeconfig", "--cloud-config", "--config", "--kubeconfig", "--log-file",
 		"--cert-dir"}
 	expectedDependencies := []string{"docker"}
+	if !dockerRuntime {
+		expectedDependencies = []string{"containerd"}
+	}
 
 	_, path, actualDependencies, err := getSvcInfo(bootstrapper.KubeletServiceName)
 	require.NoError(t, err, "Could not get kubelet arguments")
