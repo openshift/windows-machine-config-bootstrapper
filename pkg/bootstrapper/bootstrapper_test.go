@@ -287,6 +287,7 @@ func TestKubeletArgs(t *testing.T) {
 				kubeconfigPath:  filepath.Join("/fakepath/kubeconfig"),
 				kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
 				logDir:          "/fakepath/",
+				dockerRuntime:   true,
 			},
 		},
 		{
@@ -298,6 +299,19 @@ func TestKubeletArgs(t *testing.T) {
 				kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
 				logDir:          "/fakepath/",
 				nodeIP:          "192.168.1.1",
+				dockerRuntime:   true,
+			},
+		},
+		{
+			name: "With docker runtime set to false",
+			additionalExpectedArgs: []string{"--container-runtime=remote",
+				"--container-runtime-endpoint=npipe://./pipe/containerd-containerd"},
+			wnb: winNodeBootstrapper{
+				installDir:      dir,
+				kubeconfigPath:  filepath.Join("/fakepath/kubeconfig"),
+				kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
+				logDir:          "/fakepath/",
+				dockerRuntime:   false,
 			},
 		},
 	}

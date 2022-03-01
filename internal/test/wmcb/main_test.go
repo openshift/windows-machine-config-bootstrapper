@@ -13,13 +13,16 @@ var (
 	framework = wmcbFramework{}
 	// TODO: expose this to the end user as a command line flag
 	// vmCount is the number of VMs the test suite requires
-	vmCount = 1
+	vmCount       = 1
+	dockerRuntime bool
 )
 
 func TestMain(m *testing.M) {
 	var skipVMSetup bool
 
 	flag.BoolVar(&skipVMSetup, "skipVMSetup", false, "Option to disable setup in the VMs")
+	flag.BoolVar(&dockerRuntime, "dockerRuntime", true, "Container runtime to be used is docker")
+
 	flag.Parse()
 
 	err := framework.Setup(vmCount, skipVMSetup)
