@@ -216,20 +216,18 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 // handleHybridOverlay ensures that the hybrid overlay is running on the node
 func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 	// Check if the hybrid-overlay-node is running
-	output, err := vm.Run("Get-Process -Name \"hybrid-overlay-node\"", true)
-
-	// stderr being empty implies that an hybrid-overlay-node was running. This is to help with local development.
-	if err == nil || output == "" {
+	running := vm.isRunning(hybridOverlayServiceName)
+	if running {
 		return nil
 	}
 
 	// Wait until the node object has the hybrid overlay subnet annotation. Otherwise the hybrid-overlay-node will fail
 	// to start
-	if err = waitForNodeAnnotation(nodeName, test.HybridOverlaySubnet); err != nil {
+	if err := waitForNodeAnnotation(nodeName, test.HybridOverlaySubnet); err != nil {
 		return fmt.Errorf("error waiting for hybrid overlay subnet annotation: %v", err)
 	}
 
-	output, err = vm.Run(mkdirCmd(kLog), false)
+	output, err := vm.Run(mkdirCmd(kLog), false)
 	if err != nil {
 		return fmt.Errorf("unable to create remote directory %s: %v\n%s", kLog, err, output)
 	}
@@ -237,11 +235,9 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 	// Start the hybrid-overlay-node Windows service
 	binPath := fmt.Sprintf("%s --node %s --windows-service --k8s-kubeconfig c:\\k\\kubeconfig "+
 		"--logfile %s\\hybrid-overlay.log", hybridOverlayExecutable, nodeName, kLog)
-	startCommand := fmt.Sprintf("sc.exe create %s binPath=\"%s\" start=auto && sc.exe start %s",
-		hybridOverlayServiceName, binPath, hybridOverlayServiceName)
-	out, err := vm.Run(startCommand, false)
-	if err != nil {
-		return errors.Wrapf(err, "failed to start service with output: %s", out)
+
+	if err = vm.ensureServiceIsRunning(hybridOverlayServiceName, binPath); err != nil {
+		fmt.Errorf("unable to start Windows service %s: %v", hybridOverlayServiceName, err)
 	}
 
 	// Wait for the hybrid-overlay to complete reconfiguring the network. The only way to detect that it has completed
@@ -295,6 +291,25 @@ func (vm *wmcbVM) waitForOpenShiftHNSNetworks() error {
 func (vm *wmcbVM) runTestKubeletUninstall(t *testing.T) {
 	err := vm.runTest(e2eExecutable + " --test.run TestKubeletUninstall --test.v")
 	require.NoError(t, err, "TestKubeletUninstall failed")
+}
+
+// isRunning checks if the given service is running
+func (vm *wmcbVM) isRunning(serviceName string) bool {
+	svcCmd := fmt.Sprintf("sc.exe qc %s", serviceName)
+	out, _ := vm.Run(svcCmd, false)
+	return strings.Contains(out, "RUNNING")
+}
+
+// ensureServiceIsRunning creates and starts a given Windows service
+func (vm *wmcbVM) ensureServiceIsRunning(serviceName string, binPath string) error {
+	startCmd := fmt.Sprintf("sc.exe create %s binPath=\"%s\" start=auto && sc.exe start %s", serviceName, binPath,
+		serviceName)
+
+	out, err := vm.Run(startCmd, false)
+	if err != nil {
+		return errors.Wrapf(err, "failed to start service with output: %s", out)
+	}
+	return nil
 }
 
 // mkdirCmd returns the Windows command to create a directory if it does not exists
