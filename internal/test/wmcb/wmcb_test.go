@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"text/template"
@@ -54,6 +55,16 @@ const (
 	hybridOverlayConfigurationTime = 2 * time.Minute
 	// hybridOverlayServiceName is the name of hybrid-overlay Windows service
 	hybridOverlayServiceName = "hybrid-overlay-node"
+	//containerdServiceName is containerd Windows service name
+	containerdServiceName = "containerd"
+	// containerdDir is the directory for storing the containerd files in the payload directory
+	containerdDir = payloadDirectory + containerdServiceName
+	// winContainerdDir is the directory where the containerd files are placed in remote directory
+	winContainerdDir = remoteDir + containerdServiceName
+	// containerdPath is the location of the containerd exe
+	containerdPath = remoteDir + containerdServiceName + "\\containerd.exe"
+	// containerdConfPath is the location of containerd config file
+	containerdConfPath = remoteDir + containerdServiceName + "\\containerd_conf.toml"
 )
 
 var (
@@ -91,6 +102,9 @@ func TestWMCB(t *testing.T) {
 	srcDestPairs := map[string]string{
 		payloadDirectory: remoteDir,
 		cniDirectory:     winCNIDir,
+	}
+	if !dockerRuntime {
+		srcDestPairs[containerdDir] = winContainerdDir
 	}
 
 	for _, vm := range framework.WinVMs {
@@ -144,7 +158,13 @@ func (vm *wmcbVM) runTestBootstrapper(t *testing.T) {
 	err := vm.initializeTestBootstrapperFiles()
 	require.NoError(t, err, "error initializing files required for TestBootstrapper")
 
-	err = vm.runTest(e2eExecutable + " --test.run TestBootstrapper --test.v --platform-type=aws")
+	if !dockerRuntime {
+		err = vm.configureContainerd()
+		require.NoError(t, err, "error running containerd Windows service")
+	}
+
+	err = vm.runTest(e2eExecutable + " --test.run TestBootstrapper --test.v --platform-type=aws --dockerRuntime=" +
+		strconv.FormatBool(dockerRuntime))
 	require.NoError(t, err, "TestBootstrapper failed")
 }
 
@@ -161,7 +181,8 @@ func (vm *wmcbVM) runTestConfigureCNI(t *testing.T) {
 	err = vm.initializeTestConfigureCNIFiles(hybridOverlayAnnotation)
 	require.NoError(t, err, "error initializing files required for TestConfigureCNI")
 
-	err = vm.runTest(e2eExecutable + " --test.run TestConfigureCNI --test.v --platform-type=aws")
+	err = vm.runTest(e2eExecutable + " --test.run TestConfigureCNI --test.v --platform-type=aws --dockerRuntime=" +
+		strconv.FormatBool(dockerRuntime))
 	require.NoError(t, err, "TestConfigureCNI failed")
 }
 
@@ -177,6 +198,14 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 	_, err = vm.Run("cp "+remoteDir+"kubelet.exe "+winTemp, true)
 	if err != nil {
 		return fmt.Errorf("unable to copy kubelet.exe to %s: %v", winTemp, err)
+	}
+
+	if !dockerRuntime {
+		// create the containerd directory on Windows VM.
+		output, err := vm.Run(mkdirCmd(winContainerdDir), false)
+		if err != nil {
+			return fmt.Errorf("unable to create remote directory %s: %v\n%s", winContainerdDir, err, output)
+		}
 	}
 
 	// Ignition v2.3.0 maps to Ignition config spec v3.1.0.
@@ -216,20 +245,18 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 // handleHybridOverlay ensures that the hybrid overlay is running on the node
 func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 	// Check if the hybrid-overlay-node is running
-	output, err := vm.Run("Get-Process -Name \"hybrid-overlay-node\"", true)
-
-	// stderr being empty implies that an hybrid-overlay-node was running. This is to help with local development.
-	if err == nil || output == "" {
+	running := vm.isRunning(hybridOverlayServiceName)
+	if running {
 		return nil
 	}
 
 	// Wait until the node object has the hybrid overlay subnet annotation. Otherwise the hybrid-overlay-node will fail
 	// to start
-	if err = waitForNodeAnnotation(nodeName, test.HybridOverlaySubnet); err != nil {
+	if err := waitForNodeAnnotation(nodeName, test.HybridOverlaySubnet); err != nil {
 		return fmt.Errorf("error waiting for hybrid overlay subnet annotation: %v", err)
 	}
 
-	output, err = vm.Run(mkdirCmd(kLog), false)
+	output, err := vm.Run(mkdirCmd(kLog), false)
 	if err != nil {
 		return fmt.Errorf("unable to create remote directory %s: %v\n%s", kLog, err, output)
 	}
@@ -237,11 +264,9 @@ func (vm *wmcbVM) handleHybridOverlay(nodeName string) error {
 	// Start the hybrid-overlay-node Windows service
 	binPath := fmt.Sprintf("%s --node %s --windows-service --k8s-kubeconfig c:\\k\\kubeconfig "+
 		"--logfile %s\\hybrid-overlay.log", hybridOverlayExecutable, nodeName, kLog)
-	startCommand := fmt.Sprintf("sc.exe create %s binPath=\"%s\" start=auto && sc.exe start %s",
-		hybridOverlayServiceName, binPath, hybridOverlayServiceName)
-	out, err := vm.Run(startCommand, false)
-	if err != nil {
-		return errors.Wrapf(err, "failed to start service with output: %s", out)
+
+	if err = vm.ensureServiceIsRunning(hybridOverlayServiceName, binPath); err != nil {
+		fmt.Errorf("unable to start Windows service %s: %v", hybridOverlayServiceName, err)
 	}
 
 	// Wait for the hybrid-overlay to complete reconfiguring the network. The only way to detect that it has completed
@@ -295,6 +320,56 @@ func (vm *wmcbVM) waitForOpenShiftHNSNetworks() error {
 func (vm *wmcbVM) runTestKubeletUninstall(t *testing.T) {
 	err := vm.runTest(e2eExecutable + " --test.run TestKubeletUninstall --test.v")
 	require.NoError(t, err, "TestKubeletUninstall failed")
+}
+
+// configureContainerd installs the containerd Windows service
+func (vm *wmcbVM) configureContainerd() error {
+	// Check if containerd is running
+	running := vm.isRunning(containerdServiceName)
+	if running {
+		return nil
+	}
+
+	out, err := vm.Run(mkdirCmd(kLog), false)
+	if err != nil {
+		return fmt.Errorf("unable to create remote directory %s: %v\n%s", kLog, err, out)
+	}
+
+	// set Windows defender exclusions for containerd
+	setExclusionCmd := fmt.Sprintf("Add-MpPreference -ExclusionProcess %s", containerdPath)
+	out, err = vm.Run(setExclusionCmd, true)
+	if err != nil {
+		return fmt.Errorf("setting Windows defender process exclusion failed: %v", err)
+	}
+
+	// Start the containerd Windows service
+	binPath := fmt.Sprintf("%s --config %s --log-file %s\\containerd.log --log-level=info --run-service",
+		containerdPath, containerdConfPath, kLog)
+
+	if err = vm.ensureServiceIsRunning(containerdServiceName, binPath); err != nil {
+		fmt.Errorf("unable to start Windows service %s: %v", containerdServiceName, err)
+	}
+
+	return nil
+}
+
+// isRunning checks if the given service is running
+func (vm *wmcbVM) isRunning(serviceName string) bool {
+	svcCmd := fmt.Sprintf("sc.exe qc %s", serviceName)
+	out, _ := vm.Run(svcCmd, false)
+	return strings.Contains(out, "RUNNING")
+}
+
+// ensureServiceIsRunning creates and starts a given Windows service
+func (vm *wmcbVM) ensureServiceIsRunning(serviceName string, binPath string) error {
+	startCmd := fmt.Sprintf("sc.exe create %s binPath=\"%s\" start=auto && sc.exe start %s", serviceName, binPath,
+		serviceName)
+
+	out, err := vm.Run(startCmd, false)
+	if err != nil {
+		return errors.Wrapf(err, "failed to start service with output: %s", out)
+	}
+	return nil
 }
 
 // mkdirCmd returns the Windows command to create a directory if it does not exists

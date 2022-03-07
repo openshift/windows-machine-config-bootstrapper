@@ -42,7 +42,8 @@ func testConfigureCNIWithoutKubeletSvc(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Instantiate the bootstrapper
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(tempDir, "", "", "", "", tempDir, cniConfig.Name(), platformType)
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(tempDir, "", "", "", "",
+		tempDir, cniConfig.Name(), platformType, true)
 	require.NoError(t, err, "could not instantiate wmcb")
 
 	err = wmcb.Configure()
@@ -53,7 +54,8 @@ func testConfigureCNIWithoutKubeletSvc(t *testing.T) {
 // testConfigureCNI tests if ConfigureCNI() runs successfully by checking if the kubelet service comes up after
 // configuring CNI
 func testConfigureCNI(t *testing.T) {
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, "", "", "", "", cniDir, cniConfig, platformType)
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, "", "", "", "",
+		cniDir, cniConfig, platformType, dockerRuntime)
 	require.NoError(t, err, "could not create wmcb")
 
 	err = wmcb.Configure()
@@ -71,9 +73,12 @@ func testConfigureCNI(t *testing.T) {
 	time.Sleep(10 * time.Second)
 
 	assert.True(t, isKubeletRunning(t, kubeletLogPath))
-	isConfiguredCorrectly, err := isCNIConfigured(t, kubeletLogPath)
-	require.NoError(t, err, "Error reading kubelet log")
-	assert.True(t, isConfiguredCorrectly, "CNI was not configured correctly")
+	// if the runtime is containerd, the kubelet log test is not applicable as the log was appended by dockershim.
+	if dockerRuntime {
+		isConfiguredCorrectly, err := isCNIConfigured(t, kubeletLogPath)
+		require.NoError(t, err, "Error reading kubelet log")
+		assert.True(t, isConfiguredCorrectly, "CNI was not configured correctly")
+	}
 
 	// Kubelet arguments with paths that are set by configure-cni
 	// Does not include arguments with paths that do not depend on underlying OS

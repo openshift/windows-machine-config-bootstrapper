@@ -55,7 +55,7 @@ func runConfigureCNICmd(cmd *cobra.Command, args []string) {
 	flag.Parse()
 
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(configureCNIOpts.installDir, "", "", "", "", configureCNIOpts.dir,
-		configureCNIOpts.config, "")
+		configureCNIOpts.config, "", true)
 	if err != nil {
 		log.Error(err, "could not create bootstrapper")
 		os.Exit(1)

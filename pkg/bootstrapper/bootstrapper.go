@@ -98,6 +98,8 @@ const (
 	// managedServicePrefix indicates that the service being described is managed by OpenShift. This ensures that all
 	// services created as part of Node configuration can be searched for by checking their description for this string
 	managedServicePrefix = "OpenShift managed"
+	// containerdEndpointValue is the default value for containerd endpoint required to be updated in kubelet arguments
+	containerdEndpointValue = "npipe://./pipe/containerd-containerd"
 )
 
 // These regex are global, so that we only need to compile them once
@@ -147,6 +149,9 @@ type winNodeBootstrapper struct {
 	cni *cniOptions
 	// platformType contains type of the platform where the cluster is deployed
 	platformType string
+	// dockerRuntime set to true indicates the container runtime to be used is docker.
+	// If set to false containerd will be the container runtime.
+	dockerRuntime bool
 }
 
 // cniOptions is responsible for reconfiguring the kubelet service with CNI configuration
@@ -168,7 +173,7 @@ type cniOptions struct {
 // object. The CNI options are populated only in the configure-cni command. The inputs to NewWinNodeBootstrapper are
 // ignored while using the uninstall kubelet functionality.
 func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, clusterDNS, cniDir,
-	cniConfig, platformType string) (*winNodeBootstrapper, error) {
+	cniConfig, platformType string, dockerRuntime bool) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
 		return nil, fmt.Errorf("both cniDir and cniConfig need to be populated")
@@ -203,6 +208,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cl
 		nodeIP:             nodeIP,
 		clusterDNS:         clusterDNS,
 		platformType:       platformType,
+		dockerRuntime:      dockerRuntime,
 	}
 	// populate the CNI struct if CNI options are present
 	if cniDir != "" && cniConfig != "" {
@@ -569,6 +575,10 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 	if wmcb.nodeIP != "" {
 		kubeletArgs = append(kubeletArgs, "--node-ip="+wmcb.nodeIP)
 	}
+	if !wmcb.dockerRuntime {
+		kubeletArgs = append(kubeletArgs, "--container-runtime=remote",
+			"--container-runtime-endpoint="+containerdEndpointValue)
+	}
 
 	hostname, err := cloud.GetKubeletHostnameOverride(wmcb.platformType)
 	if err != nil {
@@ -598,6 +608,9 @@ func (wmcb *winNodeBootstrapper) ensureKubeletService() error {
 		DisplayName:      "",
 		Password:         "",
 		Description:      fmt.Sprintf("%s kubelet", managedServicePrefix),
+	}
+	if !wmcb.dockerRuntime {
+		c.Dependencies = []string{"containerd"}
 	}
 
 	if wmcb.kubeletSVC == nil {
