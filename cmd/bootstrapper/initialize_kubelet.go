@@ -41,9 +41,6 @@ var (
 		clusterDNS string
 		// platformType contains type of the platform where the cluster is deployed
 		platformType string
-		// dockerRuntime set to true indicates the container runtime to be used is docker.
-		// If set to false containerd will be the container runtime.
-		dockerRuntime bool
 	}
 )
 
@@ -63,8 +60,6 @@ func init() {
 			"If unset, kubelet will determine the DNS server to use.")
 	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.platformType, "platform-type", "",
 		"Type of the platform where the cluster is deployed. Example: AWS, Azure, GCP")
-	initializeKubeletCmd.PersistentFlags().BoolVar(&initializeKubeletOpts.dockerRuntime, "dockerRuntime", true,
-		"Use docker as container runtime. If unset, defaults to true. If false, containerd will be used as the container runtime.")
 }
 
 // runInitializeKubeletCmd starts the Windows Machine Config Bootstrapper
@@ -75,7 +70,7 @@ func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(initializeKubeletOpts.installDir,
 		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath,
 		initializeKubeletOpts.nodeIP, initializeKubeletOpts.clusterDNS, "", "",
-		initializeKubeletOpts.platformType, initializeKubeletOpts.dockerRuntime)
+		initializeKubeletOpts.platformType)
 	if err != nil {
 		log.Error(err, "could not create bootstrapper")
 		os.Exit(1)

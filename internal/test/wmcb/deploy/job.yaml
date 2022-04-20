@@ -26,7 +26,6 @@ spec:
           args:
             - -test.run=TestWMCB
             - -test.v
-            - -dockerRuntime=DOCKER_RUNTIME
           volumeMounts:
           - name: cloud-private-key
             mountPath: "/etc/private-key/"

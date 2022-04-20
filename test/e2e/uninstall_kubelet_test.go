@@ -12,7 +12,7 @@ import (
 // TestKubeletUninstall tests if WMCB returns an error if the kubelet is uninstalled
 func TestKubeletUninstall(t *testing.T) {
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper("", "", "", "", "",
-		"", "", "", true)
+		"", "", "")
 	require.NoError(t, err, "could not create wmcb")
 
 	err = wmcb.UninstallKubelet()
@@ -31,7 +31,7 @@ func testUninstallWithoutKubeletSvc(t *testing.T) {
 	}
 
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper("", "", "", "", "",
-		"", "", "", true)
+		"", "", "")
 	require.NoError(t, err, "could not create wmcb")
 
 	err = wmcb.UninstallKubelet()

@@ -273,7 +273,10 @@ func TestKubeletArgs(t *testing.T) {
 		"--node-labels=node.openshift.io/os_id=Windows",
 		"--image-pull-progress-deadline=30m",
 		"--cloud-provider=aws",
-		"--v=3"}
+		"--v=3",
+		"--container-runtime=remote",
+		"--container-runtime-endpoint=npipe://./pipe/containerd-containerd",
+	}
 	testIO := []struct {
 		name                   string
 		additionalExpectedArgs []string
@@ -287,7 +290,6 @@ func TestKubeletArgs(t *testing.T) {
 				kubeconfigPath:  filepath.Join("/fakepath/kubeconfig"),
 				kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
 				logDir:          "/fakepath/",
-				dockerRuntime:   true,
 			},
 		},
 		{
@@ -299,19 +301,6 @@ func TestKubeletArgs(t *testing.T) {
 				kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
 				logDir:          "/fakepath/",
 				nodeIP:          "192.168.1.1",
-				dockerRuntime:   true,
-			},
-		},
-		{
-			name: "With docker runtime set to false",
-			additionalExpectedArgs: []string{"--container-runtime=remote",
-				"--container-runtime-endpoint=npipe://./pipe/containerd-containerd"},
-			wnb: winNodeBootstrapper{
-				installDir:      dir,
-				kubeconfigPath:  filepath.Join("/fakepath/kubeconfig"),
-				kubeletConfPath: filepath.Join("/fakepath/kubelet.conf"),
-				logDir:          "/fakepath/",
-				dockerRuntime:   false,
 			},
 		},
 	}
@@ -442,11 +431,11 @@ func TestCloudConfInvalidNames(t *testing.T) {
 // TestNewWinNodeBootstrapperWithInvalidCNIInputs tests if NewWinNodeBootstrapper returns the expected error on passing
 // invalid CNI inputs
 func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
-	_, err := NewWinNodeBootstrapper("", "", "", "", "", "C:\\something", "", "", true)
+	_, err := NewWinNodeBootstrapper("", "", "", "", "", "C:\\something", "", "")
 	require.Error(t, err, "no error thrown when cniDir is not empty and cniConfig is empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 
-	_, err = NewWinNodeBootstrapper("", "", "", "", "", "", "C:\\something", "", true)
+	_, err = NewWinNodeBootstrapper("", "", "", "", "", "", "C:\\something", "")
 	require.Error(t, err, "no error thrown when cniDir is empty and cniConfig not empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 }
@@ -454,7 +443,7 @@ func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
 // TestWinNodeBootstrapperConfigureWithInvalidInputs tests if Configure returns the expected error when CNI inputs
 // are not present
 func TestWinNodeBootstrapperConfigureWithInvalidInputs(t *testing.T) {
-	wnb, err := NewWinNodeBootstrapper("", "", "", "", "", "", "", "", true)
+	wnb, err := NewWinNodeBootstrapper("", "", "", "", "", "", "", "")
 	require.NoError(t, err, "error instantiating bootstrapper")
 	err = wnb.Configure()
 	require.Error(t, err, "no error thrown when Configure is called with no CNI inputs")
