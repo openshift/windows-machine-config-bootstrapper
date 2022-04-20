@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"text/template"
@@ -102,9 +101,7 @@ func TestWMCB(t *testing.T) {
 	srcDestPairs := map[string]string{
 		payloadDirectory: remoteDir,
 		cniDirectory:     winCNIDir,
-	}
-	if !dockerRuntime {
-		srcDestPairs[containerdDir] = winContainerdDir
+		containerdDir:    winContainerdDir,
 	}
 
 	for _, vm := range framework.WinVMs {
@@ -158,13 +155,10 @@ func (vm *wmcbVM) runTestBootstrapper(t *testing.T) {
 	err := vm.initializeTestBootstrapperFiles()
 	require.NoError(t, err, "error initializing files required for TestBootstrapper")
 
-	if !dockerRuntime {
-		err = vm.configureContainerd()
-		require.NoError(t, err, "error running containerd Windows service")
-	}
+	err = vm.configureContainerd()
+	require.NoError(t, err, "error running containerd Windows service")
 
-	err = vm.runTest(e2eExecutable + " --test.run TestBootstrapper --test.v --platform-type=aws --dockerRuntime=" +
-		strconv.FormatBool(dockerRuntime))
+	err = vm.runTest(e2eExecutable + " --test.run TestBootstrapper --test.v --platform-type=aws")
 	require.NoError(t, err, "TestBootstrapper failed")
 }
 
@@ -181,8 +175,7 @@ func (vm *wmcbVM) runTestConfigureCNI(t *testing.T) {
 	err = vm.initializeTestConfigureCNIFiles(hybridOverlayAnnotation)
 	require.NoError(t, err, "error initializing files required for TestConfigureCNI")
 
-	err = vm.runTest(e2eExecutable + " --test.run TestConfigureCNI --test.v --platform-type=aws --dockerRuntime=" +
-		strconv.FormatBool(dockerRuntime))
+	err = vm.runTest(e2eExecutable + " --test.run TestConfigureCNI --test.v --platform-type=aws")
 	require.NoError(t, err, "TestConfigureCNI failed")
 }
 
@@ -200,18 +193,16 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 		return fmt.Errorf("unable to copy kubelet.exe to %s: %v", winTemp, err)
 	}
 
-	if !dockerRuntime {
-		// create the containerd directory on Windows VM.
-		output, err := vm.Run(mkdirCmd(winContainerdDir), false)
-		if err != nil {
-			return fmt.Errorf("unable to create remote directory %s: %v\n%s", winContainerdDir, err, output)
-		}
+	// create the containerd directory on Windows VM.
+	output, err := vm.Run(mkdirCmd(winContainerdDir), false)
+	if err != nil {
+		return fmt.Errorf("unable to create remote directory %s: %v\n%s", winContainerdDir, err, output)
 	}
 
 	// Ignition v2.3.0 maps to Ignition config spec v3.1.0.
 	ignitionAcceptHeaderSpec := "application/vnd.coreos.ignition+json`;version=3.1.0"
 	// Download the worker ignition to C:\Windows\Tenp\ using the script that ignores the server cert
-	output, err := vm.Run(wgetIgnoreCertCmd+" -server https://"+framework.ClusterAddress+":22623/config/worker"+
+	output, err = vm.Run(wgetIgnoreCertCmd+" -server https://"+framework.ClusterAddress+":22623/config/worker"+
 		" -output "+winTemp+"worker.ign"+" -acceptHeader "+ignitionAcceptHeaderSpec, true)
 	if err != nil {
 		return fmt.Errorf("unable to download worker.ign: %v\nOutput: %s", err, output)
