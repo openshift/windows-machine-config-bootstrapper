@@ -3,7 +3,6 @@ package e2e
 import (
 	"io/ioutil"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,7 +42,7 @@ func testConfigureCNIWithoutKubeletSvc(t *testing.T) {
 
 	// Instantiate the bootstrapper
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(tempDir, "", "", "", "",
-		tempDir, cniConfig.Name(), platformType, true)
+		tempDir, cniConfig.Name(), platformType)
 	require.NoError(t, err, "could not instantiate wmcb")
 
 	err = wmcb.Configure()
@@ -55,7 +54,7 @@ func testConfigureCNIWithoutKubeletSvc(t *testing.T) {
 // configuring CNI
 func testConfigureCNI(t *testing.T) {
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, "", "", "", "",
-		cniDir, cniConfig, platformType, dockerRuntime)
+		cniDir, cniConfig, platformType)
 	require.NoError(t, err, "could not create wmcb")
 
 	err = wmcb.Configure()
@@ -73,12 +72,6 @@ func testConfigureCNI(t *testing.T) {
 	time.Sleep(10 * time.Second)
 
 	assert.True(t, isKubeletRunning(t, kubeletLogPath))
-	// if the runtime is containerd, the kubelet log test is not applicable as the log was appended by dockershim.
-	if dockerRuntime {
-		isConfiguredCorrectly, err := isCNIConfigured(t, kubeletLogPath)
-		require.NoError(t, err, "Error reading kubelet log")
-		assert.True(t, isConfiguredCorrectly, "CNI was not configured correctly")
-	}
 
 	// Kubelet arguments with paths that are set by configure-cni
 	// Does not include arguments with paths that do not depend on underlying OS
@@ -89,13 +82,4 @@ func testConfigureCNI(t *testing.T) {
 	t.Run("Test the paths in Kubelet arguments", func(t *testing.T) {
 		testPathInKubeletArgs(t, checkPathsFor, path)
 	})
-}
-
-// isCNIConfigured checks if the kubelet start successfully and after applying the CNI config
-func isCNIConfigured(t *testing.T, logPath string) (bool, error) {
-	buf, err := ioutil.ReadFile(logPath)
-	if err != nil {
-		return false, err
-	}
-	return strings.Contains(string(buf), "\"Loaded network plugin\" networkPluginName=\"cni\""), nil
 }
