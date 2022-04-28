@@ -149,9 +149,6 @@ type winNodeBootstrapper struct {
 	cni *cniOptions
 	// platformType contains type of the platform where the cluster is deployed
 	platformType string
-	// dockerRuntime set to true indicates the container runtime to be used is docker.
-	// If set to false containerd will be the container runtime.
-	dockerRuntime bool
 }
 
 // cniOptions is responsible for reconfiguring the kubelet service with CNI configuration
@@ -173,7 +170,7 @@ type cniOptions struct {
 // object. The CNI options are populated only in the configure-cni command. The inputs to NewWinNodeBootstrapper are
 // ignored while using the uninstall kubelet functionality.
 func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, clusterDNS, cniDir,
-	cniConfig, platformType string, dockerRuntime bool) (*winNodeBootstrapper, error) {
+	cniConfig, platformType string) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
 		return nil, fmt.Errorf("both cniDir and cniConfig need to be populated")
@@ -208,7 +205,6 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cl
 		nodeIP:             nodeIP,
 		clusterDNS:         clusterDNS,
 		platformType:       platformType,
-		dockerRuntime:      dockerRuntime,
 	}
 	// populate the CNI struct if CNI options are present
 	if cniDir != "" && cniConfig != "" {
@@ -556,6 +552,8 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 		// not available for ContainerD yet. Addition of this option is tracked by
 		// https://github.com/containerd/containerd/issues/4984
 		"--image-pull-progress-deadline=30m",
+		"--container-runtime=remote",
+		"--container-runtime-endpoint=" + containerdEndpointValue,
 	}
 	if cloudProvider, ok := args["cloud-provider"]; ok {
 		kubeletArgs = append(kubeletArgs, "--cloud-provider="+cloudProvider)
@@ -574,10 +572,6 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 	}
 	if wmcb.nodeIP != "" {
 		kubeletArgs = append(kubeletArgs, "--node-ip="+wmcb.nodeIP)
-	}
-	if !wmcb.dockerRuntime {
-		kubeletArgs = append(kubeletArgs, "--container-runtime=remote",
-			"--container-runtime-endpoint="+containerdEndpointValue)
 	}
 
 	hostname, err := cloud.GetKubeletHostnameOverride(wmcb.platformType)
@@ -602,15 +596,12 @@ func (wmcb *winNodeBootstrapper) ensureKubeletService() error {
 		ErrorControl:   0,
 		LoadOrderGroup: "",
 		TagId:          0,
-		// set dependency on docker
-		Dependencies:     []string{"docker"},
+		// set dependency on containerd
+		Dependencies:     []string{"containerd"},
 		ServiceStartName: "",
 		DisplayName:      "",
 		Password:         "",
 		Description:      fmt.Sprintf("%s kubelet", managedServicePrefix),
-	}
-	if !wmcb.dockerRuntime {
-		c.Dependencies = []string{"containerd"}
 	}
 
 	if wmcb.kubeletSVC == nil {
