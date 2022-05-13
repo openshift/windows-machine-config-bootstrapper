@@ -264,14 +264,12 @@ func TestKubeletArgs(t *testing.T) {
 	baseExpectedArgs := []string{"--config=\\fakepath\\kubelet.conf",
 		"--bootstrap-kubeconfig=" + filepath.Join(dir, "bootstrap-kubeconfig"),
 		"--kubeconfig=\\fakepath\\kubeconfig",
-		"--pod-infra-container-image=mcr.microsoft.com/oss/kubernetes/pause:3.6",
 		"--cert-dir=c:\\var\\lib\\kubelet\\pki\\",
 		"--windows-service",
 		"--logtostderr=false",
 		"--log-file=\\fakepath\\kubelet.log",
 		"--register-with-taints=os=Windows:NoSchedule",
 		"--node-labels=node.openshift.io/os_id=Windows",
-		"--image-pull-progress-deadline=30m",
 		"--cloud-provider=aws",
 		"--v=3",
 		"--container-runtime=remote",
@@ -608,7 +606,7 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 	t.Run("kubelet command without CNI arguments", func(t *testing.T) {
 		kubeletCmd := "c:\\k\\kubelet.exe --config=c:\\k\\kubelet.conf" +
 			"--bootstrap-kubeconfig=c:\\k\\bootstrap-kubeconfig --kubeconfig=c:\\k\\kubeconfig " +
-			"--pod-infra-container-image=mcr.microsoft.com/k8s/core/pause:1.2.0 --cert-dir=c:/var/lib/kubelet/pki/ " +
+			"--cert-dir=c:/var/lib/kubelet/pki/ " +
 			"--windows-service --logtostderr=false --log-file=c:\\var\\log\\kubelet\\kubelet.log " +
 			"--register-with-taints=os=Windows:NoSchedule --cloud-provider=aws --v=3 --resolv-conf="
 
@@ -620,7 +618,7 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 	t.Run("kubelet command with CNI parameters set to different values", func(t *testing.T) {
 		kubeletCmd := "c:\\k\\kubelet.exe --config=c:\\k\\kubelet.conf" +
 			"--bootstrap-kubeconfig=c:\\k\\bootstrap-kubeconfig --kubeconfig=c:\\k\\kubeconfig " +
-			"--pod-infra-container-image=mcr.microsoft.com/k8s/core/pause:1.2.0 --cert-dir=c:/var/lib/kubelet/pki/ " +
+			"--cert-dir=c:/var/lib/kubelet/pki/ " +
 			"--windows-service --logtostderr=false --log-file=c:\\var\\log\\kubelet\\kubelet.log " +
 			"--register-with-taints=os=Windows:NoSchedule --cloud-provider=aws --v=3 " +
 			"--network-plugin=xyz --cni-bin-dir=d:\\k\\cni --resolv-conf=" +
