@@ -69,7 +69,7 @@ func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(initializeKubeletOpts.installDir,
 		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath,
-		initializeKubeletOpts.nodeIP, initializeKubeletOpts.clusterDNS, "", "",
+		initializeKubeletOpts.nodeIP, initializeKubeletOpts.clusterDNS,
 		initializeKubeletOpts.platformType)
 	if err != nil {
 		log.Error(err, "could not create bootstrapper")
