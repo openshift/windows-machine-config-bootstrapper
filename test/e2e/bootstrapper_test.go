@@ -3,7 +3,6 @@ package e2e
 import (
 	"fmt"
 	"io/ioutil"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"os"
 	"strings"
 	"testing"
@@ -24,8 +23,6 @@ var platformType string
 
 const (
 	kubeletLogPath = "C:\\var\\log\\kubelet\\kubelet.log"
-	// pollIntervalKubeletLog is the interval at which we poll the kubelet log
-	pollIntervalKubeletLog = 30 * time.Second
 	// waitTimeKubeletLog is the maximum duration to get kubelet log
 	waitTimeKubeletLog = 2 * time.Minute
 )
@@ -59,13 +56,11 @@ func TestBootstrapper(t *testing.T) {
 		removeFileIfExists(t, kubeletLogPath)
 	}
 
-	t.Run("Configure CNI without kubelet service present", testConfigureCNIWithoutKubeletSvc)
-
 	t.Run("Uninstall kubelet without kubelet service present", testUninstallWithoutKubeletSvc)
 
 	// Run the bootstrapper, which will start the kubelet service
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "",
-		"", "", platformType)
+		platformType)
 	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
 	assert.NoErrorf(t, err, "Could not run bootstrapper: %s", err)
@@ -83,18 +78,6 @@ func TestBootstrapper(t *testing.T) {
 		// Wait for kubelet log to be populated
 		time.Sleep(waitTimeKubeletLog)
 		assert.True(t, isKubeletRunning(t, kubeletLogPath))
-	})
-
-	t.Run("Update already running kubelet service", func(t *testing.T) {
-		err := wmcb.InitializeKubelet()
-		assert.NoError(t, err, "unable to update kubelet service")
-		err = wmcb.Disconnect()
-		assert.NoErrorf(t, err, "Could not disconnect from windows svc API: %s", err)
-
-		err = wait.Poll(pollIntervalKubeletLog, waitTimeKubeletLog, func() (done bool, err error) {
-			return isKubeletRunning(t, kubeletLogPath), nil
-		})
-		assert.NoError(t, err)
 	})
 
 	// Kubelet arguments with paths that are set by bootstrapper
