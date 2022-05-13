@@ -532,7 +532,6 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 		"--config=" + wmcb.kubeletConfPath,
 		"--bootstrap-kubeconfig=" + filepath.Join(wmcb.installDir, "bootstrap-kubeconfig"),
 		"--kubeconfig=" + wmcb.kubeconfigPath,
-		"--pod-infra-container-image=" + kubeletPauseContainerImage,
 		"--cert-dir=" + certDirectory,
 		"--windows-service",
 		"--logtostderr=false",
@@ -544,10 +543,6 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 		"--register-with-taints=" + windowsTaints,
 		// Label that WMCB uses
 		"--node-labels=" + nodeLabel,
-		// Added to allow pulling of large base Windows images. Note that this only works with the Docker runtime and is
-		// not available for ContainerD yet. Addition of this option is tracked by
-		// https://github.com/containerd/containerd/issues/4984
-		"--image-pull-progress-deadline=30m",
 		"--container-runtime=remote",
 		"--container-runtime-endpoint=" + containerdEndpointValue,
 		"--resolv-conf=",
