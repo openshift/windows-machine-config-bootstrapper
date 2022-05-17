@@ -83,10 +83,6 @@ const (
 	cniConfigDirName = cniDirName + "/config/"
 
 	// kubelet CLI options for CNI
-	// resolvOption is to specify the resolv.conf
-	resolvOption = "--resolv-conf"
-	// resolvValue is the default value passed to the resolv option
-	resolvValue = "\"\""
 	// networkPluginOption is to specify the network plugin type
 	networkPluginOption = "--network-plugin"
 	// networkPluginValue is the default network plugin that we support
@@ -554,6 +550,7 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 		"--image-pull-progress-deadline=30m",
 		"--container-runtime=remote",
 		"--container-runtime-endpoint=" + containerdEndpointValue,
+		"--resolv-conf=",
 	}
 	if cloudProvider, ok := args["cloud-provider"]; ok {
 		kubeletArgs = append(kubeletArgs, "--cloud-provider="+cloudProvider)
@@ -956,7 +953,6 @@ func (cni *cniOptions) updateKubeletArgs(kubeletCmd *string) error {
 	}
 
 	// Add or replace the CNI CLI args
-	kubeletKeyValueArgs[resolvOption] = resolvValue
 	kubeletKeyValueArgs[networkPluginOption] = networkPluginValue
 	kubeletKeyValueArgs[cniBinDirOption] = cni.binDir
 	kubeletKeyValueArgs[cniConfDirOption] = cni.confDir
