@@ -276,6 +276,7 @@ func TestKubeletArgs(t *testing.T) {
 		"--v=3",
 		"--container-runtime=remote",
 		"--container-runtime-endpoint=npipe://./pipe/containerd-containerd",
+		"--resolv-conf=",
 	}
 	testIO := []struct {
 		name                   string
@@ -595,7 +596,7 @@ func testCNICopyFiles(t *testing.T) {
 // checkKubeletCmd asserts that the CNI arguments were added correctly
 func checkKubeletCmd(t *testing.T, kubeletCmd string, cni *cniOptions) {
 	assert.True(t, strings.HasPrefix(kubeletCmd, "c:\\k\\kubelet.exe"), "kubelet.exe missing in kubelet args")
-	assert.Contains(t, kubeletCmd, " --resolv-conf=\"\"", "--resolv-conf missing in kubelet args")
+	assert.Contains(t, kubeletCmd, " --resolv-conf=", "--resolv-conf missing in kubelet args")
 	assert.Contains(t, kubeletCmd, " --network-plugin=cni", "--network-plugin missing in kubelet args")
 	assert.Contains(t, kubeletCmd, " --cni-bin-dir="+cni.binDir, "--cni-bin-dir missing in kubelet args")
 	assert.Contains(t, kubeletCmd, " --cni-conf-dir="+cni.confDir, "--cni-conf-dir missing in kubelet args")
@@ -609,7 +610,7 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 			"--bootstrap-kubeconfig=c:\\k\\bootstrap-kubeconfig --kubeconfig=c:\\k\\kubeconfig " +
 			"--pod-infra-container-image=mcr.microsoft.com/k8s/core/pause:1.2.0 --cert-dir=c:/var/lib/kubelet/pki/ " +
 			"--windows-service --logtostderr=false --log-file=c:\\var\\log\\kubelet\\kubelet.log " +
-			"--register-with-taints=os=Windows:NoSchedule --cloud-provider=aws --v=3"
+			"--register-with-taints=os=Windows:NoSchedule --cloud-provider=aws --v=3 --resolv-conf="
 
 		err := cniTest.cni.updateKubeletArgs(&kubeletCmd)
 		require.NoError(t, err, "error updating kubelet arguments without CNI arguments")
@@ -622,7 +623,7 @@ func testCNIUpdateKubeletArgs(t *testing.T) {
 			"--pod-infra-container-image=mcr.microsoft.com/k8s/core/pause:1.2.0 --cert-dir=c:/var/lib/kubelet/pki/ " +
 			"--windows-service --logtostderr=false --log-file=c:\\var\\log\\kubelet\\kubelet.log " +
 			"--register-with-taints=os=Windows:NoSchedule --cloud-provider=aws --v=3 " +
-			"--resolv-conf=d:\\k\\etc\\resolv.conf--network-plugin=xyz --cni-bin-dir=d:\\k\\cni " +
+			"--network-plugin=xyz --cni-bin-dir=d:\\k\\cni --resolv-conf=" +
 			"--cni-conf-dir=d:\\k\\cni\\config\\cni.conf"
 
 		err := cniTest.cni.updateKubeletArgs(&kubeletCmd)
