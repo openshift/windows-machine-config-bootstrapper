@@ -220,7 +220,7 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 	}
 
 	// Create the CNI config file locally
-	cniConfigPath, err := createCNIConf(ovnHostSubnet)
+	cniConfigPath, err := createCNIConf(ovnHostSubnet, vm.GetCredentials().IPAddress())
 	if err != nil {
 		return fmt.Errorf("error creating local cni.conf: %v", err)
 	}
@@ -369,13 +369,13 @@ func mkdirCmd(dirName string) string {
 }
 
 // createCNIConf create the local cni.conf and returns its path
-func createCNIConf(ovnHostSubnet string) (string, error) {
+func createCNIConf(ovnHostSubnet string, ipAddress string) (string, error) {
 	serviceNetworkCIDR, err := getServiceNetworkCIDR()
 	if err != nil {
 		return "", fmt.Errorf("unable to get service network CIDR: %v", err)
 	}
 
-	cniConfigPath, err := generateCNIConf(ovnHostSubnet, serviceNetworkCIDR)
+	cniConfigPath, err := generateCNIConf(ovnHostSubnet, serviceNetworkCIDR, ipAddress)
 	if err != nil {
 		return "", fmt.Errorf("unable to generate CNI configuration: %v", err)
 	}
@@ -400,13 +400,14 @@ func getServiceNetworkCIDR() (string, error) {
 
 // generateCNIConf generates the cni.conf file, based on the input OVN host subnet and service network CIDR, and
 // returns the its path
-func generateCNIConf(ovnHostSubnet, serviceNetworkCIDR string) (string, error) {
+func generateCNIConf(ovnHostSubnet, serviceNetworkCIDR, ipAddress string) (string, error) {
 	// cniConf is used in replacing the template values in templates/cni.template
 	type cniConf struct {
 		OvnHostSubnet      string
 		ServiceNetworkCIDR string
+		IpAddress          string
 	}
-	confData := cniConf{ovnHostSubnet, serviceNetworkCIDR}
+	confData := cniConf{ovnHostSubnet, serviceNetworkCIDR, ipAddress}
 
 	// Read the contents of the template file
 	content, err := ioutil.ReadFile(cniConfigTemplate)
