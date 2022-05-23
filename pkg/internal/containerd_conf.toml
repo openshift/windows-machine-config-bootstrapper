@@ -64,8 +64,8 @@ version = 2
     unset_seccomp_profile = ""
 
     [plugins."io.containerd.grpc.v1.cri".cni]
-      bin_dir = "C:\\k\\cni"
-      conf_dir = "C:\\k\\cni\\config"
+      bin_dir = "C:\\Windows\\Temp\\cni"
+      conf_dir = "C:\\Windows\\Temp\\cni\\config"
       conf_template = ""
       max_conf_num = 1
 
