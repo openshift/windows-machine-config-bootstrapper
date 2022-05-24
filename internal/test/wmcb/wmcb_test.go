@@ -57,13 +57,11 @@ const (
 	//containerdServiceName is containerd Windows service name
 	containerdServiceName = "containerd"
 	// containerdDir is the directory for storing the containerd files in the payload directory
-	containerdDir = payloadDirectory + containerdServiceName
-	// winContainerdDir is the directory where the containerd files are placed in remote directory
-	winContainerdDir = remoteDir + containerdServiceName
+	containerdDir = payloadDirectory + "/containerd/"
 	// containerdPath is the location of the containerd exe
-	containerdPath = remoteDir + containerdServiceName + "\\containerd.exe"
+	containerdPath = remoteDir + "\\containerd.exe"
 	// containerdConfPath is the location of containerd config file
-	containerdConfPath = remoteDir + containerdServiceName + "\\containerd_conf.toml"
+	containerdConfPath = remoteDir + "\\containerd_conf.toml"
 )
 
 var (
@@ -101,7 +99,7 @@ func TestWMCB(t *testing.T) {
 	srcDestPairs := map[string]string{
 		payloadDirectory: remoteDir,
 		cniDirectory:     winCNIDir,
-		containerdDir:    winContainerdDir,
+		containerdDir:    remoteDir,
 	}
 
 	for _, vm := range framework.WinVMs {
@@ -124,8 +122,6 @@ func TestWMCB(t *testing.T) {
 // runE2ETestSuite runs the WmCB e2e tests suite on the VM
 func (vm *wmcbVM) runE2ETestSuite(t *testing.T) {
 	vm.runTestBootstrapper(t)
-
-	vm.runTestConfigureCNI(t)
 
 	// Run this test only after TestBoostrapper() to ensure kubelet service is present.
 	vm.runTestKubeletUninstall(t)
@@ -160,23 +156,36 @@ func (vm *wmcbVM) runTestBootstrapper(t *testing.T) {
 
 	err = vm.runTest(e2eExecutable + " --test.run TestBootstrapper --test.v --platform-type=aws")
 	require.NoError(t, err, "TestBootstrapper failed")
+
+	err = vm.configureNetwork()
+	require.NoError(t, err, "error configuring network information for the Windows VM")
 }
 
-// runTestConfigureCNI performs the required setup and runs the configure-cni tests
-func (vm *wmcbVM) runTestConfigureCNI(t *testing.T) {
+// configureNetwork performs the required steps for configuring network
+// such as configuring hybrid overlay and creating CNI config.
+func (vm *wmcbVM) configureNetwork() error {
 	node, err := framework.GetNode(vm.GetCredentials().IPAddress())
-	require.NoError(t, err, "unable to get node object for VM")
+	if err != nil {
+		return fmt.Errorf("unable to get node object for VM: %v", err)
+	}
 
 	err = vm.handleHybridOverlay(node.GetName())
-	require.NoError(t, err, "unable to handle hybrid-overlay")
-
+	if err != nil {
+		return fmt.Errorf("unable to handle hybrid-overlay: %v", err)
+	}
 	// It is guaranteed that the hybrid overlay annotations are present as we have already checked for it
 	hybridOverlayAnnotation := node.GetAnnotations()[test.HybridOverlaySubnet]
-	err = vm.initializeTestConfigureCNIFiles(hybridOverlayAnnotation)
-	require.NoError(t, err, "error initializing files required for TestConfigureCNI")
 
-	err = vm.runTest(e2eExecutable + " --test.run TestConfigureCNI --test.v --platform-type=aws")
-	require.NoError(t, err, "TestConfigureCNI failed")
+	err = vm.initializeTestConfigureCNIFiles(hybridOverlayAnnotation)
+	if err != nil {
+		return fmt.Errorf("error initializing files required for CNI configuration: %v", err)
+	}
+
+	// There is a wait time for the node to become Ready after CNI files have been copied to the location
+	// expected by containerd config. Adding a wait here is required for the node to be Ready before
+	// the WMCB cluster tests.
+	time.Sleep(2 * time.Minute)
+	return nil
 }
 
 // initializeTestBootstrapperFiles initializes the files required for initialize-kubelet
@@ -193,16 +202,10 @@ func (vm *wmcbVM) initializeTestBootstrapperFiles() error {
 		return fmt.Errorf("unable to copy kubelet.exe to %s: %v", winTemp, err)
 	}
 
-	// create the containerd directory on Windows VM.
-	output, err := vm.Run(mkdirCmd(winContainerdDir), false)
-	if err != nil {
-		return fmt.Errorf("unable to create remote directory %s: %v\n%s", winContainerdDir, err, output)
-	}
-
 	// Ignition v2.3.0 maps to Ignition config spec v3.1.0.
 	ignitionAcceptHeaderSpec := "application/vnd.coreos.ignition+json`;version=3.1.0"
 	// Download the worker ignition to C:\Windows\Tenp\ using the script that ignores the server cert
-	output, err = vm.Run(wgetIgnoreCertCmd+" -server https://"+framework.ClusterAddress+":22623/config/worker"+
+	output, err := vm.Run(wgetIgnoreCertCmd+" -server https://"+framework.ClusterAddress+":22623/config/worker"+
 		" -output "+winTemp+"worker.ign"+" -acceptHeader "+ignitionAcceptHeaderSpec, true)
 	if err != nil {
 		return fmt.Errorf("unable to download worker.ign: %v\nOutput: %s", err, output)
@@ -220,7 +223,7 @@ func (vm *wmcbVM) initializeTestConfigureCNIFiles(ovnHostSubnet string) error {
 	}
 
 	// Create the CNI config file locally
-	cniConfigPath, err := createCNIConf(ovnHostSubnet)
+	cniConfigPath, err := createCNIConf(ovnHostSubnet, vm.GetCredentials().IPAddress())
 	if err != nil {
 		return fmt.Errorf("error creating local cni.conf: %v", err)
 	}
@@ -369,13 +372,13 @@ func mkdirCmd(dirName string) string {
 }
 
 // createCNIConf create the local cni.conf and returns its path
-func createCNIConf(ovnHostSubnet string) (string, error) {
+func createCNIConf(ovnHostSubnet string, ipAddress string) (string, error) {
 	serviceNetworkCIDR, err := getServiceNetworkCIDR()
 	if err != nil {
 		return "", fmt.Errorf("unable to get service network CIDR: %v", err)
 	}
 
-	cniConfigPath, err := generateCNIConf(ovnHostSubnet, serviceNetworkCIDR)
+	cniConfigPath, err := generateCNIConf(ovnHostSubnet, serviceNetworkCIDR, ipAddress)
 	if err != nil {
 		return "", fmt.Errorf("unable to generate CNI configuration: %v", err)
 	}
@@ -400,13 +403,14 @@ func getServiceNetworkCIDR() (string, error) {
 
 // generateCNIConf generates the cni.conf file, based on the input OVN host subnet and service network CIDR, and
 // returns the its path
-func generateCNIConf(ovnHostSubnet, serviceNetworkCIDR string) (string, error) {
+func generateCNIConf(ovnHostSubnet, serviceNetworkCIDR, ipAddress string) (string, error) {
 	// cniConf is used in replacing the template values in templates/cni.template
 	type cniConf struct {
 		OvnHostSubnet      string
 		ServiceNetworkCIDR string
+		IpAddress          string
 	}
-	confData := cniConf{ovnHostSubnet, serviceNetworkCIDR}
+	confData := cniConf{ovnHostSubnet, serviceNetworkCIDR, ipAddress}
 
 	// Read the contents of the template file
 	content, err := ioutil.ReadFile(cniConfigTemplate)
