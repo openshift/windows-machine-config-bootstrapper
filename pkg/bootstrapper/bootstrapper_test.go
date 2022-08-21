@@ -180,7 +180,7 @@ func TestCreateKubeletConf(t *testing.T) {
 //	"excludeMasterFromStandardLB": null,
 //	"disableOutboundSNAT": null,
 //	"maximumLoadBalancerRuleCount": 0
-//}
+// }
 
 // getArgValue takes a slice of args and returns whether the specified arg is present, and if it is, its value
 func getArgValue(key string, args []string) (string, bool) {
