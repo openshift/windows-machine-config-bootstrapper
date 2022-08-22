@@ -59,7 +59,7 @@ func TestBootstrapper(t *testing.T) {
 	t.Run("Uninstall kubelet without kubelet service present", testUninstallWithoutKubeletSvc)
 
 	// Run the bootstrapper, which will start the kubelet service
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "",
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper(installDir, ignitionFilePath, kubeletPath, "", "", "",
 		platformType)
 	require.NoErrorf(t, err, "Could not create WinNodeBootstrapper: %s", err)
 	err = wmcb.InitializeKubelet()
