@@ -33,6 +33,8 @@ var (
 		ignitionFile string
 		// The location where the kubelet.exe has been downloaded to
 		kubeletPath string
+		// kubeletVerbosity represents the log level for kubelet
+		kubeletVerbosity string
 		// The directory to install the kubelet and related files
 		installDir string
 		// nodeIP directs the kubelet to use a specific IP for the node object
@@ -50,6 +52,9 @@ func init() {
 		"Ignition file location to bootstrap the Windows node")
 	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.kubeletPath, "kubelet-path", "",
 		"Kubelet file location to bootstrap the Windows node")
+	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.kubeletVerbosity, "kubelet-verbosity",
+		"", "Represents the log level for kubelet. If unset, will use the value in the kubelet' systemd unit "+
+			"file, if any, or default to "+bootstrapper.KubeletDefaultVerbosity)
 	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.installDir, "install-dir", "c:\\k",
 		"Kubelet file location to bootstrap the Windows node. Defaults to C:\\k")
 	initializeKubeletCmd.PersistentFlags().StringVar(&initializeKubeletOpts.nodeIP, "node-ip", "",
@@ -68,7 +73,7 @@ func runInitializeKubeletCmd(cmd *cobra.Command, args []string) {
 	// TODO: add validation for flags
 
 	wmcb, err := bootstrapper.NewWinNodeBootstrapper(initializeKubeletOpts.installDir,
-		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath,
+		initializeKubeletOpts.ignitionFile, initializeKubeletOpts.kubeletPath, initializeKubeletOpts.kubeletVerbosity,
 		initializeKubeletOpts.nodeIP, initializeKubeletOpts.clusterDNS, "", "",
 		initializeKubeletOpts.platformType)
 	if err != nil {

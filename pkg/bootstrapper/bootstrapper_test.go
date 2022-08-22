@@ -312,6 +312,62 @@ func TestKubeletArgs(t *testing.T) {
 
 }
 
+// TestKubeletVerbosityArgs tests the kubelet verbosity argument populates correctly
+func TestKubeletVerbosityArgs(t *testing.T) {
+	ignitionContentsWithoutKubeletVerbosity := `{"ignition":{"version":"3.1.0"},"passwd":{"users":[{"name":"core","sshAuthorizedKeys":["ssh-rsa dummy"]}]},"systemd":{"units":[{"contents":"[Unit]\nDescription=Kubernetes Kubelet\nWants=rpc-statd.service crio.service\nAfter=crio.service\n\n[Service]\nType=notify\nExecStartPre=/bin/mkdir --parents /etc/kubernetes/manifests\nExecStartPre=/bin/rm -f /var/lib/kubelet/cpu_manager_state\nEnvironmentFile=/etc/os-release\nEnvironmentFile=-/etc/kubernetes/kubelet-workaround\nEnvironmentFile=-/etc/kubernetes/kubelet-env\n\nExecStart=/usr/bin/hyperkube \\\n    kubelet \\\n      --config=/etc/kubernetes/kubelet.conf \\\n      --bootstrap-kubeconfig=/etc/kubernetes/kubeconfig \\\n      --kubeconfig=/var/lib/kubelet/kubeconfig \\\n      --container-runtime=remote \\\n      --container-runtime-endpoint=/var/run/crio/crio.sock \\\n      --node-labels=node-role.kubernetes.io/worker,node.openshift.io/os_id=${ID} \\\n      --minimum-container-ttl-duration=6m0s \\\n      --volume-plugin-dir=/etc/kubernetes/kubelet-plugins/volume/exec \\\n      --cloud-provider=aws \\\n      Restart=always\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n","enabled":true,"name":"kubelet.service"}]}}`
+	ignitionContentsWithKubeletVerbosity := `{"ignition":{"version":"3.1.0"},"passwd":{"users":[{"name":"core","sshAuthorizedKeys":["ssh-rsa dummy"]}]},"systemd":{"units":[{"contents":"[Unit]\nDescription=Kubernetes Kubelet\nWants=rpc-statd.service crio.service\nAfter=crio.service\n\n[Service]\nType=notify\nExecStartPre=/bin/mkdir --parents /etc/kubernetes/manifests\nExecStartPre=/bin/rm -f /var/lib/kubelet/cpu_manager_state\nEnvironmentFile=/etc/os-release\nEnvironmentFile=-/etc/kubernetes/kubelet-workaround\nEnvironmentFile=-/etc/kubernetes/kubelet-env\n\nExecStart=/usr/bin/hyperkube \\\n    kubelet \\\n      --config=/etc/kubernetes/kubelet.conf \\\n      --bootstrap-kubeconfig=/etc/kubernetes/kubeconfig \\\n      --kubeconfig=/var/lib/kubelet/kubeconfig \\\n      --container-runtime=remote \\\n      --container-runtime-endpoint=/var/run/crio/crio.sock \\\n      --node-labels=node-role.kubernetes.io/worker,node.openshift.io/os_id=${ID} \\\n      --minimum-container-ttl-duration=6m0s \\\n      --volume-plugin-dir=/etc/kubernetes/kubelet-plugins/volume/exec \\\n      --cloud-provider=aws \\\n      --v=1\n\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=multi-user.target\n","enabled":true,"name":"kubelet.service"}]}}`
+
+	baseExpectedArgs := []string{"--config=",
+		"--bootstrap-kubeconfig=bootstrap-kubeconfig",
+		"--kubeconfig=",
+		"--pod-infra-container-image=mcr.microsoft.com/oss/kubernetes/pause:3.6",
+		"--cert-dir=c:\\var\\lib\\kubelet\\pki\\",
+		"--windows-service",
+		"--logtostderr=false",
+		"--log-file=kubelet.log",
+		"--register-with-taints=os=Windows:NoSchedule",
+		"--node-labels=node.openshift.io/os_id=Windows",
+		"--image-pull-progress-deadline=30m",
+		"--cloud-provider=aws",
+	}
+
+	testIO := []struct {
+		name                   string
+		ignitionContents       string
+		additionalExpectedArgs []string
+		wnb                    winNodeBootstrapper
+	}{
+		{
+			name:                   "verbosity present in ignition content should use it",
+			ignitionContents:       ignitionContentsWithKubeletVerbosity,
+			additionalExpectedArgs: []string{"--v=1"},
+			wnb:                    winNodeBootstrapper{},
+		},
+		{
+			name:                   "verbosity present program argument should use it",
+			ignitionContents:       ignitionContentsWithKubeletVerbosity,
+			additionalExpectedArgs: []string{"--v=2"},
+			wnb: winNodeBootstrapper{
+				kubeletVerbosity: "2",
+			},
+		},
+		{
+			name:                   "no verbosity should load default",
+			ignitionContents:       ignitionContentsWithoutKubeletVerbosity,
+			additionalExpectedArgs: []string{"--v=3"},
+			wnb:                    winNodeBootstrapper{},
+		},
+	}
+	for _, test := range testIO {
+		t.Run(test.name, func(t *testing.T) {
+			expectedArgs := append(baseExpectedArgs, test.additionalExpectedArgs...)
+			err := test.wnb.parseIgnitionFileContents([]byte(test.ignitionContents), map[string]fileTranslation{})
+			require.NoError(t, err, "error parsing ignition file contents")
+			assert.ElementsMatch(t, expectedArgs, test.wnb.kubeletArgs, "unexpected kubelet args")
+		})
+	}
+}
+
 func TestCloudConfExtraction(t *testing.T) {
 	// ignitionContents is the actual worker ignition contents from an azure cluster with dummy credentials and
 	// resources
@@ -428,11 +484,11 @@ func TestCloudConfInvalidNames(t *testing.T) {
 // TestNewWinNodeBootstrapperWithInvalidCNIInputs tests if NewWinNodeBootstrapper returns the expected error on passing
 // invalid CNI inputs
 func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
-	_, err := NewWinNodeBootstrapper("", "", "", "", "", "C:\\something", "", "")
+	_, err := NewWinNodeBootstrapper("", "", "", "", "", "", "C:\\something", "", "")
 	require.Error(t, err, "no error thrown when cniDir is not empty and cniConfig is empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 
-	_, err = NewWinNodeBootstrapper("", "", "", "", "", "", "C:\\something", "")
+	_, err = NewWinNodeBootstrapper("", "", "", "", "", "", "", "C:\\something", "")
 	require.Error(t, err, "no error thrown when cniDir is empty and cniConfig not empty")
 	assert.Contains(t, err.Error(), "both cniDir and cniConfig need to be populated", "incorrect error thrown")
 }
@@ -440,7 +496,7 @@ func TestNewWinNodeBootstrapperWithInvalidCNIInputs(t *testing.T) {
 // TestWinNodeBootstrapperConfigureWithInvalidInputs tests if Configure returns the expected error when CNI inputs
 // are not present
 func TestWinNodeBootstrapperConfigureWithInvalidInputs(t *testing.T) {
-	wnb, err := NewWinNodeBootstrapper("", "", "", "", "", "", "", "")
+	wnb, err := NewWinNodeBootstrapper("", "", "", "", "", "", "", "", "")
 	require.NoError(t, err, "error instantiating bootstrapper")
 	err = wnb.Configure()
 	require.Error(t, err, "no error thrown when Configure is called with no CNI inputs")
