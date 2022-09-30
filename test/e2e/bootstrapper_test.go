@@ -39,7 +39,7 @@ func init() {
 
 // TestBootstrapper tests that the bootstrapper was able to start the required services
 // TODO: Consider adding functionality to this test to check if the underlying processes are running properly,
-//  	 otherwise keep that functionality contained within other future tests
+// otherwise keep that functionality contained within other future tests
 func TestBootstrapper(t *testing.T) {
 	var kubeletRunningBeforeTest bool
 	// We make a best effort to ensure that there is a ignition file on the node.
