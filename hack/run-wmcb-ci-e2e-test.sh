@@ -57,6 +57,19 @@ fi
 sed -i "s~ARTIFACT_DIR_VALUE~${ARTIFACT_DIR}~g" internal/test/wmcb/deploy/job.yaml
 sed -i "s~REPLACE_IMAGE~${WMCB_IMAGE}~g" internal/test/wmcb/deploy/job.yaml
 
+# declare required labels
+declare -a NS_LABELS=(
+  # turn on the automatic label synchronization required for PodSecurity admission
+  "security.openshift.io/scc.podSecurityLabelSync=true"
+  # set pods security profile to privileged. See https://kubernetes.io/docs/concepts/security/pod-security-admission/#pod-security-levels
+  "pod-security.kubernetes.io/enforce=privileged"
+)
+
+# apply required labels
+if ! $OC label ns default "${NS_LABELS[@]}" --overwrite; then
+  error-exit "error setting labels ${NS_LABELS[@]} in namespace default"
+fi
+
 # deploy the test pod on test cluster
 if ! $OC apply -f internal/test/wmcb/deploy/job.yaml -n default; then
     echo "job already deployed"
