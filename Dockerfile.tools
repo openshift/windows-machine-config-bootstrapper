@@ -1,4 +1,4 @@
-FROM registry.ci.openshift.org/openshift/release:golang-1.18 as build
+FROM registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.19-openshift-4.12 as build
 LABEL stage=build
 
 # dos2unix is needed to build CNI plugins
@@ -6,7 +6,7 @@ RUN yum install -y dos2unix
 
 # Clone WMCO repo and initialize submodules for building of windows binaries payload for e2e testing 
 WORKDIR /build/
-RUN git clone --branch release-4.11 --single-branch https://github.com/openshift/windows-machine-config-operator.git
+RUN git clone --branch release-4.12 --single-branch https://github.com/openshift/windows-machine-config-operator.git
 WORKDIR /build/windows-machine-config-operator/
 RUN git submodule update --init containernetworking-plugins kubelet ovn-kubernetes containerd hcsshim
 
@@ -42,7 +42,7 @@ RUN make build-wmcb-e2e-test
 WORKDIR /build/internal/test/wmcb/
 RUN CGO_ENABLED=0 GO111MODULE=on go test -c -run=TestWMCB -timeout=30m . -o test-wmcb
 
-FROM registry.ci.openshift.org/openshift/release:golang-1.18 as testing
+FROM registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.19-openshift-4.12 as testing
 LABEL stage=testing
 
 WORKDIR /payload/cni

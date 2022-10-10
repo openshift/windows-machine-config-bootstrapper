@@ -23,7 +23,7 @@ const (
 
 // cloudProvider holds the information related to cloud provider
 // TODO: Move this to proper location which can destroy the VM that got created.
-//		https://issues.redhat.com/browse/WINC-245
+// https://issues.redhat.com/browse/WINC-245
 var cloudProvider providers.CloudProvider
 
 // TestWindowsVM is the interface for interacting with a Windows VM in the test framework. This will hold the

@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-//cniTest holds the location of the directories and files required for running some of the CNI tests
+// cniTest holds the location of the directories and files required for running some of the CNI tests
 type cniTestOptions struct {
 	// k8sInstallDir is the main installation directory
 	k8sInstallDir string

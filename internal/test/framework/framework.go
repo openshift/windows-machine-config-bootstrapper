@@ -368,12 +368,12 @@ func (f *TestFramework) RetrieveArtifacts() {
 
 		// Let's reinitialize the ssh client as hybrid overlay is known to cause ssh connections to be dropped
 		// TODO: Reduce the usage of Reinitialize as much as possible, this is to ensure that when we move to operator
-		// 		model, the reconnectivity should be handled automatically.
+		// model, the reconnectivity should be handled automatically.
 		if err := vm.Reinitialize(); err != nil {
 			log.Printf("failed re-initializing ssh connectivity with on vm %s: %v", instanceID, err)
 		}
 		// TODO: Make this a map["'"artifact_that_we_want_to_pull"]="log_file.name" to only capture
-		//  the logs we are interested in, to avoid capturing every directory in c:\\k\\log
+		// the logs we are interested in, to avoid capturing every directory in c:\\k\\log
 		// Retrieve directories copies the directories from remote VM to the Artifacts directory
 		if err := vm.RetrieveDirectories(remoteLogPath, localKubeletLogPath); err != nil {
 			log.Printf("failed retrieving log directories on vm %s: %v", instanceID, err)
