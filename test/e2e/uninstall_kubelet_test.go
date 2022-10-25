@@ -11,7 +11,7 @@ import (
 
 // TestKubeletUninstall tests if WMCB returns an error if the kubelet is uninstalled
 func TestKubeletUninstall(t *testing.T) {
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper("", "", "", "", "", "", "", "")
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper("", "", "", "", "", "", "", "", "")
 	require.NoError(t, err, "could not create wmcb")
 
 	err = wmcb.UninstallKubelet()
@@ -29,7 +29,7 @@ func testUninstallWithoutKubeletSvc(t *testing.T) {
 		t.Skip("Skipping as kubelet service already exists")
 	}
 
-	wmcb, err := bootstrapper.NewWinNodeBootstrapper("", "", "", "", "", "", "", "")
+	wmcb, err := bootstrapper.NewWinNodeBootstrapper("", "", "", "", "", "", "", "", "")
 	require.NoError(t, err, "could not create wmcb")
 
 	err = wmcb.UninstallKubelet()
