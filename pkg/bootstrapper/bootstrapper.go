@@ -38,6 +38,8 @@ const (
 	// KubeletServiceName is the name will we run the kubelet Windows service under. It is required to be named "kubelet":
 	// https://github.com/kubernetes/kubernetes/blob/v1.16.0/cmd/kubelet/app/init_windows.go#L26
 	KubeletServiceName = "kubelet"
+	// KubeletDefaultVerbosity is the recommended default log level for kubelet. See https://github.com/kubernetes/community/blob/master/contributors/devel/sig-instrumentation/logging.md
+	KubeletDefaultVerbosity = "3"
 	// kubeletDependentSvc is the name of the service dependent on kubelet Windows service
 	kubeletDependentSvc = "hybrid-overlay-node"
 	// kubeletSystemdName is the name of the systemd service that the kubelet runs under,
@@ -117,6 +119,8 @@ type winNodeBootstrapper struct {
 	kubeconfigPath string
 	// kubeletConfPath is the file path of the kubelet configuration
 	kubeletConfPath string
+	// kubeletVerbosity represents the log level for kubelet
+	kubeletVerbosity string
 	// ignitionFilePath is the path to the ignition file which is used to set up worker nodes
 	// https://github.com/coreos/ignition/blob/spec2x/doc/getting-started.md
 	ignitionFilePath string
@@ -156,11 +160,11 @@ type cniOptions struct {
 	confDir string
 }
 
-// NewWinNodeBootstrapper takes the dir to install the kubelet to, and paths to the ignition and kubelet files, an
-// optional node IP, an optional clusterDNS, along with the CNI options as inputs, and generates the winNodeBootstrapper
-// object. The CNI options are populated only in the configure-cni command. The inputs to NewWinNodeBootstrapper are
-// ignored while using the uninstall kubelet functionality.
-func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, clusterDNS, cniDir,
+// NewWinNodeBootstrapper takes the dir to install the kubelet to, the verbosity and paths to the ignition and kubelet
+// files, an optional node IP, an optional clusterDNS, along with the CNI options as inputs, and generates the
+// winNodeBootstrapper object. The CNI options are populated only in the configure-cni command. The inputs to
+// NewWinNodeBootstrapper are ignored while using the uninstall kubelet functionality.
+func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, kubeletVerbosity, nodeIP, clusterDNS, cniDir,
 	cniConfig string) (*winNodeBootstrapper, error) {
 	// Check if cniDir or cniConfig is empty when the other is not
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
@@ -188,6 +192,7 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath, nodeIP, cl
 	bootstrapper := winNodeBootstrapper{
 		kubeconfigPath:     filepath.Join(k8sInstallDir, "kubeconfig"),
 		kubeletConfPath:    filepath.Join(k8sInstallDir, "kubelet.conf"),
+		kubeletVerbosity:   kubeletVerbosity,
 		ignitionFilePath:   ignitionFile,
 		installDir:         k8sInstallDir,
 		logDir:             "C:\\var\\log\\kubelet",
@@ -543,12 +548,20 @@ func (wmcb *winNodeBootstrapper) generateInitialKubeletArgs(args map[string]stri
 	if cloudProvider, ok := args["cloud-provider"]; ok {
 		kubeletArgs = append(kubeletArgs, "--cloud-provider="+cloudProvider)
 	}
-	if v, ok := args["v"]; ok && v != "" {
-		kubeletArgs = append(kubeletArgs, "--v="+v)
+	// set default verbosity for kubelet
+	kubeletVerbosity := KubeletDefaultVerbosity
+	// set the verbosity value from the program argument if any, this takes precedence
+	if wmcb.kubeletVerbosity != "" {
+		kubeletVerbosity = wmcb.kubeletVerbosity
 	} else {
-		// In case the verbosity argument is missing, use a default value
-		kubeletArgs = append(kubeletArgs, "--v="+"3")
+		// otherwise look for verbosity value in kubelet systemd unit file configuration
+		if v, ok := args["v"]; ok && v != "" {
+			// and update, if found
+			kubeletVerbosity = v
+		}
 	}
+	kubeletArgs = append(kubeletArgs, "--v="+kubeletVerbosity)
+
 	if cloudConfigValue, ok := args[cloudConfigOption]; ok {
 		kubeletArgs = append(kubeletArgs, "--"+cloudConfigOption+"="+cloudConfigValue)
 	}
