@@ -103,7 +103,7 @@ type winNodeBootstrapper struct {
 	// ignitionFilePath is the path to the ignition file which is used to set up worker nodes
 	// https://github.com/coreos/ignition/blob/spec2x/doc/getting-started.md
 	ignitionFilePath string
-	//initialKubeletPath is the path to the kubelet that we'll be using to bootstrap this node
+	// initialKubeletPath is the path to the kubelet that we'll be using to bootstrap this node
 	initialKubeletPath string
 	// nodeIP is the IP that should be used as the node object's IP. If unset, kubelet will determine the IP itself.
 	nodeIP string
