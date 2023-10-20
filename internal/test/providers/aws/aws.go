@@ -114,18 +114,18 @@ func (a *awsProvider) getInfraID() (string, error) {
 	return infraID, nil
 }
 
-// getLatestWindowsAMI returns the imageID of the latest released "Windows Server with Containers" image
+// getLatestWindowsAMI returns the imageID of the latest released "Windows Server 2019" image
 func getLatestWindowsAMI(ec2Client *ec2.EC2) (string, error) {
 	// Have to create these variables, as the below functions require pointers to them
 	windowsAMIOwner := "amazon"
 	windowsAMIFilterName := "name"
 	// This filter will grab all ami's that match the exact name. The '?' indicate any character will match.
-	// The ami's will have the name format: Windows_Server-2019-English-Full-ContainersLatest-2020.01.15
+	// The ami's will have the name format: Windows_Server-2019-English-Core-Base-2023.07.12
 	// so the question marks will match the date of creation
 	// The image obtained by using windowsAMIFilterValue is compatible with  the test container image -
 	// "mcr.microsoft.com/powershell:lts-nanoserver-1809". If the windowsAMIFilterValue changes,
 	// the test container image also needs to be changed.
-	windowsAMIFilterValue := "Windows_Server-2019-English-Full-ContainersLatest-????.??.??"
+	windowsAMIFilterValue := "Windows_Server-2019-English-Core-Base-????.??.??"
 	searchFilter := ec2.Filter{Name: &windowsAMIFilterName, Values: []*string{&windowsAMIFilterValue}}
 
 	describedImages, err := ec2Client.DescribeImages(&ec2.DescribeImagesInput{
